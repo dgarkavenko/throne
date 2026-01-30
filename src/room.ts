@@ -2,6 +2,7 @@ interface PlayerState {
   id: string;
   emoji: string;
   typing: string;
+  color: string;
 }
 
 interface RoomMessage {
@@ -13,6 +14,7 @@ export class RoomDurableObject implements DurableObject {
   private connections = new Map<WebSocket, PlayerState>();
   private hostId: string | null = null;
   private emojis = ['\ud83d\udc99', '\ud83d\udd25', '\ud83c\udf1c', '\u2728', '\ud83d\udc7e', '\ud83d\udc8e', '\ud83c\udf38', '\ud83c\udf19', '\ud83e\uddf8', '\ud83e\udee7', '\ud83c\udf2c\ufe0f', '\ud83c\udf89'];
+  private colors = ['#f6c1c7', '#f7d6b2', '#f8f1b4', '#c7f0d9', '#c4d7f7', '#d9c4f7', '#f7c4e3', '#c7f3f6', '#f6c7a6', '#d7f6b4', '#c9f6d7', '#f3c9f6'];
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade') !== 'websocket') {
@@ -35,6 +37,7 @@ export class RoomDurableObject implements DurableObject {
       id: crypto.randomUUID(),
       emoji: this.pickEmoji(),
       typing: '',
+      color: this.pickColor(),
     };
 
     if (this.connections.size === 0) {
@@ -125,5 +128,10 @@ export class RoomDurableObject implements DurableObject {
   private pickEmoji(): string {
     const emoji = this.emojis[Math.floor(Math.random() * this.emojis.length)];
     return emoji ?? '\ud83e\udee7';
+  }
+
+  private pickColor(): string {
+    const color = this.colors[Math.floor(Math.random() * this.colors.length)];
+    return color ?? '#f5f5f5';
   }
 }
