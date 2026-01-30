@@ -1,67 +1,24 @@
 interface PlayerState {
   id: string;
-  x: number;
-  y: number;
-  color: string;
   emoji: string;
-  text: string;
 }
 
 interface RoomMessage {
-  type: 'join' | 'move' | 'text' | 'drop';
-  x?: number;
-  y?: number;
-  text?: string;
+  type: 'join';
 }
-
-interface MessageState {
-  id: string;
-  text: string;
-  color: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-const GRAVITY = 1600;
-const JUMP_VELOCITY = -380;
 
 export class RoomDurableObject implements DurableObject {
   private connections = new Map<WebSocket, PlayerState>();
   private hostId: string | null = null;
-  private emojis = ['🐙', '🐳', '🦊', '🦄', '🐢', '🐸', '🐧', '🦋', '🐝', '🐬', '🦜', '🦉'];
-  private messages: MessageState[] = [];
-  private ready: Promise<void>;
-
-  constructor(private state: DurableObjectState) {
-    this.ready = this.state.storage.get<MessageState[]>('messages').then((stored) => {
-      if (Array.isArray(stored)) {
-        this.messages = stored.map((message) => this.normalizeMessage(message));
-      }
-    });
-  }
+  private emojis = ['\ud83d\udc99', '\ud83d\udd25', '\ud83c\udf1c', '\u2728', '\ud83d\udc7e', '\ud83d\udc8e', '\ud83c\udf38', '\ud83c\udf19', '\ud83e\uddf8', '\ud83e\udee7', '\ud83c\udf2c\ufe0f', '\ud83c\udf89'];
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected WebSocket', { status: 426 });
     }
 
-    const url = new URL(request.url);
-    const isHost = url.searchParams.get('host') === '1';
-
-    if (!isHost && this.connections.size === 0) {
-      return new Response('Room is closed.', { status: 410 });
-    }
-
-    if (isHost && this.connections.size > 0) {
-      return new Response('Room already hosted.', { status: 409 });
-    }
-
     const [client, server] = Object.values(new WebSocketPair());
-    await this.handleSession(server, isHost);
+    await this.handleSession(server);
 
     return new Response(null, {
       status: 101,
@@ -69,20 +26,15 @@ export class RoomDurableObject implements DurableObject {
     });
   }
 
-  private async handleSession(socket: WebSocket, isHost: boolean) {
-    await this.ready;
+  private async handleSession(socket: WebSocket) {
     socket.accept();
 
     const player: PlayerState = {
       id: crypto.randomUUID(),
-      x: 120,
-      y: 120,
-      color: this.pickColor(),
       emoji: this.pickEmoji(),
-      text: '',
     };
 
-    if (isHost) {
+    if (this.connections.size === 0) {
       this.hostId = player.id;
     }
 
@@ -103,39 +55,9 @@ export class RoomDurableObject implements DurableObject {
         return;
       }
 
-      if (message.type === 'move') {
-        if (typeof message.x === 'number') {
-          player.x = message.x;
-        }
-        if (typeof message.y === 'number') {
-          player.y = message.y;
-        }
+      if (message.type === 'join') {
+        this.broadcastState();
       }
-
-      if (message.type === 'text' && typeof message.text === 'string') {
-        player.text = message.text.slice(0, 48);
-      }
-
-      if (message.type === 'drop' && typeof message.text === 'string') {
-        const trimmed = message.text.trim().slice(0, 48);
-        if (trimmed.length > 0) {
-          const now = Date.now();
-          this.messages.push({
-            id: crypto.randomUUID(),
-            text: trimmed,
-            color: player.color,
-            x: player.x,
-            y: Math.max(0, player.y - 60),
-            vx: 0,
-            vy: JUMP_VELOCITY,
-            createdAt: now,
-            updatedAt: now,
-          });
-          void this.state.storage.put('messages', this.messages);
-        }
-      }
-
-      this.broadcastState();
     });
 
     const cleanup = () => {
@@ -157,12 +79,7 @@ export class RoomDurableObject implements DurableObject {
 
     try {
       const message = JSON.parse(data) as RoomMessage;
-      if (
-        message.type === 'join' ||
-        message.type === 'move' ||
-        message.type === 'text' ||
-        message.type === 'drop'
-      ) {
+      if (message.type === 'join') {
         return message;
       }
       return null;
@@ -172,15 +89,10 @@ export class RoomDurableObject implements DurableObject {
   }
 
   private broadcastState() {
-    const now = Date.now();
-    this.advancePhysics(now);
-
     const payload = JSON.stringify({
       type: 'state',
       players: Array.from(this.connections.values()),
       hostId: this.hostId,
-      messages: this.messages,
-      serverTime: now,
     });
 
     for (const socket of this.connections.keys()) {
@@ -192,39 +104,8 @@ export class RoomDurableObject implements DurableObject {
     }
   }
 
-  private advancePhysics(now: number) {
-    for (const message of this.messages) {
-      const dt = Math.max(0, (now - message.updatedAt) / 1000);
-      if (dt === 0) {
-        continue;
-      }
-      message.vy += GRAVITY * dt;
-      message.y += message.vy * dt;
-      message.updatedAt = now;
-    }
-  }
-
-  private normalizeMessage(message: MessageState): MessageState {
-    const now = Date.now();
-    return {
-      id: message.id,
-      text: message.text,
-      color: message.color,
-      x: message.x,
-      y: message.y,
-      vx: Number.isFinite(message.vx) ? message.vx : 0,
-      vy: Number.isFinite(message.vy) ? message.vy : 0,
-      createdAt: Number.isFinite(message.createdAt) ? message.createdAt : now,
-      updatedAt: Number.isFinite(message.updatedAt) ? message.updatedAt : now,
-    };
-  }
-
-  private pickColor() {
-    const palette = ['#f97316', '#38bdf8', '#a78bfa', '#34d399', '#fb7185', '#facc15'];
-    return palette[Math.floor(Math.random() * palette.length)];
-  }
-
-  private pickEmoji() {
-    return this.emojis[Math.floor(Math.random() * this.emojis.length)];
+  private pickEmoji(): string {
+    const emoji = this.emojis[Math.floor(Math.random() * this.emojis.length)];
+    return emoji ?? '\ud83e\udee7';
   }
 }
