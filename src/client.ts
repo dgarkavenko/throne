@@ -40,7 +40,7 @@ async function initScene() {
 
   setupPhysics();
   bindPhysicsTicker();
-  enableSpawnOnClick();
+  //enableSpawnOnClick();
 
   renderPlayers();
 }
