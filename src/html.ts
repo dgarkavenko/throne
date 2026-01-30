@@ -26,29 +26,11 @@ main {
   border-radius: 28px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
   overflow: hidden;
-  position: relative;
 }
 #field canvas {
   width: 100%;
   height: 100%;
   display: block;
-}
-.keyboard-input {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
-  height: 44px;
-  padding: 0 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(5, 6, 7, 0.75);
-  color: #f5f5f5;
-  font-size: 16px;
-  z-index: 2;
-}
-.keyboard-input::placeholder {
-  color: rgba(245, 245, 245, 0.6);
 }
 .status {
   font-size: 0.9rem;
@@ -79,19 +61,7 @@ export const html = `<!doctype html>
   </head>
   <body>
     <main>
-      <div id="field">
-        <input
-          id="keyboard-input"
-          class="keyboard-input"
-          type="text"
-          inputmode="text"
-          autocomplete="off"
-          autocorrect="off"
-          autocapitalize="off"
-          spellcheck="false"
-          placeholder="Type to keep the keyboard open"
-        />
-      </div>
+      <div id="field"></div>
       <div class="status" id="status">Connecting...</div>
     </main>
 

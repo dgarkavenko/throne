@@ -12,8 +12,6 @@ let app = null;
 let emojiLayer = null;
 let physicsEngine = null;
 let physicsBoxes = [];
-let keyboardInput = null;
-let keepKeyboardAliveTimer = null;
 
 function updateStatus(message) {
   statusEl.textContent = message;
@@ -23,8 +21,6 @@ async function initScene() {
   if (!window.PIXI || app) {
     return;
   }
-  keyboardInput = document.getElementById('keyboard-input');
-  setupKeyboardInput();
   const appInstance = new PIXI.Application();
   await appInstance.init({
     width: PHONE_WIDTH,
@@ -49,44 +45,6 @@ async function initScene() {
   renderPlayers();
 }
 
-function setupKeyboardInput() {
-  if (!keyboardInput) {
-    return;
-  }
-  const keepKeyboardAlive = () => {
-    if (document.activeElement !== keyboardInput) {
-      keyboardInput.focus({ preventScroll: true });
-    }
-  };
-
-  keyboardInput.addEventListener('input', (event) => {
-    currentTyping = event.target.value || '';
-    sendTyping();
-  });
-
-  keyboardInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === 'Escape') {
-      event.preventDefault();
-      keyboardInput.value = '';
-      currentTyping = '';
-      sendTyping();
-    }
-  });
-
-  keyboardInput.addEventListener('blur', () => {
-    clearTimeout(keepKeyboardAliveTimer);
-    keepKeyboardAliveTimer = setTimeout(keepKeyboardAlive, 20);
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      keepKeyboardAlive();
-    }
-  });
-
-  keepKeyboardAlive();
-  
-  }
 function parseColor(value, fallback) {
   if (typeof value !== 'string') {
     return fallback;
