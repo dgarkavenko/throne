@@ -133,11 +133,12 @@ function renderPlayers() {
     return;
   }
   emojiLayer.removeChildren();
-  const style = new PIXI.TextStyle({
-    fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
-    fontSize: 28,
-  });
   players.forEach((player, index) => {
+    const style = new PIXI.TextStyle({
+      fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
+      fontSize: 28,
+      fill: player.color || '#f5f5f5',
+    });
     const typingText = player.typing ? ' ' + player.typing : '';
     const text = new PIXI.Text((player.emoji || '🪧') + typingText, style);
     text.x = 0;
