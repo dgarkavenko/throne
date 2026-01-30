@@ -10,6 +10,8 @@ let playerId = null;
 let players = [];
 let app = null;
 let emojiLayer = null;
+let physicsEngine = null;
+let physicsBoxes = [];
 
 function updateStatus(message) {
   statusEl.textContent = message;
@@ -36,7 +38,94 @@ async function initScene() {
   emojiLayer.y = 24;
   app.stage.addChild(emojiLayer);
 
+  setupPhysics();
+  bindPhysicsTicker();
+  enableSpawnOnClick();
+
   renderPlayers();
+}
+
+function setupPhysics() {
+  if (!window.Matter || !app) {
+    return;
+  }
+  const { Engine, Bodies, World } = Matter;
+  const engine = Engine.create({
+    gravity: { x: 0, y: 1 },
+  });
+  physicsEngine = engine;
+  physicsBoxes = [];
+
+  const wallThickness = 120;
+  const boundaries = [
+    Bodies.rectangle(PHONE_WIDTH / 2, PHONE_HEIGHT + wallThickness / 2, PHONE_WIDTH + wallThickness * 2, wallThickness, {
+      isStatic: true,
+    }),
+    Bodies.rectangle(PHONE_WIDTH / 2, -wallThickness / 2, PHONE_WIDTH + wallThickness * 2, wallThickness, {
+      isStatic: true,
+    }),
+    Bodies.rectangle(-wallThickness / 2, PHONE_HEIGHT / 2, wallThickness, PHONE_HEIGHT + wallThickness * 2, {
+      isStatic: true,
+    }),
+    Bodies.rectangle(PHONE_WIDTH + wallThickness / 2, PHONE_HEIGHT / 2, wallThickness, PHONE_HEIGHT + wallThickness * 2, {
+      isStatic: true,
+    }),
+  ];
+  World.add(engine.world, boundaries);
+}
+
+function bindPhysicsTicker() {
+  if (!app || !physicsEngine) {
+    return;
+  }
+  app.ticker.add((ticker) => {
+    Matter.Engine.update(physicsEngine, ticker.deltaMS);
+    physicsBoxes.forEach(({ body, graphic }) => {
+      graphic.x = body.position.x;
+      graphic.y = body.position.y;
+      graphic.rotation = body.angle;
+    });
+  });
+}
+
+function enableSpawnOnClick() {
+  if (!app) {
+    return;
+  }
+  app.stage.eventMode = 'static';
+  app.stage.hitArea = app.screen;
+  app.stage.on('pointerdown', (event) => {
+    spawnBox(event.global.x, event.global.y);
+  });
+}
+
+function spawnBox(x, y) {
+  if (!physicsEngine || !app || !window.Matter || !window.PIXI) {
+    return;
+  }
+  const size = 24 + Math.random() * 32;
+  const { Bodies, Body, World } = Matter;
+  const body = Bodies.rectangle(x, y, size, size, {
+    restitution: 0.6,
+    friction: 0.3,
+    density: 0.002,
+  });
+  Body.setVelocity(body, {
+    x: (Math.random() - 0.5) * 12,
+    y: (Math.random() - 0.5) * 12,
+  });
+  Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.4);
+  World.add(physicsEngine.world, body);
+
+  const graphic = new PIXI.Graphics();
+  graphic.roundRect(-size / 2, -size / 2, size, size, Math.min(10, size / 3));
+  graphic.fill({ color: 0x57b9ff, alpha: 0.9 });
+  graphic.stroke({ width: 2, color: 0x0b0e12, alpha: 0.8 });
+  graphic.x = x;
+  graphic.y = y;
+  app.stage.addChild(graphic);
+
+  physicsBoxes.push({ body, graphic });
 }
 
 function renderPlayers() {
