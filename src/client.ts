@@ -1,5 +1,6 @@
 export const clientScript = `const field = document.getElementById('field');
 const statusEl = document.getElementById('status');
+const typingField = document.getElementById('typing');
 
 const PHONE_WIDTH = 390;
 const PHONE_HEIGHT = 844;
@@ -48,7 +49,8 @@ function renderPlayers() {
     fontSize: 28,
   });
   players.forEach((player, index) => {
-    const text = new PIXI.Text(player.emoji || '🪧', style);
+    const typingText = player.typing ? ' ' + player.typing : '';
+    const text = new PIXI.Text((player.emoji || '🪧') + typingText, style);
     text.x = 0;
     text.y = index * 36;
     emojiLayer.addChild(text);
@@ -96,6 +98,20 @@ function connect() {
   });
 }
 
+function sendTyping() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  socket.send(
+    JSON.stringify({
+      type: 'typing',
+      text: typingField?.value ?? '',
+    })
+  );
+}
+
 void initScene();
 connect();
+
+typingField?.addEventListener('input', sendTyping);
 `;
