@@ -112,6 +112,10 @@ const html = `<!doctype html>
           <button id="join" class="secondary">Join room</button>
           <button id="leave" class="secondary" disabled>Leave</button>
         </div>
+        <div class="controls">
+          <input id="share-link" readonly placeholder="Share link" />
+          <button id="copy" class="secondary">Copy link</button>
+        </div>
         <div class="status" id="status">Not connected</div>
       </header>
       <section id="field"></section>
@@ -125,11 +129,57 @@ const html = `<!doctype html>
       const hostBtn = document.getElementById('host');
       const joinBtn = document.getElementById('join');
       const leaveBtn = document.getElementById('leave');
+      const shareLinkInput = document.getElementById('share-link');
+      const copyBtn = document.getElementById('copy');
 
       let socket;
       let playerId = null;
       const players = new Map();
       const colors = ['#f97316', '#38bdf8', '#a78bfa', '#34d399', '#fb7185', '#facc15'];
+      const birds = [
+        'Robin',
+        'Sparrow',
+        'Wren',
+        'Finch',
+        'Heron',
+        'Lark',
+        'Swift',
+        'Plover',
+        'Hawk',
+        'Kestrel',
+        'Ibis',
+        'Egret',
+        'Pipit',
+        'Gull',
+        'Osprey',
+      ];
+
+      function randomBirdName() {
+        const bird = birds[Math.floor(Math.random() * birds.length)];
+        const number = Math.floor(Math.random() * 900 + 100);
+        return bird + ' ' + number;
+      }
+
+      function ensureName() {
+        if (!nameInput.value.trim()) {
+          nameInput.value = randomBirdName();
+        }
+      }
+
+      function updateShareLink() {
+        const room = roomInput.value.trim();
+        if (!room) {
+          shareLinkInput.value = '';
+          return;
+        }
+        const params = new URLSearchParams();
+        params.set('room', room);
+        const name = nameInput.value.trim();
+        if (name) {
+          params.set('name', name);
+        }
+        shareLinkInput.value = location.origin + '/?' + params.toString();
+      }
 
       function updateStatus(message) {
         statusEl.textContent = message;
@@ -155,13 +205,11 @@ const html = `<!doctype html>
       }
 
       function connect({ host }) {
-        if (!nameInput.value.trim()) {
-          updateStatus('Enter your name to connect.');
-          return;
-        }
+        ensureName();
         if (!roomInput.value.trim()) {
           roomInput.value = crypto.randomUUID().slice(0, 6);
         }
+        updateShareLink();
         const roomId = roomInput.value.trim();
         const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
         const url = protocol + '://' + location.host + '/room/' + roomId + (host ? '?host=1' : '');
@@ -207,6 +255,24 @@ const html = `<!doctype html>
       leaveBtn.addEventListener('click', () => {
         socket?.close();
       });
+      copyBtn.addEventListener('click', async () => {
+        if (!shareLinkInput.value) {
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(shareLinkInput.value);
+          updateStatus('Link copied to clipboard.');
+        } catch (error) {
+          updateStatus('Copy failed. Select the link and copy manually.');
+        }
+      });
+
+      nameInput.addEventListener('input', () => {
+        updateShareLink();
+      });
+      roomInput.addEventListener('input', () => {
+        updateShareLink();
+      });
 
       let lastSent = 0;
       field.addEventListener('pointermove', (event) => {
@@ -225,6 +291,22 @@ const html = `<!doctype html>
           send({ type: 'move', x: me.x, y: me.y });
         }
       });
+
+      const params = new URLSearchParams(location.search);
+      if (params.has('name')) {
+        nameInput.value = params.get('name') || '';
+      }
+      if (!nameInput.value.trim()) {
+        nameInput.value = randomBirdName();
+      }
+      if (params.has('room')) {
+        roomInput.value = params.get('room') || '';
+      }
+      updateShareLink();
+
+      if (roomInput.value.trim()) {
+        connect({ host: false });
+      }
     </script>
   </body>
 </html>`;
