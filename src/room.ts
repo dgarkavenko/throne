@@ -22,12 +22,17 @@ interface MessageState {
   y: number;
   vx: number;
   vy: number;
+  rotation: number;
+  angularVelocity: number;
   createdAt: number;
   updatedAt: number;
 }
 
 const GRAVITY = 1600;
-const JUMP_VELOCITY = -380;
+const POP_VELOCITY_MIN = -520;
+const POP_VELOCITY_MAX = -320;
+const POP_VELOCITY_X = 120;
+const POP_TORQUE = 4;
 
 export class RoomDurableObject implements DurableObject {
   private connections = new Map<WebSocket, PlayerState>();
@@ -120,14 +125,18 @@ export class RoomDurableObject implements DurableObject {
         const trimmed = message.text.trim().slice(0, 48);
         if (trimmed.length > 0) {
           const now = Date.now();
+          const initialX = typeof message.x === 'number' ? message.x : player.x;
+          const initialY = typeof message.y === 'number' ? message.y : Math.max(0, player.y - 60);
           this.messages.push({
             id: crypto.randomUUID(),
             text: trimmed,
             color: player.color,
-            x: player.x,
-            y: Math.max(0, player.y - 60),
-            vx: 0,
-            vy: JUMP_VELOCITY,
+            x: initialX,
+            y: initialY,
+            vx: this.randomInRange(-POP_VELOCITY_X, POP_VELOCITY_X),
+            vy: this.randomInRange(POP_VELOCITY_MIN, POP_VELOCITY_MAX),
+            rotation: this.randomInRange(0, Math.PI * 2),
+            angularVelocity: this.randomInRange(-POP_TORQUE, POP_TORQUE),
             createdAt: now,
             updatedAt: now,
           });
@@ -199,7 +208,9 @@ export class RoomDurableObject implements DurableObject {
         continue;
       }
       message.vy += GRAVITY * dt;
+      message.x += message.vx * dt;
       message.y += message.vy * dt;
+      message.rotation += message.angularVelocity * dt;
       message.updatedAt = now;
     }
   }
@@ -214,6 +225,8 @@ export class RoomDurableObject implements DurableObject {
       y: message.y,
       vx: Number.isFinite(message.vx) ? message.vx : 0,
       vy: Number.isFinite(message.vy) ? message.vy : 0,
+      rotation: Number.isFinite(message.rotation) ? message.rotation : 0,
+      angularVelocity: Number.isFinite(message.angularVelocity) ? message.angularVelocity : 0,
       createdAt: Number.isFinite(message.createdAt) ? message.createdAt : now,
       updatedAt: Number.isFinite(message.updatedAt) ? message.updatedAt : now,
     };
@@ -226,5 +239,9 @@ export class RoomDurableObject implements DurableObject {
 
   private pickEmoji() {
     return this.emojis[Math.floor(Math.random() * this.emojis.length)];
+  }
+
+  private randomInRange(min: number, max: number) {
+    return min + Math.random() * (max - min);
   }
 }

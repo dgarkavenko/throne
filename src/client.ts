@@ -109,25 +109,21 @@ function drawBubbleAt({ left, centerY, text, font, paddingX, paddingY, minWidth,
   return metrics;
 }
 
-function drawCenteredBubble({ x, y, text, color, font, paddingX, paddingY, minWidth, scale }) {
+function drawCenteredBubble({ x, y, text, color, font, paddingX, paddingY, minWidth, scale, rotation }) {
   const metrics = getBubbleMetrics(text, font, paddingX, paddingY, minWidth);
-  const width = metrics.width * scale;
-  const height = metrics.height * scale;
-  const left = x - width / 2;
-  const top = y - height / 2;
   ctx.save();
   ctx.translate(x, y);
+  ctx.rotate(rotation || 0);
   ctx.scale(scale, scale);
-  ctx.translate(-x, -y);
   ctx.fillStyle = '#ffffff';
-  roundedRectPath(ctx, left, top, width, height, height / 2);
+  roundedRectPath(ctx, -metrics.width / 2, -metrics.height / 2, metrics.width, metrics.height, metrics.height / 2);
   ctx.fill();
   if (text && text.length > 0) {
     ctx.font = font;
     ctx.fillStyle = color;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, x, y + 0.5);
+    ctx.fillText(text, 0, 0.5);
   }
   ctx.restore();
   return metrics;
@@ -141,7 +137,11 @@ function updateBodies(now) {
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     if (dt > 0) {
       body.vy += gravity * dt;
+      body.x += (body.vx || 0) * dt;
       body.y += body.vy * dt;
+      if (typeof body.angularVelocity === 'number') {
+        body.rotation = (body.rotation || 0) + body.angularVelocity * dt;
+      }
       body.updatedAt = now;
     }
     const metrics = getBubbleMetrics(body.text, font, 14, 6, 32);
@@ -179,6 +179,7 @@ function renderFrame() {
       paddingY: 6,
       minWidth: 32,
       scale,
+      rotation: body.rotation || 0,
     });
   }
 
@@ -265,6 +266,12 @@ function connect({ host }) {
           if (typeof message.vx !== 'number') {
             message.vx = 0;
           }
+          if (typeof message.rotation !== 'number') {
+            message.rotation = 0;
+          }
+          if (typeof message.angularVelocity !== 'number') {
+            message.angularVelocity = 0;
+          }
           if (typeof message.createdAt !== 'number') {
             message.createdAt = now;
           }
@@ -325,6 +332,23 @@ messageInput.addEventListener('input', () => {
   send({ type: 'text', text: messageInput.value });
 });
 
+function getPlayerBubbleCenter(player, text) {
+  const emojiSize = 28;
+  const colonX = player.x + emojiSize * 0.6;
+  const bubbleLeft = colonX + 10;
+  const metrics = getBubbleMetrics(
+    text || '',
+    '13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    10,
+    5,
+    16
+  );
+  return {
+    x: bubbleLeft + metrics.width / 2,
+    y: player.y,
+  };
+}
+
 messageInput.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter') {
     return;
@@ -332,7 +356,11 @@ messageInput.addEventListener('keydown', (event) => {
   event.preventDefault();
   const text = messageInput.value.trim();
   if (text.length > 0) {
-    send({ type: 'drop', text });
+    let bubbleCenter = null;
+    if (playerId && players.has(playerId)) {
+      bubbleCenter = getPlayerBubbleCenter(players.get(playerId), text);
+    }
+    send({ type: 'drop', text, x: bubbleCenter?.x, y: bubbleCenter?.y });
   }
   messageInput.value = '';
   send({ type: 'text', text: '' });
