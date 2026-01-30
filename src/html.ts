@@ -19,6 +19,12 @@ main {
   gap: 1rem;
   justify-items: center;
 }
+.session {
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  opacity: 0.85;
+  text-transform: uppercase;
+}
 #field {
   width: 390px;
   height: 844px;
@@ -61,6 +67,7 @@ export const html = `<!doctype html>
   </head>
   <body>
     <main>
+      <div class="session" id="session">Session: --:--</div>
       <div id="field"></div>
       <div class="status" id="status">Connecting...</div>
     </main>

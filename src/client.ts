@@ -1,5 +1,6 @@
 export const clientScript = `const field = document.getElementById('field');
 const statusEl = document.getElementById('status');
+const sessionEl = document.getElementById('session');
 let currentTyping = '';
 
 const PHONE_WIDTH = 390;
@@ -8,6 +9,8 @@ const PHONE_HEIGHT = 844;
 let socket;
 let playerId = null;
 let players = [];
+let sessionStart = null;
+let sessionTimerId = null;
 let app = null;
 let emojiLayer = null;
 let physicsEngine = null;
@@ -16,6 +19,25 @@ const typingPositions = new Map();
 
 function updateStatus(message) {
   statusEl.textContent = message;
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const paddedSeconds = seconds.toString().padStart(2, '0');
+  return minutes + ':' + paddedSeconds;
+}
+
+function updateSessionTimer() {
+  if (!sessionEl) {
+    return;
+  }
+  if (!sessionStart) {
+    sessionEl.textContent = 'Session: --:--';
+    return;
+  }
+  sessionEl.textContent = 'Session: ' + formatDuration(Date.now() - sessionStart);
 }
 
 async function initScene() {
@@ -243,7 +265,9 @@ function connect() {
     }
     if (payload.type === 'state') {
       players = payload.players || [];
+      sessionStart = typeof payload.sessionStart === 'number' ? payload.sessionStart : null;
       renderPlayers();
+      updateSessionTimer();
     }
     if (payload.type === 'launch') {
       spawnTextBox(payload.text || '', payload.color, payload.emoji, typingPositions.get(payload.id));
@@ -286,6 +310,10 @@ function sendLaunch(text) {
 
 void initScene();
 connect();
+if (!sessionTimerId) {
+  sessionTimerId = setInterval(updateSessionTimer, 1000);
+}
+updateSessionTimer();
 
 function handleKeyDown(event) {
   if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
