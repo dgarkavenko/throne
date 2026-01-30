@@ -126,10 +126,11 @@ const html = `<!doctype html>
       </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/planck-js@0.3.0/dist/planck.min.js"></script>
     <script>
       const field = document.getElementById('field');
       const canvas = document.getElementById('scene');
-      const ctx = canvas.getContext('2d');
       const statusEl = document.getElementById('status');
       const roomInput = document.getElementById('room');
       const hostBtn = document.getElementById('host');
@@ -144,12 +145,29 @@ const html = `<!doctype html>
       const players = new Map();
       const messages = new Map();
       const emojis = ['🐙', '🐳', '🦊', '🦄', '🐢', '🐸', '🐧', '🦋', '🐝', '🐬', '🦜', '🦉'];
-      let serverTimeOffset = 0;
-      const gravity = 1600;
-      let animationFrame = null;
+      const playerSprites = new Map();
+      const messageSprites = new Map();
+      const playerBodies = new Map();
+      const messageBodies = new Map();
+
+      const pixiApp = new PIXI.Application({
+        view: canvas,
+        resizeTo: field,
+        backgroundAlpha: 0,
+        antialias: true,
+        autoDensity: true,
+      });
+
+      const physicsScale = 30;
+      const physicsWorld = new planck.World({
+        gravity: planck.Vec2(0, 30),
+      });
+      let boundsBody = null;
       let canvasWidth = 0;
       let canvasHeight = 0;
-      let deviceScale = 1;
+      let animationStarted = false;
+      const timeStep = 1 / 60;
+      let accumulator = 0;
 
       function updateShareLink() {
         const room = roomInput.value.trim();
@@ -179,105 +197,215 @@ const html = `<!doctype html>
         }
       }
 
-      function resizeCanvas() {
+      function toWorld(value) {
+        return value / physicsScale;
+      }
+
+      function toPixels(value) {
+        return value * physicsScale;
+      }
+
+      function syncBounds() {
         const rect = field.getBoundingClientRect();
         const nextWidth = Math.max(1, Math.floor(rect.width));
         const nextHeight = Math.max(1, Math.floor(rect.height));
-        const nextScale = window.devicePixelRatio || 1;
-        if (nextWidth === canvasWidth && nextHeight === canvasHeight && nextScale === deviceScale) {
+        if (nextWidth === canvasWidth && nextHeight === canvasHeight) {
           return;
         }
         canvasWidth = nextWidth;
         canvasHeight = nextHeight;
-        deviceScale = nextScale;
-        canvas.width = Math.floor(canvasWidth * deviceScale);
-        canvas.height = Math.floor(canvasHeight * deviceScale);
-        ctx.setTransform(deviceScale, 0, 0, deviceScale, 0, 0);
+        rebuildBounds();
       }
 
-      function roundedRectPath(context, x, y, width, height, radius) {
-        const r = Math.min(radius, width / 2, height / 2);
-        context.beginPath();
-        context.moveTo(x + r, y);
-        context.lineTo(x + width - r, y);
-        context.quadraticCurveTo(x + width, y, x + width, y + r);
-        context.lineTo(x + width, y + height - r);
-        context.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-        context.lineTo(x + r, y + height);
-        context.quadraticCurveTo(x, y + height, x, y + height - r);
-        context.lineTo(x, y + r);
-        context.quadraticCurveTo(x, y, x + r, y);
-        context.closePath();
-      }
-
-      function drawBubble({ x, y, text, color, font, paddingX, paddingY }) {
-        ctx.font = font;
-        const metrics = ctx.measureText(text || ' ');
-        const textWidth = metrics.width;
-        const height = Math.max(26, metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + paddingY * 2);
-        const width = Math.max(96, textWidth + paddingX * 2);
-        const left = x - width / 2;
-        const top = y - height / 2;
-        ctx.fillStyle = '#ffffff';
-        roundedRectPath(ctx, left, top, width, height, height / 2);
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = color;
-        ctx.stroke();
-        ctx.fillStyle = color;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, x, y + 0.5);
-        return height;
-      }
-
-      function renderFrame() {
-        resizeCanvas();
-        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-        const now = Date.now() + serverTimeOffset;
-        const ground = canvasHeight - 16;
-        for (const message of messages.values()) {
-          const age = Math.max(0, (now - message.createdAt) / 1000);
-          const fall = message.y + 0.5 * gravity * age * age;
-          const y = Math.min(fall, ground);
-          drawBubble({
-            x: message.x,
-            y,
-            text: message.text,
-            color: message.color,
-            font: '14px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-            paddingX: 14,
-            paddingY: 6,
-          });
+      function rebuildBounds() {
+        if (boundsBody) {
+          physicsWorld.destroyBody(boundsBody);
         }
-        for (const player of players.values()) {
-          const emojiSize = 32;
-          const gap = 6;
-          const bubbleY = player.y - emojiSize / 2 - gap - 18;
-          drawBubble({
-            x: player.x,
-            y: bubbleY,
-            text: player.text || '',
-            color: player.color,
-            font: '13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-            paddingX: 12,
-            paddingY: 5,
-          });
-          ctx.font =
-            emojiSize +
-            'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(player.emoji || emojis[0], player.x, player.y + emojiSize / 4);
+        boundsBody = physicsWorld.createBody();
+        const width = toWorld(canvasWidth);
+        const groundHeight = toWorld(Math.max(0, canvasHeight - 16));
+        boundsBody.createFixture(planck.Edge(planck.Vec2(0, 0), planck.Vec2(width, 0)));
+        boundsBody.createFixture(planck.Edge(planck.Vec2(0, 0), planck.Vec2(0, groundHeight)));
+        boundsBody.createFixture(planck.Edge(planck.Vec2(width, 0), planck.Vec2(width, groundHeight)));
+        boundsBody.createFixture(planck.Edge(planck.Vec2(0, groundHeight), planck.Vec2(width, groundHeight)));
+      }
+
+      function createPlayerSprite(player) {
+        const container = new PIXI.Container();
+        const bubble = new PIXI.Graphics();
+        const bubbleText = new PIXI.Text('', {
+          fontFamily:
+            'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontSize: 13,
+          fill: player.color,
+          align: 'center',
+        });
+        bubbleText.anchor.set(0.5);
+        const emojiText = new PIXI.Text(player.emoji || emojis[0], {
+          fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
+          fontSize: 32,
+        });
+        emojiText.anchor.set(0.5);
+        container.addChild(bubble);
+        container.addChild(bubbleText);
+        container.addChild(emojiText);
+        pixiApp.stage.addChild(container);
+        const sprite = { container, bubble, bubbleText, emojiText };
+        updatePlayerSprite(player, sprite);
+        return sprite;
+      }
+
+      function updatePlayerSprite(player, sprite) {
+        sprite.emojiText.text = player.emoji || emojis[0];
+        sprite.bubbleText.style.fill = player.color;
+        const text = player.text || '';
+        if (!text) {
+          sprite.bubble.visible = false;
+          sprite.bubbleText.visible = false;
+          return;
         }
-        animationFrame = requestAnimationFrame(renderFrame);
+        sprite.bubble.visible = true;
+        sprite.bubbleText.visible = true;
+        sprite.bubbleText.text = text;
+        const paddingX = 12;
+        const paddingY = 5;
+        const width = Math.max(96, sprite.bubbleText.width + paddingX * 2);
+        const height = Math.max(26, sprite.bubbleText.height + paddingY * 2);
+        const color = PIXI.utils.string2hex(player.color);
+        sprite.bubble.clear();
+        sprite.bubble.beginFill(0xffffff);
+        sprite.bubble.lineStyle(2, color);
+        sprite.bubble.drawRoundedRect(-width / 2, -height / 2, width, height, height / 2);
+        sprite.bubble.endFill();
+        const emojiSize = 32;
+        const gap = 6;
+        const bubbleY = -emojiSize / 2 - gap - height / 2;
+        sprite.bubble.position.set(0, bubbleY);
+        sprite.bubbleText.position.set(0, bubbleY);
+        sprite.bubbleText.anchor.set(0.5);
+        sprite.emojiText.position.set(0, 0);
+      }
+
+      function createMessageSprite(message) {
+        const container = new PIXI.Container();
+        const bubble = new PIXI.Graphics();
+        const bubbleText = new PIXI.Text(message.text, {
+          fontFamily:
+            'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontSize: 14,
+          fill: message.color,
+          align: 'center',
+        });
+        bubbleText.anchor.set(0.5);
+        container.addChild(bubble);
+        container.addChild(bubbleText);
+        pixiApp.stage.addChild(container);
+        const sprite = { container, bubble, bubbleText, width: 0, height: 0 };
+        updateMessageSprite(message, sprite);
+        return sprite;
+      }
+
+      function updateMessageSprite(message, sprite) {
+        sprite.bubbleText.text = message.text;
+        sprite.bubbleText.style.fill = message.color;
+        const paddingX = 14;
+        const paddingY = 6;
+        const width = Math.max(96, sprite.bubbleText.width + paddingX * 2);
+        const height = Math.max(26, sprite.bubbleText.height + paddingY * 2);
+        sprite.width = width;
+        sprite.height = height;
+        const color = PIXI.utils.string2hex(message.color);
+        sprite.bubble.clear();
+        sprite.bubble.beginFill(0xffffff);
+        sprite.bubble.lineStyle(2, color);
+        sprite.bubble.drawRoundedRect(-width / 2, -height / 2, width, height, height / 2);
+        sprite.bubble.endFill();
+      }
+
+      function createPlayerBody(player) {
+        const body = physicsWorld.createKinematicBody({
+          position: planck.Vec2(toWorld(player.x), toWorld(player.y)),
+        });
+        body.createFixture(planck.Circle(toWorld(18)), {
+          density: 1,
+        });
+        return body;
+      }
+
+      function createMessageBody(message, sprite) {
+        const body = physicsWorld.createDynamicBody({
+          position: planck.Vec2(toWorld(message.x), toWorld(message.y)),
+        });
+        body.createFixture(
+          planck.Box(toWorld(sprite.width / 2), toWorld(sprite.height / 2)),
+          {
+            density: 1,
+            friction: 0.35,
+            restitution: 0.1,
+          }
+        );
+        return body;
+      }
+
+      function clearEntities() {
+        for (const body of playerBodies.values()) {
+          physicsWorld.destroyBody(body);
+        }
+        for (const body of messageBodies.values()) {
+          physicsWorld.destroyBody(body);
+        }
+        for (const sprite of playerSprites.values()) {
+          pixiApp.stage.removeChild(sprite.container);
+        }
+        for (const sprite of messageSprites.values()) {
+          pixiApp.stage.removeChild(sprite.container);
+        }
+        playerBodies.clear();
+        messageBodies.clear();
+        playerSprites.clear();
+        messageSprites.clear();
+        players.clear();
+        messages.clear();
+      }
+
+      function stepPhysics(deltaSeconds) {
+        accumulator = Math.min(accumulator + deltaSeconds, 0.25);
+        while (accumulator >= timeStep) {
+          for (const [id, player] of players.entries()) {
+            const body = playerBodies.get(id);
+            if (body) {
+              body.setTransform(planck.Vec2(toWorld(player.x), toWorld(player.y)), 0);
+            }
+          }
+          physicsWorld.step(timeStep);
+          accumulator -= timeStep;
+        }
+
+        for (const [id, sprite] of playerSprites.entries()) {
+          const body = playerBodies.get(id);
+          if (!body) continue;
+          const position = body.getPosition();
+          sprite.container.position.set(toPixels(position.x), toPixels(position.y));
+        }
+
+        for (const [id, sprite] of messageSprites.entries()) {
+          const body = messageBodies.get(id);
+          if (!body) continue;
+          const position = body.getPosition();
+          sprite.container.position.set(toPixels(position.x), toPixels(position.y));
+        }
       }
 
       function ensureAnimation() {
-        if (animationFrame !== null) {
+        if (animationStarted) {
           return;
         }
-        animationFrame = requestAnimationFrame(renderFrame);
+        animationStarted = true;
+        syncBounds();
+        pixiApp.ticker.add(() => {
+          syncBounds();
+          stepPhysics(pixiApp.ticker.deltaMS / 1000);
+        });
       }
 
       function send(message) {
@@ -313,14 +441,60 @@ const html = `<!doctype html>
             playerId = payload.id;
           }
           if (payload.type === 'state') {
-            serverTimeOffset = payload.serverTime - Date.now();
-            players.clear();
+            syncBounds();
+            const nextPlayers = new Set();
             for (const player of payload.players) {
-              players.set(player.id, player);
+              nextPlayers.add(player.id);
+              const existing = players.get(player.id);
+              if (existing) {
+                Object.assign(existing, player);
+                const sprite = playerSprites.get(player.id);
+                if (sprite) {
+                  updatePlayerSprite(existing, sprite);
+                }
+              } else {
+                players.set(player.id, player);
+                const sprite = createPlayerSprite(player);
+                playerSprites.set(player.id, sprite);
+                const body = createPlayerBody(player);
+                playerBodies.set(player.id, body);
+              }
             }
-            messages.clear();
+            for (const [id, sprite] of playerSprites.entries()) {
+              if (!nextPlayers.has(id)) {
+                pixiApp.stage.removeChild(sprite.container);
+                playerSprites.delete(id);
+                const body = playerBodies.get(id);
+                if (body) {
+                  physicsWorld.destroyBody(body);
+                  playerBodies.delete(id);
+                }
+                players.delete(id);
+              }
+            }
+
+            const nextMessages = new Set();
             for (const message of payload.messages || []) {
-              messages.set(message.id, message);
+              nextMessages.add(message.id);
+              if (!messages.has(message.id)) {
+                messages.set(message.id, message);
+                const sprite = createMessageSprite(message);
+                messageSprites.set(message.id, sprite);
+                const body = createMessageBody(message, sprite);
+                messageBodies.set(message.id, body);
+              }
+            }
+            for (const [id, sprite] of messageSprites.entries()) {
+              if (!nextMessages.has(id)) {
+                pixiApp.stage.removeChild(sprite.container);
+                messageSprites.delete(id);
+                const body = messageBodies.get(id);
+                if (body) {
+                  physicsWorld.destroyBody(body);
+                  messageBodies.delete(id);
+                }
+                messages.delete(id);
+              }
             }
             syncMessageInput();
             ensureAnimation();
@@ -338,8 +512,7 @@ const html = `<!doctype html>
           joinBtn.disabled = false;
           messageInput.disabled = true;
           messageInput.value = '';
-          players.clear();
-          messages.clear();
+          clearEntities();
           syncMessageInput();
           ensureAnimation();
         });
@@ -398,7 +571,7 @@ const html = `<!doctype html>
       });
 
       window.addEventListener('resize', () => {
-        resizeCanvas();
+        syncBounds();
         if (playerId && players.has(playerId)) {
           const me = players.get(playerId);
           send({ type: 'move', x: me.x, y: me.y });
