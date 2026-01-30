@@ -1,10 +1,12 @@
 interface PlayerState {
   id: string;
   emoji: string;
+  typing: string;
 }
 
 interface RoomMessage {
-  type: 'join';
+  type: 'join' | 'typing';
+  text?: string;
 }
 
 export class RoomDurableObject implements DurableObject {
@@ -32,6 +34,7 @@ export class RoomDurableObject implements DurableObject {
     const player: PlayerState = {
       id: crypto.randomUUID(),
       emoji: this.pickEmoji(),
+      typing: '',
     };
 
     if (this.connections.size === 0) {
@@ -58,6 +61,15 @@ export class RoomDurableObject implements DurableObject {
       if (message.type === 'join') {
         this.broadcastState();
       }
+      if (message.type === 'typing') {
+        const nextText = message.text ?? '';
+        const entry = this.connections.get(socket);
+        if (entry && entry.typing !== nextText) {
+          entry.typing = nextText;
+          this.connections.set(socket, entry);
+        }
+        this.broadcastState();
+      }
     });
 
     const cleanup = () => {
@@ -81,6 +93,12 @@ export class RoomDurableObject implements DurableObject {
       const message = JSON.parse(data) as RoomMessage;
       if (message.type === 'join') {
         return message;
+      }
+      if (message.type === 'typing') {
+        return {
+          type: 'typing',
+          text: typeof message.text === 'string' ? message.text : '',
+        };
       }
       return null;
     } catch (error) {

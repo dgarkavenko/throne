@@ -19,6 +19,18 @@ main {
   gap: 1rem;
   justify-items: center;
 }
+#typing {
+  width: min(360px, 92vw);
+  border-radius: 999px;
+  border: 1px solid #1f242c;
+  background: #0f1217;
+  color: #f5f5f5;
+  padding: 0.6rem 1rem;
+  font-size: 0.95rem;
+}
+#typing::placeholder {
+  color: rgba(245, 245, 245, 0.5);
+}
 #field {
   width: 390px;
   height: 844px;
@@ -62,6 +74,7 @@ export const html = `<!doctype html>
   <body>
     <main>
       <div id="field"></div>
+      <input id="typing" type="text" autocomplete="off" placeholder="Type to broadcast…" />
       <div class="status" id="status">Connecting...</div>
     </main>
 
