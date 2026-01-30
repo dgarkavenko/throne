@@ -45,6 +45,15 @@ async function initScene() {
   renderPlayers();
 }
 
+function parseColor(value, fallback) {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const normalized = value.replace('#', '');
+  const parsed = Number.parseInt(normalized, 16);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
 function setupPhysics() {
   if (!window.Matter || !app) {
     return;
@@ -128,6 +137,64 @@ function spawnBox(x, y) {
   physicsBoxes.push({ body, graphic });
 }
 
+function spawnTextBox(text, color, emoji) {
+  if (!physicsEngine || !app || !window.Matter || !window.PIXI) {
+    return;
+  }
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return;
+  }
+  const style = new PIXI.TextStyle({
+    fontFamily: '"Inter", "Segoe UI", sans-serif',
+    fontSize: 22,
+    fill: '#0b0e12',
+    fontWeight: '600',
+    wordWrap: true,
+    wordWrapWidth: PHONE_WIDTH - 80,
+  });
+  const content = emoji ? emoji + ' ' + trimmed : trimmed;
+  const textSprite = new PIXI.Text(content, style);
+  if (textSprite.anchor?.set) {
+    textSprite.anchor.set(0.5);
+  }
+
+  const paddingX = 18;
+  const paddingY = 12;
+  const boxWidth = textSprite.width + paddingX * 2;
+  const boxHeight = textSprite.height + paddingY * 2;
+  const x = PHONE_WIDTH / 2 + (Math.random() - 0.5) * 80;
+  const y = PHONE_HEIGHT / 4 + (Math.random() - 0.5) * 60;
+  const { Bodies, Body, World } = Matter;
+  const body = Bodies.rectangle(x, y, boxWidth, boxHeight, {
+    restitution: 0.5,
+    friction: 0.4,
+    density: 0.0025,
+  });
+  Body.setVelocity(body, {
+    x: (Math.random() - 0.5) * 10,
+    y: (Math.random() - 0.5) * 10,
+  });
+  Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.35);
+  World.add(physicsEngine.world, body);
+
+  const container = new PIXI.Container();
+  const background = new PIXI.Graphics();
+  const fillColor = parseColor(color, 0xfef6d4);
+  background.roundRect(-boxWidth / 2, -boxHeight / 2, boxWidth, boxHeight, Math.min(18, boxHeight / 2));
+  background.fill({ color: fillColor, alpha: 0.95 });
+  background.stroke({ width: 2, color: 0x0b0e12, alpha: 0.35 });
+  container.addChild(background);
+  textSprite.x = 0;
+  textSprite.y = 0;
+  container.addChild(textSprite);
+  container.x = x;
+  container.y = y;
+  app.stage.addChild(container);
+
+  physicsBoxes.push({ body, graphic: container });
+}
+
 function renderPlayers() {
   if (!emojiLayer || !window.PIXI) {
     return;
@@ -176,6 +243,9 @@ function connect() {
       players = payload.players || [];
       renderPlayers();
     }
+    if (payload.type === 'launch') {
+      spawnTextBox(payload.text || '', payload.color, payload.emoji);
+    }
   });
 
   socket.addEventListener('error', () => {
@@ -200,6 +270,18 @@ function sendTyping() {
   );
 }
 
+function sendLaunch(text) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  socket.send(
+    JSON.stringify({
+      type: 'launch',
+      text,
+    })
+  );
+}
+
 void initScene();
 connect();
 
@@ -213,6 +295,9 @@ function handleKeyDown(event) {
     return;
   }
   if (event.key === 'Escape' || event.key === 'Enter') {
+    if (event.key === 'Enter' && currentTyping.trim()) {
+      sendLaunch(currentTyping);
+    }
     currentTyping = '';
     sendTyping();
     return;

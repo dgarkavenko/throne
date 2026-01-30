@@ -6,7 +6,7 @@ interface PlayerState {
 }
 
 interface RoomMessage {
-  type: 'join' | 'typing';
+  type: 'join' | 'typing' | 'launch';
   text?: string;
 }
 
@@ -73,6 +73,14 @@ export class RoomDurableObject implements DurableObject {
         }
         this.broadcastState();
       }
+      if (message.type === 'launch') {
+        const entry = this.connections.get(socket);
+        const text = (message.text ?? '').trim();
+        if (!entry || !text) {
+          return;
+        }
+        this.broadcastLaunch(text, entry);
+      }
     });
 
     const cleanup = () => {
@@ -103,6 +111,12 @@ export class RoomDurableObject implements DurableObject {
           text: typeof message.text === 'string' ? message.text : '',
         };
       }
+      if (message.type === 'launch') {
+        return {
+          type: 'launch',
+          text: typeof message.text === 'string' ? message.text : '',
+        };
+      }
       return null;
     } catch (error) {
       return null;
@@ -114,6 +128,23 @@ export class RoomDurableObject implements DurableObject {
       type: 'state',
       players: Array.from(this.connections.values()),
       hostId: this.hostId,
+    });
+
+    for (const socket of this.connections.keys()) {
+      try {
+        socket.send(payload);
+      } catch (error) {
+        this.connections.delete(socket);
+      }
+    }
+  }
+
+  private broadcastLaunch(text: string, player: PlayerState) {
+    const payload = JSON.stringify({
+      type: 'launch',
+      text,
+      color: player.color,
+      emoji: player.emoji,
     });
 
     for (const socket of this.connections.keys()) {
