@@ -38,7 +38,7 @@ function updateSessionTimer() {
     sessionEl.textContent = 'Session: --:--';
     return;
   }
-  sessionEl.textContent = 'Session: ' + formatDuration(Date.now() - sessionStart);
+  sessionEl.textContent = formatDuration(Date.now() - sessionStart);
 }
 
 async function initScene() {
