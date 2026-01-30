@@ -1,6 +1,6 @@
 export const clientScript = `const field = document.getElementById('field');
 const statusEl = document.getElementById('status');
-const typingField = document.getElementById('typing');
+let currentTyping = '';
 
 const PHONE_WIDTH = 390;
 const PHONE_HEIGHT = 844;
@@ -105,7 +105,7 @@ function sendTyping() {
   socket.send(
     JSON.stringify({
       type: 'typing',
-      text: typingField?.value ?? '',
+      text: currentTyping,
     })
   );
 }
@@ -113,5 +113,31 @@ function sendTyping() {
 void initScene();
 connect();
 
-typingField?.addEventListener('input', sendTyping);
+function handleKeyDown(event) {
+  if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
+    return;
+  }
+  if (event.key === 'Backspace') {
+    currentTyping = currentTyping.slice(0, -1);
+    sendTyping();
+    return;
+  }
+  if (event.key === 'Escape' || event.key === 'Enter') {
+    currentTyping = '';
+    sendTyping();
+    return;
+  }
+  if (event.key.length === 1) {
+    currentTyping += event.key;
+    sendTyping();
+  }
+}
+
+window.addEventListener('keydown', handleKeyDown);
+window.addEventListener('blur', () => {
+  if (currentTyping) {
+    currentTyping = '';
+    sendTyping();
+  }
+});
 `;
