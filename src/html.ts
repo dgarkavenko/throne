@@ -79,6 +79,7 @@ export const html = `<!doctype html>
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
     <script>
       ${clientScript}
     </script>
