@@ -136,15 +136,20 @@ function drawCenteredBubble({ x, y, text, color, font, paddingX, paddingY, minWi
 function updateBodies(now) {
   const ground = canvasHeight - 16;
   const font = '14px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  for (const body of bodies.values()) {
+  const bodyList = Array.from(bodies.values());
+  const metricsMap = new Map();
+  for (const body of bodyList) {
     const last = body.updatedAt || body.createdAt || now;
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     if (dt > 0) {
       body.vy += gravity * dt;
       body.y += body.vy * dt;
+      body.x += (body.vx || 0) * dt;
+      body.vx *= 0.98;
       body.updatedAt = now;
     }
     const metrics = getBubbleMetrics(body.text, font, 14, 6, 32);
+    metricsMap.set(body.id, metrics);
     const halfHeight = metrics.height / 2;
     if (body.y + halfHeight >= ground) {
       body.y = ground - halfHeight;
@@ -152,6 +157,54 @@ function updateBodies(now) {
         body.vy = -body.vy * restitution;
         if (Math.abs(body.vy) < 40) {
           body.vy = 0;
+        }
+      }
+    }
+    const halfWidth = metrics.width / 2;
+    if (body.x - halfWidth < 8) {
+      body.x = halfWidth + 8;
+      body.vx = Math.abs(body.vx || 0);
+    } else if (body.x + halfWidth > canvasWidth - 8) {
+      body.x = canvasWidth - halfWidth - 8;
+      body.vx = -Math.abs(body.vx || 0);
+    }
+  }
+
+  for (let i = 0; i < bodyList.length; i += 1) {
+    const bodyA = bodyList[i];
+    const metricsA = metricsMap.get(bodyA.id);
+    if (!metricsA) {
+      continue;
+    }
+    const radiusA = Math.max(metricsA.width, metricsA.height) / 2;
+    for (let j = i + 1; j < bodyList.length; j += 1) {
+      const bodyB = bodyList[j];
+      const metricsB = metricsMap.get(bodyB.id);
+      if (!metricsB) {
+        continue;
+      }
+      const radiusB = Math.max(metricsB.width, metricsB.height) / 2;
+      const dx = bodyB.x - bodyA.x;
+      const dy = bodyB.y - bodyA.y;
+      const minDist = radiusA + radiusB;
+      const dist = Math.hypot(dx, dy);
+      if (dist > 0 && dist < minDist) {
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const overlap = (minDist - dist) / 2;
+        bodyA.x -= nx * overlap;
+        bodyA.y -= ny * overlap;
+        bodyB.x += nx * overlap;
+        bodyB.y += ny * overlap;
+        const relVx = (bodyB.vx || 0) - (bodyA.vx || 0);
+        const relVy = (bodyB.vy || 0) - (bodyA.vy || 0);
+        const relVel = relVx * nx + relVy * ny;
+        if (relVel < 0) {
+          const impulse = -(1 + restitution) * relVel * 0.5;
+          bodyA.vx -= impulse * nx;
+          bodyA.vy -= impulse * ny;
+          bodyB.vx += impulse * nx;
+          bodyB.vy += impulse * ny;
         }
       }
     }
