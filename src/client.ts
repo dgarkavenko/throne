@@ -37,7 +37,7 @@ function initScene() {
 }
 
 function renderPlayers() {
-  if (!emojiLayer) {
+  if (!emojiLayer || !window.PIXI) {
     return;
   }
   emojiLayer.removeChildren();
@@ -60,7 +60,14 @@ function connect() {
   const url = protocol + '://' + location.host + '/room/' + roomId;
   socket = new WebSocket(url);
 
+  const connectTimeout = setTimeout(() => {
+    if (socket.readyState !== WebSocket.OPEN) {
+      updateStatus('Unable to connect. Check the server and refresh.');
+    }
+  }, 4000);
+
   socket.addEventListener('open', () => {
+    clearTimeout(connectTimeout);
     updateStatus('Connected to room ' + roomId + '.');
     document.body.classList.add('connected');
     socket.send(JSON.stringify({ type: 'join' }));
@@ -75,6 +82,10 @@ function connect() {
       players = payload.players || [];
       renderPlayers();
     }
+  });
+
+  socket.addEventListener('error', () => {
+    updateStatus('Connection error. Refresh to retry.');
   });
 
   socket.addEventListener('close', () => {
