@@ -54,9 +54,19 @@ const html = `<!doctype html>
       .controls button.secondary {
         background: #272b35;
       }
+      .status-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
       .status {
         font-size: 0.9rem;
         opacity: 0.8;
+      }
+      body.connected .setup-controls,
+      body.connected .share-controls,
+      body.connected .hint {
+        display: none;
       }
       #field {
         position: relative;
@@ -72,19 +82,27 @@ const html = `<!doctype html>
         gap: 0.35rem;
         pointer-events: none;
       }
-      .player .dot {
-        width: 14px;
-        height: 14px;
-        border-radius: 999px;
-        background: var(--color, #f97316);
-        box-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
+      .player.self {
+        pointer-events: auto;
       }
-      .player .label {
+      .player .emoji {
+        font-size: 1.35rem;
+        filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.35));
+      }
+      .player input {
         font-size: 0.75rem;
         background: rgba(0, 0, 0, 0.6);
         padding: 0.15rem 0.4rem;
         border-radius: 0.4rem;
         white-space: nowrap;
+        border: 1px solid color-mix(in srgb, var(--color, #f97316) 70%, transparent);
+        color: inherit;
+        text-align: center;
+        min-width: 6rem;
+        pointer-events: none;
+      }
+      .player.self input {
+        pointer-events: auto;
       }
       .hint {
         font-size: 0.85rem;
@@ -105,18 +123,19 @@ const html = `<!doctype html>
           <h1>Mouse Room</h1>
           <div class="hint">Host a room, then share the code so others can join.</div>
         </div>
-        <div class="controls">
-          <input id="name" placeholder="Your name" />
+        <div class="controls setup-controls">
           <input id="room" placeholder="Room code" />
           <button id="host">Host room</button>
           <button id="join" class="secondary">Join room</button>
-          <button id="leave" class="secondary" disabled>Leave</button>
         </div>
-        <div class="controls">
+        <div class="controls share-controls">
           <input id="share-link" readonly placeholder="Share link" />
           <button id="copy" class="secondary">Copy link</button>
         </div>
-        <div class="status" id="status">Not connected</div>
+        <div class="status-row">
+          <div class="status" id="status">Not connected</div>
+          <button id="leave" class="secondary" disabled>Leave</button>
+        </div>
       </header>
       <section id="field"></section>
     </main>
@@ -124,7 +143,6 @@ const html = `<!doctype html>
     <script>
       const field = document.getElementById('field');
       const statusEl = document.getElementById('status');
-      const nameInput = document.getElementById('name');
       const roomInput = document.getElementById('room');
       const hostBtn = document.getElementById('host');
       const joinBtn = document.getElementById('join');
@@ -135,36 +153,8 @@ const html = `<!doctype html>
       let socket;
       let playerId = null;
       const players = new Map();
-      const colors = ['#f97316', '#38bdf8', '#a78bfa', '#34d399', '#fb7185', '#facc15'];
-      const birds = [
-        'Robin',
-        'Sparrow',
-        'Wren',
-        'Finch',
-        'Heron',
-        'Lark',
-        'Swift',
-        'Plover',
-        'Hawk',
-        'Kestrel',
-        'Ibis',
-        'Egret',
-        'Pipit',
-        'Gull',
-        'Osprey',
-      ];
-
-      function randomBirdName() {
-        const bird = birds[Math.floor(Math.random() * birds.length)];
-        const number = Math.floor(Math.random() * 900 + 100);
-        return bird + ' ' + number;
-      }
-
-      function ensureName() {
-        if (!nameInput.value.trim()) {
-          nameInput.value = randomBirdName();
-        }
-      }
+      const playerElements = new Map();
+      const emojis = ['🐙', '🐳', '🦊', '🦄', '🐢', '🐸', '🐧', '🦋', '🐝', '🐬', '🦜', '🦉'];
 
       function updateShareLink() {
         const room = roomInput.value.trim();
@@ -174,10 +164,6 @@ const html = `<!doctype html>
         }
         const params = new URLSearchParams();
         params.set('room', room);
-        const name = nameInput.value.trim();
-        if (name) {
-          params.set('name', name);
-        }
         shareLinkInput.value = location.origin + '/?' + params.toString();
       }
 
@@ -185,16 +171,61 @@ const html = `<!doctype html>
         statusEl.textContent = message;
       }
 
+      function createPlayerElement(player) {
+        const el = document.createElement('div');
+        el.className = 'player';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Say something';
+        input.maxLength = 48;
+        const emoji = document.createElement('div');
+        emoji.className = 'emoji';
+        el.append(input, emoji);
+        input.addEventListener('input', () => {
+          if (player.id !== playerId) {
+            return;
+          }
+          send({ type: 'text', text: input.value });
+        });
+        return el;
+      }
+
+      function updatePlayerElement(el, player) {
+        el.style.left = player.x + 'px';
+        el.style.top = player.y + 'px';
+        el.style.setProperty('--color', player.color);
+        el.classList.toggle('self', player.id === playerId);
+        const emoji = el.querySelector('.emoji');
+        if (emoji) {
+          emoji.textContent = player.emoji || emojis[0];
+        }
+        const input = el.querySelector('input');
+        if (input) {
+          const isSelf = player.id === playerId;
+          input.readOnly = !isSelf;
+          input.tabIndex = isSelf ? 0 : -1;
+          if (!isSelf || document.activeElement !== input) {
+            input.value = player.text || '';
+          }
+        }
+      }
+
       function renderPlayers() {
-        field.innerHTML = '';
+        const activeIds = new Set(players.keys());
         for (const player of players.values()) {
-          const el = document.createElement('div');
-          el.className = 'player';
-          el.style.left = player.x + 'px';
-          el.style.top = player.y + 'px';
-          el.style.setProperty('--color', player.color);
-          el.innerHTML = '<div class=\"dot\"></div><div class=\"label\">' + player.name + '</div>';
-          field.appendChild(el);
+          let el = playerElements.get(player.id);
+          if (!el) {
+            el = createPlayerElement(player);
+            playerElements.set(player.id, el);
+            field.appendChild(el);
+          }
+          updatePlayerElement(el, player);
+        }
+        for (const [id, el] of playerElements.entries()) {
+          if (!activeIds.has(id)) {
+            el.remove();
+            playerElements.delete(id);
+          }
         }
       }
 
@@ -205,7 +236,6 @@ const html = `<!doctype html>
       }
 
       function connect({ host }) {
-        ensureName();
         if (!roomInput.value.trim()) {
           roomInput.value = crypto.randomUUID().slice(0, 6);
         }
@@ -217,10 +247,11 @@ const html = `<!doctype html>
 
         socket.addEventListener('open', () => {
           updateStatus('Connected to ' + roomId);
+          document.body.classList.add('connected');
           leaveBtn.disabled = false;
           hostBtn.disabled = true;
           joinBtn.disabled = true;
-          send({ type: 'join', name: nameInput.value.trim() });
+          send({ type: 'join' });
         });
 
         socket.addEventListener('message', (event) => {
@@ -242,6 +273,7 @@ const html = `<!doctype html>
 
         socket.addEventListener('close', () => {
           updateStatus('Disconnected');
+          document.body.classList.remove('connected');
           leaveBtn.disabled = true;
           hostBtn.disabled = false;
           joinBtn.disabled = false;
@@ -267,9 +299,6 @@ const html = `<!doctype html>
         }
       });
 
-      nameInput.addEventListener('input', () => {
-        updateShareLink();
-      });
       roomInput.addEventListener('input', () => {
         updateShareLink();
       });
@@ -293,12 +322,6 @@ const html = `<!doctype html>
       });
 
       const params = new URLSearchParams(location.search);
-      if (params.has('name')) {
-        nameInput.value = params.get('name') || '';
-      }
-      if (!nameInput.value.trim()) {
-        nameInput.value = randomBirdName();
-      }
       if (params.has('room')) {
         roomInput.value = params.get('room') || '';
       }
@@ -313,22 +336,24 @@ const html = `<!doctype html>
 
 interface PlayerState {
   id: string;
-  name: string;
   x: number;
   y: number;
   color: string;
+  emoji: string;
+  text: string;
 }
 
 interface RoomMessage {
-  type: 'join' | 'move';
-  name?: string;
+  type: 'join' | 'move' | 'text';
   x?: number;
   y?: number;
+  text?: string;
 }
 
 export class RoomDurableObject implements DurableObject {
   private connections = new Map<WebSocket, PlayerState>();
   private hostId: string | null = null;
+  private emojis = ['🐙', '🐳', '🦊', '🦄', '🐢', '🐸', '🐧', '🦋', '🐝', '🐬', '🦜', '🦉'];
 
   constructor(private state: DurableObjectState) {}
 
@@ -362,10 +387,11 @@ export class RoomDurableObject implements DurableObject {
 
     const player: PlayerState = {
       id: crypto.randomUUID(),
-      name: 'Guest',
       x: 120,
       y: 120,
       color: this.pickColor(),
+      emoji: this.pickEmoji(),
+      text: '',
     };
 
     if (isHost) {
@@ -389,10 +415,6 @@ export class RoomDurableObject implements DurableObject {
         return;
       }
 
-      if (message.type === 'join' && message.name) {
-        player.name = message.name.slice(0, 24);
-      }
-
       if (message.type === 'move') {
         if (typeof message.x === 'number') {
           player.x = message.x;
@@ -400,6 +422,10 @@ export class RoomDurableObject implements DurableObject {
         if (typeof message.y === 'number') {
           player.y = message.y;
         }
+      }
+
+      if (message.type === 'text' && typeof message.text === 'string') {
+        player.text = message.text.slice(0, 48);
       }
 
       this.broadcastState();
@@ -424,7 +450,7 @@ export class RoomDurableObject implements DurableObject {
 
     try {
       const message = JSON.parse(data) as RoomMessage;
-      if (message.type === 'join' || message.type === 'move') {
+      if (message.type === 'join' || message.type === 'move' || message.type === 'text') {
         return message;
       }
       return null;
@@ -452,6 +478,10 @@ export class RoomDurableObject implements DurableObject {
   private pickColor() {
     const palette = ['#f97316', '#38bdf8', '#a78bfa', '#34d399', '#fb7185', '#facc15'];
     return palette[Math.floor(Math.random() * palette.length)];
+  }
+
+  private pickEmoji() {
+    return this.emojis[Math.floor(Math.random() * this.emojis.length)];
   }
 }
 
