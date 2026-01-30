@@ -1,5 +1,6 @@
 export const clientScript = `const field = document.getElementById('field');
 const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
 
 const PHONE_WIDTH = 390;
 const PHONE_HEIGHT = 844;
@@ -9,9 +10,31 @@ let playerId = null;
 let players = [];
 let app = null;
 let emojiLayer = null;
+const logMessages = [];
 
 function updateStatus(message) {
   statusEl.textContent = message;
+}
+
+function addLog(message) {
+  if (!logEl) {
+    return;
+  }
+  logMessages.push({ message, time: new Date() });
+  if (logMessages.length > 30) {
+    logMessages.shift();
+  }
+  renderLog();
+}
+
+function renderLog() {
+  logEl.innerHTML = '';
+  logMessages.forEach((entry) => {
+    const item = document.createElement('li');
+    const time = entry.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    item.textContent = '[' + time + '] ' + entry.message;
+    logEl.appendChild(item);
+  });
 }
 
 function initScene() {
@@ -63,6 +86,7 @@ function connect() {
   socket.addEventListener('open', () => {
     updateStatus('Connected to room ' + roomId + '.');
     document.body.classList.add('connected');
+    addLog('Connected to room ' + roomId + '.');
     socket.send(JSON.stringify({ type: 'join' }));
   });
 
@@ -70,16 +94,19 @@ function connect() {
     const payload = JSON.parse(event.data);
     if (payload.type === 'welcome') {
       playerId = payload.id;
+      addLog('Welcome! Your id is ' + payload.id + '.');
     }
     if (payload.type === 'state') {
       players = payload.players || [];
       renderPlayers();
+      addLog('State updated: ' + players.length + ' player(s) connected.');
     }
   });
 
   socket.addEventListener('close', () => {
     updateStatus('Disconnected. Refresh to reconnect.');
     document.body.classList.remove('connected');
+    addLog('Disconnected from room ' + roomId + '.');
   });
 }
 
