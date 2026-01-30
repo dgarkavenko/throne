@@ -13,6 +13,7 @@ interface RoomMessage {
 export class RoomDurableObject implements DurableObject {
   private connections = new Map<WebSocket, PlayerState>();
   private hostId: string | null = null;
+  private sessionStart: number | null = null;
   private emojis = ['\ud83d\udc99', '\ud83d\udd25', '\ud83c\udf1c', '\u2728', '\ud83d\udc7e', '\ud83d\udc8e', '\ud83c\udf38', '\ud83c\udf19', '\ud83e\uddf8', '\ud83e\udee7', '\ud83c\udf2c\ufe0f', '\ud83c\udf89'];
   private colors = ['#f6c1c7', '#f7d6b2', '#f8f1b4', '#c7f0d9', '#c4d7f7', '#d9c4f7', '#f7c4e3', '#c7f3f6', '#f6c7a6', '#d7f6b4', '#c9f6d7', '#f3c9f6'];
 
@@ -42,6 +43,7 @@ export class RoomDurableObject implements DurableObject {
 
     if (this.connections.size === 0) {
       this.hostId = player.id;
+      this.sessionStart = Date.now();
     }
 
     this.connections.set(socket, player);
@@ -88,6 +90,9 @@ export class RoomDurableObject implements DurableObject {
       if (this.hostId === player.id) {
         this.hostId = null;
       }
+      if (this.connections.size === 0) {
+        this.sessionStart = null;
+      }
       this.broadcastState();
     };
 
@@ -128,6 +133,7 @@ export class RoomDurableObject implements DurableObject {
       type: 'state',
       players: Array.from(this.connections.values()),
       hostId: this.hostId,
+      sessionStart: this.sessionStart,
     });
 
     for (const socket of this.connections.keys()) {
