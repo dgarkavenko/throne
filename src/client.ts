@@ -23,6 +23,10 @@ let animationFrame = null;
 let canvasWidth = 0;
 let canvasHeight = 0;
 let deviceScale = 1;
+let physicsWorld = null;
+let boundaryBody = null;
+let lastPhysicsStep = null;
+const physicsBodies = new Map();
 
 function updateShareLink() {
   const room = roomInput.value.trim();
@@ -66,6 +70,7 @@ function resizeCanvas() {
   canvas.width = Math.floor(canvasWidth * deviceScale);
   canvas.height = Math.floor(canvasHeight * deviceScale);
   ctx.setTransform(deviceScale, 0, 0, deviceScale, 0, 0);
+  syncWorldBounds();
 }
 
 function roundedRectPath(context, x, y, width, height, radius) {
@@ -91,6 +96,97 @@ function getBubbleMetrics(text, font, paddingX, paddingY, minWidth) {
   const height = Math.max(20, metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + paddingY * 2);
   const width = Math.max(minWidth, textWidth + paddingX * 2);
   return { width, height, textWidth };
+}
+
+function ensurePhysicsWorld() {
+  if (physicsWorld) {
+    return physicsWorld;
+  }
+  if (!window.planck) {
+    return null;
+  }
+  const planck = window.planck;
+  physicsWorld = new planck.World(planck.Vec2(0, gravity));
+  boundaryBody = physicsWorld.createBody();
+  lastPhysicsStep = null;
+  return physicsWorld;
+}
+
+function syncWorldBounds() {
+  const world = ensurePhysicsWorld();
+  if (!world || !boundaryBody) {
+    return;
+  }
+  world.destroyBody(boundaryBody);
+  boundaryBody = world.createBody();
+  const planck = window.planck;
+  const wallThickness = 12;
+  const halfThickness = wallThickness / 2;
+  const width = Math.max(1, canvasWidth);
+  const height = Math.max(1, canvasHeight);
+  boundaryBody.createFixture(
+    planck.Box(width / 2, halfThickness, planck.Vec2(width / 2, height - halfThickness), 0),
+    {
+      restitution,
+    }
+  );
+  boundaryBody.createFixture(
+    planck.Box(width / 2, halfThickness, planck.Vec2(width / 2, halfThickness), 0),
+    {
+      restitution,
+    }
+  );
+  boundaryBody.createFixture(
+    planck.Box(halfThickness, height / 2, planck.Vec2(halfThickness, height / 2), 0),
+    {
+      restitution,
+    }
+  );
+  boundaryBody.createFixture(
+    planck.Box(halfThickness, height / 2, planck.Vec2(width - halfThickness, height / 2), 0),
+    {
+      restitution,
+    }
+  );
+}
+
+function ensurePhysicsBody(message, metrics) {
+  const world = ensurePhysicsWorld();
+  if (!world) {
+    return null;
+  }
+  const planck = window.planck;
+  const existing = physicsBodies.get(message.id);
+  const width = metrics.width;
+  const height = metrics.height;
+  if (!existing) {
+    const body = world.createDynamicBody({
+      position: planck.Vec2(message.x, message.y),
+      linearVelocity: planck.Vec2(message.vx || 0, message.vy || 0),
+      linearDamping: 0.4,
+    });
+    body.createFixture(planck.Box(width / 2, height / 2), {
+      restitution,
+      friction: 0.1,
+      density: 0.8,
+    });
+    const entry = { body, width, height };
+    physicsBodies.set(message.id, entry);
+    return entry;
+  }
+  if (Math.abs(existing.width - width) > 0.5 || Math.abs(existing.height - height) > 0.5) {
+    for (let fixture = existing.body.getFixtureList(); fixture; fixture = fixture.getNext()) {
+      existing.body.destroyFixture(fixture);
+    }
+    existing.body.createFixture(planck.Box(width / 2, height / 2), {
+      restitution,
+      friction: 0.1,
+      density: 0.8,
+    });
+    existing.width = width;
+    existing.height = height;
+  }
+  return existing;
 }
 
 function drawBubbleAt({ left, centerY, text, font, paddingX, paddingY, minWidth, textColor }) {
@@ -134,80 +230,45 @@ function drawCenteredBubble({ x, y, text, color, font, paddingX, paddingY, minWi
 }
 
 function updateBodies(now) {
-  const ground = canvasHeight - 16;
   const font = '14px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  const world = ensurePhysicsWorld();
+  if (!world) {
+    return;
+  }
+  syncWorldBounds();
   const bodyList = Array.from(bodies.values());
   const metricsMap = new Map();
   for (const body of bodyList) {
-    const last = body.updatedAt || body.createdAt || now;
-    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
-    if (dt > 0) {
-      body.vy += gravity * dt;
-      body.y += body.vy * dt;
-      body.x += (body.vx || 0) * dt;
-      body.vx *= 0.98;
-      body.updatedAt = now;
-    }
     const metrics = getBubbleMetrics(body.text, font, 14, 6, 32);
     metricsMap.set(body.id, metrics);
-    const halfHeight = metrics.height / 2;
-    if (body.y + halfHeight >= ground) {
-      body.y = ground - halfHeight;
-      if (body.vy > 0) {
-        body.vy = -body.vy * restitution;
-        if (Math.abs(body.vy) < 40) {
-          body.vy = 0;
-        }
-      }
-    }
-    const halfWidth = metrics.width / 2;
-    if (body.x - halfWidth < 8) {
-      body.x = halfWidth + 8;
-      body.vx = Math.abs(body.vx || 0);
-    } else if (body.x + halfWidth > canvasWidth - 8) {
-      body.x = canvasWidth - halfWidth - 8;
-      body.vx = -Math.abs(body.vx || 0);
+    ensurePhysicsBody(body, metrics);
+  }
+
+  for (const [id, entry] of physicsBodies.entries()) {
+    if (!bodies.has(id)) {
+      world.destroyBody(entry.body);
+      physicsBodies.delete(id);
     }
   }
 
-  for (let i = 0; i < bodyList.length; i += 1) {
-    const bodyA = bodyList[i];
-    const metricsA = metricsMap.get(bodyA.id);
-    if (!metricsA) {
+  const dt = lastPhysicsStep ? Math.min(0.05, Math.max(0, (now - lastPhysicsStep) / 1000)) : 0;
+  if (dt > 0) {
+    world.step(dt);
+    lastPhysicsStep = now;
+  }
+
+  for (const body of bodyList) {
+    const entry = physicsBodies.get(body.id);
+    if (!entry) {
       continue;
     }
-    const radiusA = Math.max(metricsA.width, metricsA.height) / 2;
-    for (let j = i + 1; j < bodyList.length; j += 1) {
-      const bodyB = bodyList[j];
-      const metricsB = metricsMap.get(bodyB.id);
-      if (!metricsB) {
-        continue;
-      }
-      const radiusB = Math.max(metricsB.width, metricsB.height) / 2;
-      const dx = bodyB.x - bodyA.x;
-      const dy = bodyB.y - bodyA.y;
-      const minDist = radiusA + radiusB;
-      const dist = Math.hypot(dx, dy);
-      if (dist > 0 && dist < minDist) {
-        const nx = dx / dist;
-        const ny = dy / dist;
-        const overlap = (minDist - dist) / 2;
-        bodyA.x -= nx * overlap;
-        bodyA.y -= ny * overlap;
-        bodyB.x += nx * overlap;
-        bodyB.y += ny * overlap;
-        const relVx = (bodyB.vx || 0) - (bodyA.vx || 0);
-        const relVy = (bodyB.vy || 0) - (bodyA.vy || 0);
-        const relVel = relVx * nx + relVy * ny;
-        if (relVel < 0) {
-          const impulse = -(1 + restitution) * relVel * 0.5;
-          bodyA.vx -= impulse * nx;
-          bodyA.vy -= impulse * ny;
-          bodyB.vx += impulse * nx;
-          bodyB.vy += impulse * ny;
-        }
-      }
-    }
+    const position = entry.body.getPosition();
+    const velocity = entry.body.getLinearVelocity();
+    body.x = position.x;
+    body.y = position.y;
+    body.vx = velocity.x;
+    body.vy = velocity.y;
+    body.updatedAt = now;
   }
 }
 
@@ -345,6 +406,10 @@ function connect({ host }) {
     messageInput.value = '';
     players.clear();
     bodies.clear();
+    physicsBodies.clear();
+    physicsWorld = null;
+    boundaryBody = null;
+    lastPhysicsStep = null;
     syncMessageInput();
     ensureAnimation();
   });
