@@ -312,9 +312,6 @@ function handleKeyDown(event) {
 
 window.addEventListener('keydown', handleKeyDown);
 window.addEventListener('blur', () => {
-  if (currentTyping) {
-    currentTyping = '';
-    sendTyping();
-  }
+  // Intentionally keep currentTyping when the tab loses focus.
 });
 `;
