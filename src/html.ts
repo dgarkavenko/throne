@@ -132,6 +132,7 @@ export const html = `<!doctype html>
       </section>
     </main>
 
+    <script src="https://unpkg.com/planck-js@0.3.0/dist/planck.min.js"></script>
     <script>
       ${clientScript}
     </script>
