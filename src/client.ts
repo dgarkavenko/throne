@@ -14,19 +14,21 @@ function updateStatus(message) {
   statusEl.textContent = message;
 }
 
-function initScene() {
+async function initScene() {
   if (!window.PIXI || app) {
     return;
   }
-  app = new PIXI.Application({
+  const appInstance = new PIXI.Application();
+  await appInstance.init({
     width: PHONE_WIDTH,
     height: PHONE_HEIGHT,
-    background: '#0b0e12',
+    background: 0x0b0e12,
     antialias: true,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   });
-  field.appendChild(app.view);
+  app = appInstance;
+  field.appendChild(appInstance.canvas ?? appInstance.view);
 
   emojiLayer = new PIXI.Container();
   emojiLayer.x = 24;
@@ -94,6 +96,6 @@ function connect() {
   });
 }
 
-initScene();
+void initScene();
 connect();
 `;
