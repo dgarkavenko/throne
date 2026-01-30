@@ -226,14 +226,20 @@ function renderPlayers() {
       fontSize: 28,
       fill: player.color || '#f5f5f5',
     });
+    const avatar = (player.emoji || '🪧') + ':';
     const typingText = player.typing ? ' ' + player.typing : '';
-    const text = new PIXI.Text((player.emoji || '🪧') + typingText, style);
-    text.x = 0;
-    text.y = index * 36;
-    emojiLayer.addChild(text);
+    const row = new PIXI.Container();
+    const avatarText = new PIXI.Text(avatar, style);
+    const typingSprite = new PIXI.Text(typingText, style);
+    typingSprite.x = avatarText.width;
+    row.addChild(avatarText);
+    row.addChild(typingSprite);
+    row.x = 0;
+    row.y = index * 36;
+    emojiLayer.addChild(row);
     typingPositions.set(player.id, {
-      x: emojiLayer.x + text.x + text.width / 2,
-      y: emojiLayer.y + text.y + text.height / 2,
+      x: emojiLayer.x + row.x + avatarText.width + typingSprite.width / 2,
+      y: emojiLayer.y + row.y + avatarText.height / 2,
     });
   });
 }
