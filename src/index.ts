@@ -74,78 +74,17 @@ const html = `<!doctype html>
         background: radial-gradient(circle at top left, #1f2937, #0f1115 50%);
         cursor: none;
       }
-      .player {
-        position: absolute;
-        transform: translate(-50%, -50%);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.2rem;
-        pointer-events: none;
-      }
-      .player.self {
-        pointer-events: auto;
-      }
-      .player .emoji {
-        font-size: 2.6rem;
-        filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.35));
-      }
-      .bubble {
-        position: relative;
-        background: #ffffff;
-        border-radius: 999px;
-        padding: 0.25rem 0.5rem;
-        min-width: 6rem;
-        min-height: 1.5rem;
-        border: 2px solid color-mix(in srgb, var(--color, #f97316) 70%, #ffffff);
-        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
-      }
-      .bubble::after {
-        content: '';
-        position: absolute;
-        left: 50%;
-        bottom: -0.4rem;
-        transform: translateX(-50%) rotate(45deg);
-        width: 0.7rem;
-        height: 0.7rem;
-        background: #ffffff;
-        border: 2px solid color-mix(in srgb, var(--color, #f97316) 70%, #ffffff);
-        border-top: none;
-        border-left: none;
-        border-bottom-right-radius: 0.35rem;
-      }
-      .bubble-input {
-        font-size: 0.8rem;
-        border: none;
-        background: transparent;
-        color: var(--color, #f97316);
-        text-align: center;
-        width: 6ch;
-        min-width: 6ch;
-        outline: none;
-        cursor: none;
-      }
-      .player.self .bubble-input {
-        pointer-events: auto;
-      }
-      .player .bubble-input {
-        pointer-events: none;
-      }
-      .message {
-        position: absolute;
-        transform: translate(-50%, -50%);
-        background: #ffffff;
-        color: var(--color, #f97316);
-        padding: 0.35rem 0.75rem;
-        border-radius: 999px;
-        border: 2px solid color-mix(in srgb, var(--color, #f97316) 70%, #ffffff);
-        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
-        font-size: 0.85rem;
-        white-space: nowrap;
+      #field canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
       }
       .hint {
         font-size: 0.85rem;
         opacity: 0.7;
+      }
+      .chat-controls input {
+        min-width: 16rem;
       }
       @media (max-width: 720px) {
         header {
@@ -178,12 +117,19 @@ const html = `<!doctype html>
           <div class="status" id="status">Not connected</div>
           <button id="leave" class="secondary" disabled>Leave</button>
         </div>
+        <div class="controls chat-controls">
+          <input id="message-input" placeholder="Type a message" disabled />
+        </div>
       </header>
-      <section id="field"></section>
+      <section id="field">
+        <canvas id="scene"></canvas>
+      </section>
     </main>
 
     <script>
       const field = document.getElementById('field');
+      const canvas = document.getElementById('scene');
+      const ctx = canvas.getContext('2d');
       const statusEl = document.getElementById('status');
       const roomInput = document.getElementById('room');
       const hostBtn = document.getElementById('host');
@@ -191,17 +137,19 @@ const html = `<!doctype html>
       const leaveBtn = document.getElementById('leave');
       const shareLinkInput = document.getElementById('share-link');
       const copyBtn = document.getElementById('copy');
+      const messageInput = document.getElementById('message-input');
 
       let socket;
       let playerId = null;
       const players = new Map();
       const messages = new Map();
-      const playerElements = new Map();
-      const messageElements = new Map();
       const emojis = ['🐙', '🐳', '🦊', '🦄', '🐢', '🐸', '🐧', '🦋', '🐝', '🐬', '🦜', '🦉'];
       let serverTimeOffset = 0;
       const gravity = 1600;
       let animationFrame = null;
+      let canvasWidth = 0;
+      let canvasHeight = 0;
+      let deviceScale = 1;
 
       function updateShareLink() {
         const room = roomInput.value.trim();
@@ -218,150 +166,118 @@ const html = `<!doctype html>
         statusEl.textContent = message;
       }
 
-      function createPlayerElement(player) {
-        const el = document.createElement('div');
-        el.className = 'player';
-        const bubble = document.createElement('div');
-        bubble.className = 'bubble';
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = ' ';
-        input.maxLength = 48;
-        input.className = 'bubble-input';
-        const emoji = document.createElement('div');
-        emoji.className = 'emoji';
-        bubble.append(input);
-        el.append(bubble, emoji);
-        input.addEventListener('input', () => {
-          if (player.id !== playerId) {
-            return;
-          }
-          send({ type: 'text', text: input.value });
-          updateBubbleSize(input);
-        });
-        input.addEventListener('keydown', (event) => {
-          if (event.key !== 'Enter') {
-            return;
-          }
-          if (player.id !== playerId) {
-            return;
-          }
-          event.preventDefault();
-          const text = input.value.trim();
-          if (text.length > 0) {
-            send({ type: 'drop', text });
-          }
-          input.value = '';
-          send({ type: 'text', text: '' });
-          updateBubbleSize(input);
-        });
-        input.addEventListener('blur', () => {
-          if (player.id === playerId) {
-            requestAnimationFrame(() => input.focus({ preventScroll: true }));
-          }
-        });
-        return el;
-      }
-
-      function updateBubbleSize(input) {
-        const length = Math.max(1, input.value.length + 1);
-        input.style.width = Math.max(6, length) + 'ch';
-      }
-
-      function updatePlayerElement(el, player) {
-        el.style.left = player.x + 'px';
-        el.style.top = player.y + 'px';
-        el.style.setProperty('--color', player.color);
-        el.classList.toggle('self', player.id === playerId);
-        const emoji = el.querySelector('.emoji');
-        if (emoji) {
-          emoji.textContent = player.emoji || emojis[0];
+      function syncMessageInput() {
+        if (!messageInput || !playerId) {
+          return;
         }
-        const input = el.querySelector('input');
-        if (input) {
-          const isSelf = player.id === playerId;
-          input.readOnly = !isSelf;
-          input.tabIndex = isSelf ? 0 : -1;
-          if (!isSelf || document.activeElement !== input) {
-            input.value = player.text || '';
-          }
-          updateBubbleSize(input);
-          if (isSelf && document.activeElement !== input) {
-            input.focus({ preventScroll: true });
-          }
+        const me = players.get(playerId);
+        if (!me) {
+          return;
+        }
+        if (document.activeElement !== messageInput) {
+          messageInput.value = me.text || '';
         }
       }
 
-      function renderPlayers() {
-        const activeIds = new Set(players.keys());
-        for (const player of players.values()) {
-          let el = playerElements.get(player.id);
-          if (!el) {
-            el = createPlayerElement(player);
-            playerElements.set(player.id, el);
-            field.appendChild(el);
-          }
-          updatePlayerElement(el, player);
+      function resizeCanvas() {
+        const rect = field.getBoundingClientRect();
+        const nextWidth = Math.max(1, Math.floor(rect.width));
+        const nextHeight = Math.max(1, Math.floor(rect.height));
+        const nextScale = window.devicePixelRatio || 1;
+        if (nextWidth === canvasWidth && nextHeight === canvasHeight && nextScale === deviceScale) {
+          return;
         }
-        for (const [id, el] of playerElements.entries()) {
-          if (!activeIds.has(id)) {
-            el.remove();
-            playerElements.delete(id);
-          }
-        }
+        canvasWidth = nextWidth;
+        canvasHeight = nextHeight;
+        deviceScale = nextScale;
+        canvas.width = Math.floor(canvasWidth * deviceScale);
+        canvas.height = Math.floor(canvasHeight * deviceScale);
+        ctx.setTransform(deviceScale, 0, 0, deviceScale, 0, 0);
       }
 
-      function createMessageElement(message) {
-        const el = document.createElement('div');
-        el.className = 'message';
-        el.textContent = message.text;
-        return el;
+      function roundedRectPath(context, x, y, width, height, radius) {
+        const r = Math.min(radius, width / 2, height / 2);
+        context.beginPath();
+        context.moveTo(x + r, y);
+        context.lineTo(x + width - r, y);
+        context.quadraticCurveTo(x + width, y, x + width, y + r);
+        context.lineTo(x + width, y + height - r);
+        context.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        context.lineTo(x + r, y + height);
+        context.quadraticCurveTo(x, y + height, x, y + height - r);
+        context.lineTo(x, y + r);
+        context.quadraticCurveTo(x, y, x + r, y);
+        context.closePath();
       }
 
-      function renderMessages() {
-        const activeIds = new Set(messages.keys());
+      function drawBubble({ x, y, text, color, font, paddingX, paddingY }) {
+        ctx.font = font;
+        const metrics = ctx.measureText(text || ' ');
+        const textWidth = metrics.width;
+        const height = Math.max(26, metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent + paddingY * 2);
+        const width = Math.max(96, textWidth + paddingX * 2);
+        const left = x - width / 2;
+        const top = y - height / 2;
+        ctx.fillStyle = '#ffffff';
+        roundedRectPath(ctx, left, top, width, height, height / 2);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, x, y + 0.5);
+        return height;
+      }
+
+      function renderFrame() {
+        resizeCanvas();
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        const now = Date.now() + serverTimeOffset;
+        const ground = canvasHeight - 16;
         for (const message of messages.values()) {
-          let el = messageElements.get(message.id);
-          if (!el) {
-            el = createMessageElement(message);
-            messageElements.set(message.id, el);
-            field.appendChild(el);
-          }
-          el.textContent = message.text;
-          el.style.setProperty('--color', message.color);
+          const age = Math.max(0, (now - message.createdAt) / 1000);
+          const fall = message.y + 0.5 * gravity * age * age;
+          const y = Math.min(fall, ground);
+          drawBubble({
+            x: message.x,
+            y,
+            text: message.text,
+            color: message.color,
+            font: '14px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            paddingX: 14,
+            paddingY: 6,
+          });
         }
-        for (const [id, el] of messageElements.entries()) {
-          if (!activeIds.has(id)) {
-            el.remove();
-            messageElements.delete(id);
-          }
+        for (const player of players.values()) {
+          const emojiSize = 32;
+          const gap = 6;
+          const bubbleY = player.y - emojiSize / 2 - gap - 18;
+          drawBubble({
+            x: player.x,
+            y: bubbleY,
+            text: player.text || '',
+            color: player.color,
+            font: '13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            paddingX: 12,
+            paddingY: 5,
+          });
+          ctx.font =
+            emojiSize +
+            'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(player.emoji || emojis[0], player.x, player.y + emojiSize / 4);
         }
-        ensureAnimation();
+        animationFrame = requestAnimationFrame(renderFrame);
       }
 
       function ensureAnimation() {
         if (animationFrame !== null) {
           return;
         }
-        const tick = () => {
-          const now = Date.now() + serverTimeOffset;
-          const fieldHeight = field.clientHeight;
-          const ground = fieldHeight - 16;
-          for (const message of messages.values()) {
-            const el = messageElements.get(message.id);
-            if (!el) {
-              continue;
-            }
-            const age = Math.max(0, (now - message.createdAt) / 1000);
-            const height = el.offsetHeight || 0;
-            const fall = message.y + 0.5 * gravity * age * age;
-            const y = Math.min(fall, ground - height / 2);
-            el.style.left = message.x + 'px';
-            el.style.top = y + 'px';
-          }
-          animationFrame = requestAnimationFrame(tick);
-        };
-        animationFrame = requestAnimationFrame(tick);
+        animationFrame = requestAnimationFrame(renderFrame);
       }
 
       function send(message) {
@@ -386,6 +302,8 @@ const html = `<!doctype html>
           leaveBtn.disabled = false;
           hostBtn.disabled = true;
           joinBtn.disabled = true;
+          messageInput.disabled = false;
+          messageInput.focus({ preventScroll: true });
           send({ type: 'join' });
         });
 
@@ -404,8 +322,8 @@ const html = `<!doctype html>
             for (const message of payload.messages || []) {
               messages.set(message.id, message);
             }
-            renderPlayers();
-            renderMessages();
+            syncMessageInput();
+            ensureAnimation();
           }
           if (payload.type === 'error') {
             updateStatus(payload.message);
@@ -418,10 +336,12 @@ const html = `<!doctype html>
           leaveBtn.disabled = true;
           hostBtn.disabled = false;
           joinBtn.disabled = false;
+          messageInput.disabled = true;
+          messageInput.value = '';
           players.clear();
           messages.clear();
-          renderPlayers();
-          renderMessages();
+          syncMessageInput();
+          ensureAnimation();
         });
       }
 
@@ -446,6 +366,26 @@ const html = `<!doctype html>
         updateShareLink();
       });
 
+      messageInput.addEventListener('input', () => {
+        if (!playerId) {
+          return;
+        }
+        send({ type: 'text', text: messageInput.value });
+      });
+
+      messageInput.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') {
+          return;
+        }
+        event.preventDefault();
+        const text = messageInput.value.trim();
+        if (text.length > 0) {
+          send({ type: 'drop', text });
+        }
+        messageInput.value = '';
+        send({ type: 'text', text: '' });
+      });
+
       let lastSent = 0;
       field.addEventListener('pointermove', (event) => {
         const now = performance.now();
@@ -458,6 +398,7 @@ const html = `<!doctype html>
       });
 
       window.addEventListener('resize', () => {
+        resizeCanvas();
         if (playerId && players.has(playerId)) {
           const me = players.get(playerId);
           send({ type: 'move', x: me.x, y: me.y });
@@ -473,6 +414,7 @@ const html = `<!doctype html>
       if (roomInput.value.trim()) {
         connect({ host: false });
       }
+      ensureAnimation();
     </script>
   </body>
 </html>`;
