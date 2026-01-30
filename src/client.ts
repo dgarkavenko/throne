@@ -190,21 +190,18 @@ function spawnTextBox(text, color, emoji) {
   const style = new PIXI.TextStyle({
     fontFamily: '"Inter", "Segoe UI", sans-serif',
     fontSize: 22,
-    fill: '#0b0e12',
+    fill: color || '#f5f5f5',
     fontWeight: '600',
     wordWrap: true,
     wordWrapWidth: PHONE_WIDTH - 80,
   });
-  const content = emoji ? emoji + ' ' + trimmed : trimmed;
-  const textSprite = new PIXI.Text(content, style);
+  const textSprite = new PIXI.Text(trimmed, style);
   if (textSprite.anchor?.set) {
     textSprite.anchor.set(0.5);
   }
 
-  const paddingX = 18;
-  const paddingY = 12;
-  const boxWidth = textSprite.width + paddingX * 2;
-  const boxHeight = textSprite.height + paddingY * 2;
+  const boxWidth = textSprite.width;
+  const boxHeight = textSprite.height;
   const x = PHONE_WIDTH / 2 + (Math.random() - 0.5) * 80;
   const y = PHONE_HEIGHT / 4 + (Math.random() - 0.5) * 60;
   const { Bodies, Body, World } = Matter;
@@ -222,10 +219,8 @@ function spawnTextBox(text, color, emoji) {
 
   const container = new PIXI.Container();
   const background = new PIXI.Graphics();
-  const fillColor = parseColor(color, 0xfef6d4);
-  background.roundRect(-boxWidth / 2, -boxHeight / 2, boxWidth, boxHeight, Math.min(18, boxHeight / 2));
-  background.fill({ color: fillColor, alpha: 0.95 });
-  background.stroke({ width: 2, color: 0x0b0e12, alpha: 0.35 });
+  background.rect(-boxWidth / 2, -boxHeight / 2, boxWidth, boxHeight);
+  background.fill({ color: 0x0b0e12, alpha: 1 });
   container.addChild(background);
   textSprite.x = 0;
   textSprite.y = 0;
