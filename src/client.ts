@@ -5,6 +5,7 @@ let currentTyping = '';
 
 const PHONE_WIDTH = 390;
 const PHONE_HEIGHT = 844;
+const COLLIDER_SCALE = 0.95;
 
 let socket;
 let playerId = null;
@@ -137,7 +138,8 @@ function spawnBox(x, y) {
   }
   const size = 24 + Math.random() * 32;
   const { Bodies, Body, World } = Matter;
-  const body = Bodies.rectangle(x, y, size, size, {
+  const colliderSize = size * COLLIDER_SCALE;
+  const body = Bodies.rectangle(x, y, colliderSize, colliderSize, {
     restitution: 0.6,
     friction: 0.3,
     density: 0.002,
@@ -187,7 +189,7 @@ function spawnTextBox(text, color, emoji, spawnPosition) {
   const x = position.x;
   const y = position.y;
   const { Bodies, Body, World } = Matter;
-  const body = Bodies.rectangle(x, y, boxWidth, boxHeight, {
+  const body = Bodies.rectangle(x, y, boxWidth * COLLIDER_SCALE, boxHeight * COLLIDER_SCALE, {
     restitution: 0.5,
     friction: 0.4,
     density: 0.0025,
