@@ -12,6 +12,7 @@ let app = null;
 let emojiLayer = null;
 let physicsEngine = null;
 let physicsBoxes = [];
+const typingPositions = new Map();
 
 function updateStatus(message) {
   statusEl.textContent = message;
@@ -137,7 +138,7 @@ function spawnBox(x, y) {
   physicsBoxes.push({ body, graphic });
 }
 
-function spawnTextBox(text, color, emoji) {
+function spawnTextBox(text, color, emoji, spawnPosition) {
   if (!physicsEngine || !app || !window.Matter || !window.PIXI) {
     return;
   }
@@ -147,7 +148,7 @@ function spawnTextBox(text, color, emoji) {
   }
   const style = new PIXI.TextStyle({
     fontFamily: '"Inter", "Segoe UI", sans-serif',
-    fontSize: 22,
+    fontSize: 28,
     fill: color || '#f5f5f5',
     fontWeight: '600',
     wordWrap: true,
@@ -160,8 +161,9 @@ function spawnTextBox(text, color, emoji) {
 
   const boxWidth = textSprite.width;
   const boxHeight = textSprite.height;
-  const x = PHONE_WIDTH / 2 + (Math.random() - 0.5) * 80;
-  const y = PHONE_HEIGHT / 4 + (Math.random() - 0.5) * 60;
+  const position = spawnPosition || { x: PHONE_WIDTH / 2, y: PHONE_HEIGHT / 4 };
+  const x = position.x;
+  const y = position.y;
   const { Bodies, Body, World } = Matter;
   const body = Bodies.rectangle(x, y, boxWidth, boxHeight, {
     restitution: 0.5,
@@ -169,10 +171,10 @@ function spawnTextBox(text, color, emoji) {
     density: 0.0025,
   });
   Body.setVelocity(body, {
-    x: (Math.random() - 0.5) * 10,
-    y: (Math.random() - 0.5) * 10,
+    x: (Math.random() - 0.5) * 2.5,
+    y: (Math.random() - 0.5) * 2.5,
   });
-  Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.35);
+  Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.12);
   World.add(physicsEngine.world, body);
 
   const container = new PIXI.Container();
@@ -195,6 +197,7 @@ function renderPlayers() {
     return;
   }
   emojiLayer.removeChildren();
+  typingPositions.clear();
   players.forEach((player, index) => {
     const style = new PIXI.TextStyle({
       fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
@@ -206,6 +209,10 @@ function renderPlayers() {
     text.x = 0;
     text.y = index * 36;
     emojiLayer.addChild(text);
+    typingPositions.set(player.id, {
+      x: emojiLayer.x + text.x + text.width / 2,
+      y: emojiLayer.y + text.y + text.height / 2,
+    });
   });
 }
 
@@ -239,7 +246,7 @@ function connect() {
       renderPlayers();
     }
     if (payload.type === 'launch') {
-      spawnTextBox(payload.text || '', payload.color, payload.emoji);
+      spawnTextBox(payload.text || '', payload.color, payload.emoji, typingPositions.get(payload.id));
     }
   });
 

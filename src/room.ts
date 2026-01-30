@@ -143,6 +143,7 @@ export class RoomDurableObject implements DurableObject {
     const payload = JSON.stringify({
       type: 'launch',
       text,
+      id: player.id,
       color: player.color,
       emoji: player.emoji,
     });
