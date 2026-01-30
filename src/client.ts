@@ -270,6 +270,19 @@ function connect() {
       renderPlayers();
       updateSessionTimer();
     }
+    if (payload.type === 'history' && Array.isArray(payload.messages)) {
+      payload.messages.forEach((message) => {
+        if (!message || typeof message.text !== 'string') {
+          return;
+        }
+        const jitter = 40;
+        const spawnPosition = {
+          x: PHONE_WIDTH / 2 + (Math.random() - 0.5) * jitter,
+          y: PHONE_HEIGHT / 4 + (Math.random() - 0.5) * jitter,
+        };
+        spawnTextBox(message.text, message.color, message.emoji, spawnPosition);
+      });
+    }
     if (payload.type === 'launch') {
       spawnTextBox(payload.text || '', payload.color, payload.emoji, typingPositions.get(payload.id));
     }
