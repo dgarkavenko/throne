@@ -214,6 +214,19 @@ function spawnTextBox(text, color, emoji, spawnPosition) {
   physicsBoxes.push({ body, graphic: container });
 }
 
+function getHistorySpawnPosition(index, total) {
+  const clampedTotal = Math.max(1, total);
+  const lowerBound = PHONE_HEIGHT - 140;
+  const upperBound = 140;
+  const progress = clampedTotal === 1 ? 0 : index / (clampedTotal - 1);
+  const y = lowerBound - progress * (lowerBound - upperBound);
+  const jitter = 24;
+  return {
+    x: PHONE_WIDTH / 2 + (Math.random() - 0.5) * jitter,
+    y: y + (Math.random() - 0.5) * jitter,
+  };
+}
+
 function renderPlayers() {
   if (!emojiLayer || !window.PIXI) {
     return;
@@ -271,15 +284,12 @@ function connect() {
       updateSessionTimer();
     }
     if (payload.type === 'history' && Array.isArray(payload.messages)) {
-      payload.messages.forEach((message) => {
+      const totalMessages = payload.messages.length;
+      payload.messages.forEach((message, index) => {
         if (!message || typeof message.text !== 'string') {
           return;
         }
-        const jitter = 40;
-        const spawnPosition = {
-          x: PHONE_WIDTH / 2 + (Math.random() - 0.5) * jitter,
-          y: PHONE_HEIGHT / 4 + (Math.random() - 0.5) * jitter,
-        };
+        const spawnPosition = getHistorySpawnPosition(index, totalMessages);
         spawnTextBox(message.text, message.color, message.emoji, spawnPosition);
       });
     }

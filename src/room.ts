@@ -163,8 +163,8 @@ export class RoomDurableObject implements DurableObject {
     });
 
     this.history.push({ text, color: player.color, emoji: player.emoji });
-    if (this.history.length > 50) {
-      this.history = this.history.slice(-50);
+    if (this.history.length > 100) {
+      this.history = this.history.slice(-100);
     }
 
     for (const socket of this.connections.keys()) {
