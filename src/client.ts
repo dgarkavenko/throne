@@ -226,8 +226,9 @@ function renderPlayers() {
       fontSize: 28,
       fill: player.color || '#f5f5f5',
     });
+    const avatar = (player.emoji || '🪧') + ':';
     const typingText = player.typing ? ' ' + player.typing : '';
-    const text = new PIXI.Text((player.emoji || '🪧') + typingText, style);
+    const text = new PIXI.Text(avatar + typingText, style);
     text.x = 0;
     text.y = index * 36;
     emojiLayer.addChild(text);
