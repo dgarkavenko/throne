@@ -1,5 +1,3 @@
-import { clientScript } from './client';
-
 const styles = `
 :root {
   color-scheme: dark;
@@ -23,6 +21,12 @@ main {
   font-size: 0.95rem;
   letter-spacing: 0.01em;
   opacity: 0.85;
+  text-transform: uppercase;
+}
+.fps {
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  opacity: 0.7;
   text-transform: uppercase;
 }
 #field {
@@ -68,14 +72,13 @@ export const html = `<!doctype html>
   <body>
     <main>
       <div class="session" id="session">Session: --:--</div>
+      <div class="fps" id="fps">FPS: --</div>
       <div id="field"></div>
       <div class="status" id="status">Connecting...</div>
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
-    <script>
-      ${clientScript}
-    </script>
+    <script src="/client.js"></script>
   </body>
 </html>`;

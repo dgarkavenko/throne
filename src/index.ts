@@ -15,6 +15,10 @@ export default {
       });
     }
 
+    if (url.pathname === '/client.js') {
+      return env.ASSETS.fetch(request);
+    }
+
     if (url.pathname.startsWith('/room/')) {
       const roomId = url.pathname.replace('/room/', '').trim();
       if (!roomId) {
@@ -31,4 +35,5 @@ export default {
 
 interface Env {
   ROOMS: DurableObjectNamespace;
+  ASSETS: Fetcher;
 }

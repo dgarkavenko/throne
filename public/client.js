@@ -1,24 +1,60 @@
-export const clientScript = `const field = document.getElementById('field');
+const field = document.getElementById('field');
 const statusEl = document.getElementById('status');
 const sessionEl = document.getElementById('session');
-let currentTyping = '';
+const fpsEl = document.getElementById('fps');
 
 const PHONE_WIDTH = 390;
 const PHONE_HEIGHT = 844;
-const COLLIDER_SCALE = 0.95;
+const COLLIDER_SCALE = 0.9;
 
-let socket;
-let playerId = null;
-let players = [];
-let sessionStart = null;
-let sessionTimerId = null;
-let app = null;
-let emojiLayer = null;
-let physicsEngine = null;
-let physicsBoxes = [];
-const typingPositions = new Map();
+const state = {
+  socket: null,
+  playerId: null,
+  players: [],
+  currentTyping: '',
+  sessionStart: null,
+  sessionTimerId: null,
+  typingPositions: new Map(),
+};
+
+const fpsTracker = {
+  lastSample: performance.now(),
+  frames: 0,
+};
+
+const game = {
+  app: null,
+  engine: null,
+  layers: {
+    world: null,
+    ui: null,
+  },
+  entities: new Set(),
+  addEntity(entity) {
+    this.entities.add(entity);
+    if (entity.onAdd) {
+      entity.onAdd(this);
+    }
+  },
+  removeEntity(entity) {
+    if (entity.destroy) {
+      entity.destroy(this);
+    }
+    this.entities.delete(entity);
+  },
+  update(deltaMs) {
+    this.entities.forEach((entity) => {
+      if (entity.update) {
+        entity.update(deltaMs, this);
+      }
+    });
+  },
+};
 
 function updateStatus(message) {
+  if (!statusEl) {
+    return;
+  }
   statusEl.textContent = message;
 }
 
@@ -34,15 +70,30 @@ function updateSessionTimer() {
   if (!sessionEl) {
     return;
   }
-  if (!sessionStart) {
+  if (!state.sessionStart) {
     sessionEl.textContent = 'Session: --:--';
     return;
   }
-  sessionEl.textContent = formatDuration(Date.now() - sessionStart);
+  sessionEl.textContent = formatDuration(Date.now() - state.sessionStart);
+}
+
+function updateFpsCounter(now) {
+  if (!fpsEl) {
+    return;
+  }
+  fpsTracker.frames += 1;
+  const elapsed = now - fpsTracker.lastSample;
+  if (elapsed < 500) {
+    return;
+  }
+  const fps = Math.round((fpsTracker.frames * 1000) / elapsed);
+  fpsEl.textContent = 'FPS: ' + fps;
+  fpsTracker.frames = 0;
+  fpsTracker.lastSample = now;
 }
 
 async function initScene() {
-  if (!window.PIXI || app) {
+  if (!window.PIXI || game.app) {
     return;
   }
   const appInstance = new PIXI.Application();
@@ -54,17 +105,23 @@ async function initScene() {
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   });
-  app = appInstance;
-  field.appendChild(appInstance.canvas ?? appInstance.view);
+  game.app = appInstance;
+  if (field) {
+    field.appendChild(appInstance.canvas ?? appInstance.view);
+  }
 
-  emojiLayer = new PIXI.Container();
-  emojiLayer.x = 24;
-  emojiLayer.y = 24;
-  app.stage.addChild(emojiLayer);
+  const worldLayer = new PIXI.Container();
+  const uiLayer = new PIXI.Container();
+  uiLayer.x = 24;
+  uiLayer.y = 24;
+  appInstance.stage.addChild(worldLayer);
+  appInstance.stage.addChild(uiLayer);
+  game.layers.world = worldLayer;
+  game.layers.ui = uiLayer;
 
   setupPhysics();
-  bindPhysicsTicker();
-  //enableSpawnOnClick();
+  bindMainLoop();
+  // enableSpawnOnClick();
 
   renderPlayers();
 }
@@ -79,15 +136,14 @@ function parseColor(value, fallback) {
 }
 
 function setupPhysics() {
-  if (!window.Matter || !app) {
+  if (!window.Matter || !game.app) {
     return;
   }
   const { Engine, Bodies, World } = Matter;
   const engine = Engine.create({
     gravity: { x: 0, y: 1 },
   });
-  physicsEngine = engine;
-  physicsBoxes = [];
+  game.engine = engine;
 
   const wallThickness = 120;
   const boundaries = [
@@ -107,37 +163,61 @@ function setupPhysics() {
   World.add(engine.world, boundaries);
 }
 
-function bindPhysicsTicker() {
-  if (!app || !physicsEngine) {
+function bindMainLoop() {
+  if (!game.app || !game.engine) {
     return;
   }
-  app.ticker.add((ticker) => {
-    Matter.Engine.update(physicsEngine, ticker.deltaMS);
-    physicsBoxes.forEach(({ body, graphic }) => {
-      graphic.x = body.position.x;
-      graphic.y = body.position.y;
-      graphic.rotation = body.angle;
-    });
+  game.app.ticker.add((ticker) => {
+    Matter.Engine.update(game.engine, ticker.deltaMS);
+    game.update(ticker.deltaMS);
+    updateFpsCounter(performance.now());
   });
 }
 
 function enableSpawnOnClick() {
-  if (!app) {
+  if (!game.app) {
     return;
   }
-  app.stage.eventMode = 'static';
-  app.stage.hitArea = app.screen;
-  app.stage.on('pointerdown', (event) => {
+  game.app.stage.eventMode = 'static';
+  game.app.stage.hitArea = game.app.screen;
+  game.app.stage.on('pointerdown', (event) => {
     spawnBox(event.global.x, event.global.y);
   });
 }
 
+function createPhysicsEntity(body, display) {
+  if (!game.engine || !game.layers.world) {
+    return null;
+  }
+  Matter.World.add(game.engine.world, body);
+  game.layers.world.addChild(display);
+  const entity = {
+    body,
+    display,
+    update() {
+      display.x = body.position.x;
+      display.y = body.position.y;
+      display.rotation = body.angle;
+    },
+    destroy(currentGame) {
+      if (currentGame.engine) {
+        Matter.World.remove(currentGame.engine.world, body);
+      }
+      if (display.removeFromParent) {
+        display.removeFromParent();
+      }
+    },
+  };
+  game.addEntity(entity);
+  return entity;
+}
+
 function spawnBox(x, y) {
-  if (!physicsEngine || !app || !window.Matter || !window.PIXI) {
+  if (!game.engine || !game.app || !window.Matter || !window.PIXI) {
     return;
   }
   const size = 24 + Math.random() * 32;
-  const { Bodies, Body, World } = Matter;
+  const { Bodies, Body } = Matter;
   const colliderSize = size * COLLIDER_SCALE;
   const body = Bodies.rectangle(x, y, colliderSize, colliderSize, {
     restitution: 0.6,
@@ -149,7 +229,6 @@ function spawnBox(x, y) {
     y: (Math.random() - 0.5) * 12,
   });
   Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.4);
-  World.add(physicsEngine.world, body);
 
   const graphic = new PIXI.Graphics();
   graphic.roundRect(-size / 2, -size / 2, size, size, Math.min(10, size / 3));
@@ -157,13 +236,12 @@ function spawnBox(x, y) {
   graphic.stroke({ width: 2, color: 0x0b0e12, alpha: 0.8 });
   graphic.x = x;
   graphic.y = y;
-  app.stage.addChild(graphic);
 
-  physicsBoxes.push({ body, graphic });
+  createPhysicsEntity(body, graphic);
 }
 
 function spawnTextBox(text, color, emoji, spawnPosition) {
-  if (!physicsEngine || !app || !window.Matter || !window.PIXI) {
+  if (!game.engine || !game.app || !window.Matter || !window.PIXI) {
     return;
   }
   const trimmed = text.trim();
@@ -179,7 +257,7 @@ function spawnTextBox(text, color, emoji, spawnPosition) {
     wordWrapWidth: PHONE_WIDTH - 80,
   });
   const textSprite = new PIXI.Text(trimmed, style);
-  if (textSprite.anchor?.set) {
+  if (textSprite.anchor && textSprite.anchor.set) {
     textSprite.anchor.set(0.5);
   }
 
@@ -188,7 +266,7 @@ function spawnTextBox(text, color, emoji, spawnPosition) {
   const position = spawnPosition || { x: PHONE_WIDTH / 2, y: PHONE_HEIGHT / 4 };
   const x = position.x;
   const y = position.y;
-  const { Bodies, Body, World } = Matter;
+  const { Bodies, Body } = Matter;
   const body = Bodies.rectangle(x, y, boxWidth * COLLIDER_SCALE, boxHeight * COLLIDER_SCALE, {
     restitution: 0.5,
     friction: 0.4,
@@ -199,7 +277,6 @@ function spawnTextBox(text, color, emoji, spawnPosition) {
     y: (Math.random() - 0.5) * 2.5,
   });
   Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.12);
-  World.add(physicsEngine.world, body);
 
   const container = new PIXI.Container();
   const background = new PIXI.Graphics();
@@ -211,9 +288,8 @@ function spawnTextBox(text, color, emoji, spawnPosition) {
   container.addChild(textSprite);
   container.x = x;
   container.y = y;
-  app.stage.addChild(container);
 
-  physicsBoxes.push({ body, graphic: container });
+  createPhysicsEntity(body, container);
 }
 
 function getHistorySpawnPosition(index, total) {
@@ -230,20 +306,21 @@ function getHistorySpawnPosition(index, total) {
 }
 
 function renderPlayers() {
-  if (!emojiLayer || !window.PIXI) {
+  if (!game.layers.ui || !window.PIXI) {
     return;
   }
-  emojiLayer.removeChildren();
-  typingPositions.clear();
-  players.forEach((player, index) => {
+  const uiLayer = game.layers.ui;
+  uiLayer.removeChildren();
+  state.typingPositions.clear();
+  state.players.forEach((player, index) => {
     const style = new PIXI.TextStyle({
       fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
       fontSize: 28,
       fill: player.color || '#f5f5f5',
     });
-    const avatar = (player.emoji || '🪧') + ':';
+    const avatar = (player.emoji || 'ðŸª§') + ':';
     const typingText = player.typing ? ' ' + player.typing : '';
-const row = new PIXI.Container();
+    const row = new PIXI.Container();
     const avatarText = new PIXI.Text(avatar, style);
     const typingSprite = new PIXI.Text(typingText, style);
     typingSprite.x = avatarText.width;
@@ -251,10 +328,10 @@ const row = new PIXI.Container();
     row.addChild(typingSprite);
     row.x = 0;
     row.y = index * 36;
-    emojiLayer.addChild(row);
-    typingPositions.set(player.id, {
-      x: emojiLayer.x + row.x + avatarText.width + typingSprite.width / 2,
-      y: emojiLayer.y + row.y + avatarText.height / 2,
+    uiLayer.addChild(row);
+    state.typingPositions.set(player.id, {
+      x: uiLayer.x + row.x + avatarText.width + typingSprite.width / 2,
+      y: uiLayer.y + row.y + avatarText.height / 2,
     });
   });
 }
@@ -264,29 +341,31 @@ function connect() {
   const roomId = params.get('room') || 'lobby';
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
   const url = protocol + '://' + location.host + '/room/' + roomId;
-  socket = new WebSocket(url);
+  state.socket = new WebSocket(url);
 
   const connectTimeout = setTimeout(() => {
-    if (socket.readyState !== WebSocket.OPEN) {
+    if (state.socket && state.socket.readyState !== WebSocket.OPEN) {
       updateStatus('Unable to connect. Check the server and refresh.');
     }
   }, 4000);
 
-  socket.addEventListener('open', () => {
+  state.socket.addEventListener('open', () => {
     clearTimeout(connectTimeout);
     updateStatus('Connected to room ' + roomId + '.');
     document.body.classList.add('connected');
-    socket.send(JSON.stringify({ type: 'join' }));
+    if (state.socket) {
+      state.socket.send(JSON.stringify({ type: 'join' }));
+    }
   });
 
-  socket.addEventListener('message', (event) => {
+  state.socket.addEventListener('message', (event) => {
     const payload = JSON.parse(event.data);
     if (payload.type === 'welcome') {
-      playerId = payload.id;
+      state.playerId = payload.id;
     }
     if (payload.type === 'state') {
-      players = payload.players || [];
-      sessionStart = typeof payload.sessionStart === 'number' ? payload.sessionStart : null;
+      state.players = payload.players || [];
+      state.sessionStart = typeof payload.sessionStart === 'number' ? payload.sessionStart : null;
       renderPlayers();
       updateSessionTimer();
     }
@@ -301,37 +380,37 @@ function connect() {
       });
     }
     if (payload.type === 'launch') {
-      spawnTextBox(payload.text || '', payload.color, payload.emoji, typingPositions.get(payload.id));
+      spawnTextBox(payload.text || '', payload.color, payload.emoji, state.typingPositions.get(payload.id));
     }
   });
 
-  socket.addEventListener('error', () => {
+  state.socket.addEventListener('error', () => {
     updateStatus('Connection error. Refresh to retry.');
   });
 
-  socket.addEventListener('close', () => {
+  state.socket.addEventListener('close', () => {
     updateStatus('Disconnected. Refresh to reconnect.');
     document.body.classList.remove('connected');
   });
 }
 
 function sendTyping() {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
+  if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
     return;
   }
-  socket.send(
+  state.socket.send(
     JSON.stringify({
       type: 'typing',
-      text: currentTyping,
+      text: state.currentTyping,
     })
   );
 }
 
 function sendLaunch(text) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
+  if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
     return;
   }
-  socket.send(
+  state.socket.send(
     JSON.stringify({
       type: 'launch',
       text,
@@ -341,8 +420,8 @@ function sendLaunch(text) {
 
 void initScene();
 connect();
-if (!sessionTimerId) {
-  sessionTimerId = setInterval(updateSessionTimer, 1000);
+if (!state.sessionTimerId) {
+  state.sessionTimerId = setInterval(updateSessionTimer, 1000);
 }
 updateSessionTimer();
 
@@ -351,20 +430,20 @@ function handleKeyDown(event) {
     return;
   }
   if (event.key === 'Backspace') {
-    currentTyping = currentTyping.slice(0, -1);
+    state.currentTyping = state.currentTyping.slice(0, -1);
     sendTyping();
     return;
   }
   if (event.key === 'Escape' || event.key === 'Enter') {
-    if (event.key === 'Enter' && currentTyping.trim()) {
-      sendLaunch(currentTyping);
+    if (event.key === 'Enter' && state.currentTyping.trim()) {
+      sendLaunch(state.currentTyping);
     }
-    currentTyping = '';
+    state.currentTyping = '';
     sendTyping();
     return;
   }
   if (event.key.length === 1) {
-    currentTyping += event.key;
+    state.currentTyping += event.key;
     sendTyping();
   }
 }
@@ -373,4 +452,3 @@ window.addEventListener('keydown', handleKeyDown);
 window.addEventListener('blur', () => {
   // Intentionally keep currentTyping when the tab loses focus.
 });
-`;
