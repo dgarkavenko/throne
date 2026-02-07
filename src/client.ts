@@ -66,9 +66,23 @@ async function startClient(): Promise<void> {
 
   await engine.init(layout.field);
   const terrainSettings = layout.getTerrainSettings();
-  engine.setVoronoiControls(terrainSettings.pointCount, terrainSettings.spacing, terrainSettings.showGraphs);
+  engine.setVoronoiControls(
+    terrainSettings.pointCount,
+    terrainSettings.spacing,
+    terrainSettings.showGraphs,
+    terrainSettings.seed,
+    terrainSettings.waterLevel,
+    terrainSettings.waterRoughness
+  );
   layout.onTerrainSettingsChange((nextSettings) => {
-    engine.setVoronoiControls(nextSettings.pointCount, nextSettings.spacing, nextSettings.showGraphs);
+    engine.setVoronoiControls(
+      nextSettings.pointCount,
+      nextSettings.spacing,
+      nextSettings.showGraphs,
+      nextSettings.seed,
+      nextSettings.waterLevel,
+      nextSettings.waterRoughness
+    );
   });
 
   engine.start((deltaMs, now) => {

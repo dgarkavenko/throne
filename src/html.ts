@@ -72,6 +72,16 @@ main {
   width: 100%;
   accent-color: #a7c28f;
 }
+.control input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #3f4e6a;
+  border-radius: 6px;
+  background: #0d1422;
+  color: #f5f5f5;
+  font-size: 0.82rem;
+}
 .control.toggle {
   min-width: 180px;
   align-items: center;
@@ -116,11 +126,23 @@ export const html = `<!doctype html>
       <div class="controls">
         <div class="control">
           <label for="terrain-points">Points <span id="terrain-points-value">72</span></label>
-          <input id="terrain-points" type="range" min="64" max="1024" step="1" value="72" />
+          <input id="terrain-points" type="range" min="64" max="2048" step="1" value="72" />
         </div>
         <div class="control">
-          <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">18</span></label>
-          <input id="terrain-spacing" type="range" min="8" max="128" step="1" value="18" />
+          <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">32</span></label>
+          <input id="terrain-spacing" type="range" min="32" max="128" step="1" value="32" />
+        </div>
+        <div class="control">
+          <label for="terrain-seed">Seed</label>
+          <input id="terrain-seed" type="number" min="0" max="4294967295" step="1" value="1337" />
+        </div>
+        <div class="control">
+          <label for="terrain-water-level">Water Level <span id="terrain-water-level-value">0</span></label>
+          <input id="terrain-water-level" type="range" min="-40" max="40" step="1" value="0" />
+        </div>
+        <div class="control">
+          <label for="terrain-water-roughness">Water Roughness <span id="terrain-water-roughness-value">50</span></label>
+          <input id="terrain-water-roughness" type="range" min="0" max="100" step="1" value="50" />
         </div>
         <div class="control toggle">
           <label for="terrain-graphs">

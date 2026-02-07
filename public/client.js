@@ -4,9 +4,14 @@ const sessionEl = document.getElementById('session');
 const fpsEl = document.getElementById('fps');
 const terrainPointsInput = document.getElementById('terrain-points');
 const terrainSpacingInput = document.getElementById('terrain-spacing');
+const terrainSeedInput = document.getElementById('terrain-seed');
+const terrainWaterLevelInput = document.getElementById('terrain-water-level');
+const terrainWaterRoughnessInput = document.getElementById('terrain-water-roughness');
 const terrainGraphsInput = document.getElementById('terrain-graphs');
 const terrainPointsValueEl = document.getElementById('terrain-points-value');
 const terrainSpacingValueEl = document.getElementById('terrain-spacing-value');
+const terrainWaterLevelValueEl = document.getElementById('terrain-water-level-value');
+const terrainWaterRoughnessValueEl = document.getElementById('terrain-water-roughness-value');
 
 const PHONE_WIDTH = 1560;
 const PHONE_HEIGHT = 844;
@@ -29,8 +34,11 @@ const fpsTracker = {
 
 const terrainSettings = {
   pointCount: 72,
-  spacing: 18,
+  spacing: 32,
   showGraphs: false,
+  seed: 1337,
+  waterLevel: 0,
+  waterRoughness: 50,
 };
 
 const game = {
@@ -157,10 +165,16 @@ function clamp(value, min, max) {
 
 function readTerrainSettings() {
   const parsedPointCount = Number.parseInt((terrainPointsInput && terrainPointsInput.value) || '72', 10);
-  const parsedSpacing = Number.parseInt((terrainSpacingInput && terrainSpacingInput.value) || '18', 10);
+  const parsedSpacing = Number.parseInt((terrainSpacingInput && terrainSpacingInput.value) || '32', 10);
+  const parsedSeed = Number.parseInt((terrainSeedInput && terrainSeedInput.value) || '1337', 10);
+  const parsedWaterLevel = Number.parseInt((terrainWaterLevelInput && terrainWaterLevelInput.value) || '0', 10);
+  const parsedWaterRoughness = Number.parseInt((terrainWaterRoughnessInput && terrainWaterRoughnessInput.value) || '50', 10);
   return {
-    pointCount: clamp(Number.isNaN(parsedPointCount) ? 72 : parsedPointCount, 64, 1024),
-    spacing: clamp(Number.isNaN(parsedSpacing) ? 18 : parsedSpacing, 8, 128),
+    pointCount: clamp(Number.isNaN(parsedPointCount) ? 72 : parsedPointCount, 64, 2048),
+    spacing: clamp(Number.isNaN(parsedSpacing) ? 32 : parsedSpacing, 32, 128),
+    seed: clamp(Number.isNaN(parsedSeed) ? 1337 : parsedSeed, 0, 0xffffffff),
+    waterLevel: clamp(Number.isNaN(parsedWaterLevel) ? 0 : parsedWaterLevel, -40, 40),
+    waterRoughness: clamp(Number.isNaN(parsedWaterRoughness) ? 50 : parsedWaterRoughness, 0, 100),
     showGraphs: Boolean(terrainGraphsInput && terrainGraphsInput.checked),
   };
 }
@@ -172,17 +186,35 @@ function syncTerrainControlLabels() {
   if (terrainSpacingValueEl) {
     terrainSpacingValueEl.textContent = String(terrainSettings.spacing);
   }
+  if (terrainWaterLevelValueEl) {
+    terrainWaterLevelValueEl.textContent = String(terrainSettings.waterLevel);
+  }
+  if (terrainWaterRoughnessValueEl) {
+    terrainWaterRoughnessValueEl.textContent = String(terrainSettings.waterRoughness);
+  }
 }
 
 function applyTerrainSettings(nextSettings) {
   terrainSettings.pointCount = nextSettings.pointCount;
   terrainSettings.spacing = nextSettings.spacing;
   terrainSettings.showGraphs = nextSettings.showGraphs;
+  terrainSettings.seed = nextSettings.seed;
+  terrainSettings.waterLevel = nextSettings.waterLevel;
+  terrainSettings.waterRoughness = nextSettings.waterRoughness;
   if (terrainPointsInput) {
     terrainPointsInput.value = String(terrainSettings.pointCount);
   }
   if (terrainSpacingInput) {
     terrainSpacingInput.value = String(terrainSettings.spacing);
+  }
+  if (terrainSeedInput) {
+    terrainSeedInput.value = String(terrainSettings.seed);
+  }
+  if (terrainWaterLevelInput) {
+    terrainWaterLevelInput.value = String(terrainSettings.waterLevel);
+  }
+  if (terrainWaterRoughnessInput) {
+    terrainWaterRoughnessInput.value = String(terrainSettings.waterRoughness);
   }
   if (terrainGraphsInput) {
     terrainGraphsInput.checked = terrainSettings.showGraphs;
@@ -205,47 +237,72 @@ function drawVoronoiTerrain() {
   waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
   terrainLayer.addChild(waterTint);
 
-  const seed = (Math.random() * 0xffffffff) >>> 0;
+  const seed = terrainSettings.seed >>> 0;
   const random = createRng(seed);
   const padding = 28;
   const sites = generatePoissonSites(terrainSettings.pointCount, terrainSettings.spacing, padding, random);
-  const palette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
   const cells = new Array(sites.length);
 
   sites.forEach((site, index) => {
-    const cell = buildVoronoiCell(site, sites);
-    cells[index] = cell;
-    if (cell.length < 3) {
+    cells[index] = buildVoronoiCell(site, sites);
+  });
+
+  const graph = buildMapGraph(sites, cells);
+  assignIslandWater(graph, cells, random, terrainSettings.waterLevel, terrainSettings.waterRoughness);
+  const landPalette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
+
+  graph.centers.forEach((center) => {
+    const cell = cells[center.index];
+    if (!cell || cell.length < 3) {
       return;
     }
+    let fillColor = landPalette[Math.floor(random() * landPalette.length)];
+    let fillAlpha = 0.78;
+    let strokeColor = 0xcadfb8;
+    let strokeAlpha = 0.42;
+
+    if (center.ocean) {
+      fillColor = 0x153961;
+      fillAlpha = 0.88;
+      strokeColor = 0x7aa3ce;
+      strokeAlpha = 0.36;
+    } else if (center.water) {
+      fillColor = 0x2d5f8d;
+      fillAlpha = 0.84;
+      strokeColor = 0x9dc2e6;
+      strokeAlpha = 0.35;
+    } else if (center.coast) {
+      fillColor = 0x8c7b4f;
+      fillAlpha = 0.82;
+      strokeColor = 0xdac38e;
+      strokeAlpha = 0.38;
+    }
+
     const terrain = new PIXI.Graphics();
     terrain.poly(flattenPolygon(cell), true);
-    terrain.fill({ color: palette[Math.floor(random() * palette.length)], alpha: 0.74 });
-    terrain.stroke({ width: 1.2, color: 0xcadfb8, alpha: 0.45 });
+    terrain.fill({ color: fillColor, alpha: fillAlpha });
+    terrain.stroke({ width: 1.2, color: strokeColor, alpha: strokeAlpha });
     terrainLayer.addChild(terrain);
   });
 
   if (terrainSettings.showGraphs) {
-    const graph = buildMapGraph(sites, cells);
     drawGraphOverlay(graph, terrainLayer);
   }
 }
 
 function generatePoissonSites(targetCount, spacing, padding, random) {
   let minDistance = spacing;
-  let clusterLimit = 1.2;
   for (let pass = 0; pass < 6; pass += 1) {
-    const sites = samplePoissonDisc(targetCount, minDistance, padding, random, clusterLimit);
+    const sites = samplePoissonDisc(targetCount, minDistance, padding, random);
     if (sites.length >= targetCount || minDistance <= 4) {
       return sites;
     }
-    minDistance *= 0.86;
-    clusterLimit *= 1.25;
+    minDistance *= 0.88;
   }
-  return samplePoissonDisc(targetCount, Math.max(4, spacing * 0.6), padding, random, 3.4);
+  return samplePoissonDisc(targetCount, Math.max(4, spacing * 0.6), padding, random);
 }
 
-function samplePoissonDisc(targetCount, minDistance, padding, random, clusterLimit) {
+function samplePoissonDisc(targetCount, minDistance, padding, random) {
   const maxAttemptsPerActivePoint = 30;
   const width = PHONE_WIDTH - padding * 2;
   const height = PHONE_HEIGHT - padding * 2;
@@ -263,30 +320,12 @@ function samplePoissonDisc(targetCount, minDistance, padding, random, clusterLim
   const centerY = PHONE_HEIGHT / 2;
   const clusterCount = 3 + Math.floor(random() * 3);
   const anchorRingRadius = Math.min(width, height) * 0.18;
-  const clusterRadiusX = width * 0.24;
-  const clusterRadiusY = height * 0.26;
   const clusterAnchors = [];
 
   const toGridX = (x) => Math.floor((x - padding) / cellSize);
   const toGridY = (y) => Math.floor((y - padding) / cellSize);
   const isInBounds = (point) =>
     point.x >= padding && point.x <= PHONE_WIDTH - padding && point.y >= padding && point.y <= PHONE_HEIGHT - padding;
-  const isInClusterBounds = (point) => {
-    let bestMetric = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < clusterAnchors.length; i += 1) {
-      const anchor = clusterAnchors[i];
-      const dx = (point.x - anchor.x) / clusterRadiusX;
-      const dy = (point.y - anchor.y) / clusterRadiusY;
-      const metric = dx * dx + dy * dy;
-      if (metric < bestMetric) {
-        bestMetric = metric;
-      }
-    }
-    if (!Number.isFinite(bestMetric)) {
-      return true;
-    }
-    return bestMetric <= clusterLimit;
-  };
 
   const registerPoint = (point) => {
     points.push(point);
@@ -298,7 +337,7 @@ function samplePoissonDisc(targetCount, minDistance, padding, random, clusterLim
   };
 
   const isFarEnough = (point) => {
-    if (!isInBounds(point) || !isInClusterBounds(point)) {
+    if (!isInBounds(point)) {
       return false;
     }
     const gx = clamp(toGridX(point.x), 0, gridWidth - 1);
@@ -335,8 +374,20 @@ function samplePoissonDisc(targetCount, minDistance, padding, random, clusterLim
     });
   }
 
-  for (let i = 0; i < clusterAnchors.length && points.length < targetCount; i += 1) {
-    const seedPoint = clusterAnchors[i];
+  const coverageAnchors = [
+    { x: padding, y: padding },
+    { x: PHONE_WIDTH / 2, y: padding },
+    { x: PHONE_WIDTH - padding, y: padding },
+    { x: padding, y: PHONE_HEIGHT / 2 },
+    { x: PHONE_WIDTH - padding, y: PHONE_HEIGHT / 2 },
+    { x: padding, y: PHONE_HEIGHT - padding },
+    { x: PHONE_WIDTH / 2, y: PHONE_HEIGHT - padding },
+    { x: PHONE_WIDTH - padding, y: PHONE_HEIGHT - padding },
+  ];
+
+  const seedAnchors = clusterAnchors.concat(coverageAnchors);
+  for (let i = 0; i < seedAnchors.length && points.length < targetCount; i += 1) {
+    const seedPoint = seedAnchors[i];
     if (isFarEnough(seedPoint)) {
       registerPoint(seedPoint);
     }
@@ -473,6 +524,9 @@ function buildMapGraph(sites, cells) {
     corners: [],
     neighbors: [],
     borders: [],
+    water: false,
+    ocean: false,
+    coast: false,
   }));
   const corners = [];
   const edges = [];
@@ -496,6 +550,9 @@ function buildMapGraph(sites, cells) {
       centers: [],
       adjacent: [],
       protrudes: [],
+      water: false,
+      ocean: false,
+      coast: false,
     });
     cornerLookup.set(key, index);
     return index;
@@ -565,6 +622,102 @@ function buildMapGraph(sites, cells) {
   });
 
   return { centers, corners, edges };
+}
+
+function assignIslandWater(graph, cells, random, waterLevel, waterRoughness) {
+  const width = PHONE_WIDTH;
+  const height = PHONE_HEIGHT;
+  const normalizedWaterLevel = clamp(waterLevel, -40, 40) / 40;
+  const normalizedRoughness = clamp(waterRoughness, 0, 100) / 100;
+  const bumps = 3 + Math.floor(normalizedRoughness * 7) + Math.floor(random() * 3);
+  const startAngle = random() * Math.PI * 2;
+  const borderEpsilon = 1;
+  const baseRadius = 0.74 - normalizedWaterLevel * 0.18;
+  const primaryWaveAmplitude = 0.06 + normalizedRoughness * 0.14;
+  const secondaryWaveAmplitude = 0.03 + normalizedRoughness * 0.1;
+
+  const islandShape = (point) => {
+    const nx = (point.x / width) * 2 - 1;
+    const ny = (point.y / height) * 2 - 1;
+    const angle = Math.atan2(ny, nx);
+    const length = 0.5 * (Math.max(Math.abs(nx), Math.abs(ny)) + Math.hypot(nx, ny));
+    const radius = clamp(
+      baseRadius +
+        primaryWaveAmplitude * Math.sin(startAngle + bumps * angle + Math.cos((bumps + 2) * angle)) +
+        secondaryWaveAmplitude * Math.sin(startAngle * 0.7 + (bumps + 3) * angle),
+      0.16,
+      0.96
+    );
+    return length < radius;
+  };
+
+  const touchesBorder = (centerIndex) => {
+    const cell = cells[centerIndex];
+    if (!cell || cell.length === 0) {
+      return true;
+    }
+    return cell.some(
+      (point) =>
+        point.x <= borderEpsilon ||
+        point.x >= width - borderEpsilon ||
+        point.y <= borderEpsilon ||
+        point.y >= height - borderEpsilon
+    );
+  };
+
+  graph.centers.forEach((center) => {
+    center.water = touchesBorder(center.index) || !islandShape(center.point);
+    center.ocean = false;
+    center.coast = false;
+  });
+
+  const queue = [];
+  graph.centers.forEach((center) => {
+    if (center.water && touchesBorder(center.index)) {
+      center.ocean = true;
+      queue.push(center.index);
+    }
+  });
+
+  for (let q = 0; q < queue.length; q += 1) {
+    const center = graph.centers[queue[q]];
+    for (let i = 0; i < center.neighbors.length; i += 1) {
+      const neighbor = graph.centers[center.neighbors[i]];
+      if (neighbor.water && !neighbor.ocean) {
+        neighbor.ocean = true;
+        queue.push(neighbor.index);
+      }
+    }
+  }
+
+  graph.centers.forEach((center) => {
+    if (!center.water) {
+      center.coast = center.neighbors.some((neighborIndex) => graph.centers[neighborIndex].ocean);
+    }
+  });
+
+  graph.corners.forEach((corner) => {
+    if (corner.centers.length === 0) {
+      corner.water = true;
+      corner.ocean = true;
+      corner.coast = false;
+      return;
+    }
+    let waterCount = 0;
+    let oceanCount = 0;
+    for (let i = 0; i < corner.centers.length; i += 1) {
+      const center = graph.centers[corner.centers[i]];
+      if (center.water) {
+        waterCount += 1;
+      }
+      if (center.ocean) {
+        oceanCount += 1;
+      }
+    }
+    corner.water = waterCount === corner.centers.length;
+    corner.ocean = oceanCount === corner.centers.length;
+    corner.coast = waterCount > 0 && waterCount < corner.centers.length;
+  });
 }
 
 function drawGraphOverlay(graph, terrainLayer) {
@@ -920,6 +1073,21 @@ if (terrainPointsInput) {
 }
 if (terrainSpacingInput) {
   terrainSpacingInput.addEventListener('input', () => {
+    applyTerrainSettings(readTerrainSettings());
+  });
+}
+if (terrainSeedInput) {
+  terrainSeedInput.addEventListener('change', () => {
+    applyTerrainSettings(readTerrainSettings());
+  });
+}
+if (terrainWaterLevelInput) {
+  terrainWaterLevelInput.addEventListener('input', () => {
+    applyTerrainSettings(readTerrainSettings());
+  });
+}
+if (terrainWaterRoughnessInput) {
+  terrainWaterRoughnessInput.addEventListener('input', () => {
     applyTerrainSettings(readTerrainSettings());
   });
 }

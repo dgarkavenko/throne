@@ -1,11 +1,20 @@
+type TerrainSettings = {
+  pointCount: number;
+  spacing: number;
+  showGraphs: boolean;
+  seed: number;
+  waterLevel: number;
+  waterRoughness: number;
+};
+
 type PageLayout = {
   field: HTMLElement | null;
   setStatus: (message: string) => void;
   setSessionElapsed: (elapsedMs: number | null) => void;
   setFps: (fps: number | null) => void;
   setConnected: (isConnected: boolean) => void;
-  getTerrainSettings: () => { pointCount: number; spacing: number; showGraphs: boolean };
-  onTerrainSettingsChange: (onChange: (settings: { pointCount: number; spacing: number; showGraphs: boolean }) => void) => void;
+  getTerrainSettings: () => TerrainSettings;
+  onTerrainSettingsChange: (onChange: (settings: TerrainSettings) => void) => void;
 };
 
 function formatDuration(ms: number): string {
@@ -23,17 +32,29 @@ export function createPageLayout(): PageLayout {
   const fpsEl = document.getElementById('fps');
   const terrainPointsInput = document.getElementById('terrain-points') as HTMLInputElement | null;
   const terrainSpacingInput = document.getElementById('terrain-spacing') as HTMLInputElement | null;
+  const terrainSeedInput = document.getElementById('terrain-seed') as HTMLInputElement | null;
+  const terrainWaterLevelInput = document.getElementById('terrain-water-level') as HTMLInputElement | null;
+  const terrainWaterRoughnessInput = document.getElementById('terrain-water-roughness') as HTMLInputElement | null;
   const terrainGraphsInput = document.getElementById('terrain-graphs') as HTMLInputElement | null;
   const terrainPointsValue = document.getElementById('terrain-points-value');
   const terrainSpacingValue = document.getElementById('terrain-spacing-value');
+  const terrainWaterLevelValue = document.getElementById('terrain-water-level-value');
+  const terrainWaterRoughnessValue = document.getElementById('terrain-water-roughness-value');
 
   const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
+  const parseIntWithFallback = (value: string | undefined, fallback: number): number => {
+    const parsed = Number.parseInt(value || '', 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
 
-  const readTerrainSettings = (): { pointCount: number; spacing: number; showGraphs: boolean } => {
-    const pointCount = clamp(Number.parseInt(terrainPointsInput?.value || '72', 10), 64, 1024);
-    const spacing = clamp(Number.parseInt(terrainSpacingInput?.value || '18', 10), 8, 128);
+  const readTerrainSettings = (): TerrainSettings => {
+    const pointCount = clamp(parseIntWithFallback(terrainPointsInput?.value, 72), 64, 2048);
+    const spacing = clamp(parseIntWithFallback(terrainSpacingInput?.value, 32), 32, 128);
+    const seed = clamp(parseIntWithFallback(terrainSeedInput?.value, 1337), 0, 0xffffffff);
+    const waterLevel = clamp(parseIntWithFallback(terrainWaterLevelInput?.value, 0), -40, 40);
+    const waterRoughness = clamp(parseIntWithFallback(terrainWaterRoughnessInput?.value, 50), 0, 100);
     const showGraphs = Boolean(terrainGraphsInput?.checked);
-    return { pointCount, spacing, showGraphs };
+    return { pointCount, spacing, showGraphs, seed, waterLevel, waterRoughness };
   };
 
   const syncTerrainLabels = (): void => {
@@ -43,6 +64,12 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainSpacingValue) {
       terrainSpacingValue.textContent = settings.spacing.toString();
+    }
+    if (terrainWaterLevelValue) {
+      terrainWaterLevelValue.textContent = settings.waterLevel.toString();
+    }
+    if (terrainWaterRoughnessValue) {
+      terrainWaterRoughnessValue.textContent = settings.waterRoughness.toString();
     }
   };
 
@@ -89,6 +116,9 @@ export function createPageLayout(): PageLayout {
       };
       terrainPointsInput?.addEventListener('input', notify);
       terrainSpacingInput?.addEventListener('input', notify);
+      terrainSeedInput?.addEventListener('change', notify);
+      terrainWaterLevelInput?.addEventListener('input', notify);
+      terrainWaterRoughnessInput?.addEventListener('input', notify);
       terrainGraphsInput?.addEventListener('change', notify);
     },
   };

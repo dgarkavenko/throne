@@ -22,6 +22,9 @@ type TerrainControls = {
   pointCount: number;
   spacing: number;
   showGraphs: boolean;
+  seed: number;
+  waterLevel: number;
+  waterRoughness: number;
 };
 
 type GraphCenter = {
@@ -30,6 +33,9 @@ type GraphCenter = {
   corners: number[];
   neighbors: number[];
   borders: number[];
+  water: boolean;
+  ocean: boolean;
+  coast: boolean;
 };
 
 type GraphCorner = {
@@ -38,6 +44,9 @@ type GraphCorner = {
   centers: number[];
   adjacent: number[];
   protrudes: number[];
+  water: boolean;
+  ocean: boolean;
+  coast: boolean;
 };
 
 type GraphEdge = {
@@ -66,8 +75,11 @@ export class GameEngine {
   private readonly config: GameConfig;
   private terrainControls: TerrainControls = {
     pointCount: 72,
-    spacing: 18,
+    spacing: 32,
     showGraphs: false,
+    seed: 1337,
+    waterLevel: 0,
+    waterRoughness: 50,
   };
 
   constructor(config: GameConfig) {
@@ -108,11 +120,22 @@ export class GameEngine {
     this.setupPhysics();
   }
 
-  setVoronoiControls(pointCount: number, spacing: number, showGraphs: boolean): void {
+  setVoronoiControls(
+    pointCount: number,
+    spacing: number,
+    showGraphs: boolean,
+    seed: number,
+    waterLevel: number,
+    waterRoughness: number
+  ): void {
+    const safeValue = (value: number, fallback: number): number => (Number.isFinite(value) ? value : fallback);
     this.terrainControls = {
-      pointCount: this.clamp(Math.round(pointCount), 64, 1024),
-      spacing: this.clamp(Math.round(spacing), 8, 128),
+      pointCount: this.clamp(Math.round(safeValue(pointCount, 72)), 64, 2048),
+      spacing: this.clamp(Math.round(safeValue(spacing, 32)), 32, 128),
       showGraphs,
+      seed: this.clamp(Math.floor(safeValue(seed, 1337)), 0, 0xffffffff),
+      waterLevel: this.clamp(Math.round(safeValue(waterLevel, 0)), -40, 40),
+      waterRoughness: this.clamp(Math.round(safeValue(waterRoughness, 50)), 0, 100),
     };
     this.drawVoronoiTerrain();
   }
@@ -275,7 +298,7 @@ export class GameEngine {
     waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
     terrainLayer.addChild(waterTint);
 
-    const seed = (Math.random() * 0xffffffff) >>> 0;
+    const seed = this.terrainControls.seed >>> 0;
     const random = this.createRng(seed);
     const padding = 28;
     const sites = this.generatePoissonSites(
@@ -284,49 +307,73 @@ export class GameEngine {
       padding,
       random
     );
-    const palette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
     const cells: Vec2[][] = new Array(sites.length);
-
     sites.forEach((site, index) => {
-      const cell = this.buildVoronoiCell(site, sites);
-      cells[index] = cell;
-      if (cell.length < 3) {
+      cells[index] = this.buildVoronoiCell(site, sites);
+    });
+
+    const graph = this.buildMapGraph(sites, cells);
+    this.assignIslandWater(
+      graph,
+      cells,
+      random,
+      this.terrainControls.waterLevel,
+      this.terrainControls.waterRoughness
+    );
+    const landPalette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
+
+    graph.centers.forEach((center) => {
+      const cell = cells[center.index];
+      if (!cell || cell.length < 3) {
         return;
       }
+      let fillColor = landPalette[Math.floor(random() * landPalette.length)];
+      let fillAlpha = 0.78;
+      let strokeColor = 0xcadfb8;
+      let strokeAlpha = 0.42;
+
+      if (center.ocean) {
+        fillColor = 0x153961;
+        fillAlpha = 0.88;
+        strokeColor = 0x7aa3ce;
+        strokeAlpha = 0.36;
+      } else if (center.water) {
+        fillColor = 0x2d5f8d;
+        fillAlpha = 0.84;
+        strokeColor = 0x9dc2e6;
+        strokeAlpha = 0.35;
+      } else if (center.coast) {
+        fillColor = 0x8c7b4f;
+        fillAlpha = 0.82;
+        strokeColor = 0xdac38e;
+        strokeAlpha = 0.38;
+      }
+
       const terrain = new window.PIXI.Graphics();
       terrain.poly(this.flattenPolygon(cell), true);
-      terrain.fill({ color: palette[Math.floor(random() * palette.length)], alpha: 0.74 });
-      terrain.stroke({ width: 1.2, color: 0xcadfb8, alpha: 0.45 });
+      terrain.fill({ color: fillColor, alpha: fillAlpha });
+      terrain.stroke({ width: 1.2, color: strokeColor, alpha: strokeAlpha });
       terrainLayer.addChild(terrain);
     });
 
     if (this.terrainControls.showGraphs) {
-      const graph = this.buildMapGraph(sites, cells);
       this.drawGraphOverlay(graph, terrainLayer);
     }
   }
 
   private generatePoissonSites(targetCount: number, spacing: number, padding: number, random: () => number): Vec2[] {
     let minDistance = spacing;
-    let clusterLimit = 1.2;
     for (let pass = 0; pass < 6; pass += 1) {
-      const sites = this.samplePoissonDisc(targetCount, minDistance, padding, random, clusterLimit);
+      const sites = this.samplePoissonDisc(targetCount, minDistance, padding, random);
       if (sites.length >= targetCount || minDistance <= 4) {
         return sites;
       }
-      minDistance *= 0.86;
-      clusterLimit *= 1.25;
+      minDistance *= 0.88;
     }
-    return this.samplePoissonDisc(targetCount, Math.max(4, spacing * 0.6), padding, random, 3.4);
+    return this.samplePoissonDisc(targetCount, Math.max(4, spacing * 0.6), padding, random);
   }
 
-  private samplePoissonDisc(
-    targetCount: number,
-    minDistance: number,
-    padding: number,
-    random: () => number,
-    clusterLimit: number
-  ): Vec2[] {
+  private samplePoissonDisc(targetCount: number, minDistance: number, padding: number, random: () => number): Vec2[] {
     const maxAttemptsPerActivePoint = 30;
     const width = this.config.width - padding * 2;
     const height = this.config.height - padding * 2;
@@ -344,8 +391,6 @@ export class GameEngine {
     const centerY = this.config.height / 2;
     const clusterCount = 3 + Math.floor(random() * 3);
     const anchorRingRadius = Math.min(width, height) * 0.18;
-    const clusterRadiusX = width * 0.24;
-    const clusterRadiusY = height * 0.26;
     const clusterAnchors: Vec2[] = [];
 
     const toGridX = (x: number): number => Math.floor((x - padding) / cellSize);
@@ -355,22 +400,6 @@ export class GameEngine {
       point.x <= this.config.width - padding &&
       point.y >= padding &&
       point.y <= this.config.height - padding;
-    const isInClusterBounds = (point: Vec2): boolean => {
-      let bestMetric = Number.POSITIVE_INFINITY;
-      for (let i = 0; i < clusterAnchors.length; i += 1) {
-        const anchor = clusterAnchors[i];
-        const dx = (point.x - anchor.x) / clusterRadiusX;
-        const dy = (point.y - anchor.y) / clusterRadiusY;
-        const metric = dx * dx + dy * dy;
-        if (metric < bestMetric) {
-          bestMetric = metric;
-        }
-      }
-      if (!Number.isFinite(bestMetric)) {
-        return true;
-      }
-      return bestMetric <= clusterLimit;
-    };
 
     const registerPoint = (point: Vec2): void => {
       points.push(point);
@@ -382,7 +411,7 @@ export class GameEngine {
     };
 
     const isFarEnough = (point: Vec2): boolean => {
-      if (!isInBounds(point) || !isInClusterBounds(point)) {
+      if (!isInBounds(point)) {
         return false;
       }
       const gx = this.clamp(toGridX(point.x), 0, gridWidth - 1);
@@ -419,8 +448,20 @@ export class GameEngine {
       });
     }
 
-    for (let i = 0; i < clusterAnchors.length && points.length < targetCount; i += 1) {
-      const seedPoint = clusterAnchors[i];
+    const coverageAnchors: Vec2[] = [
+      { x: padding, y: padding },
+      { x: this.config.width / 2, y: padding },
+      { x: this.config.width - padding, y: padding },
+      { x: padding, y: this.config.height / 2 },
+      { x: this.config.width - padding, y: this.config.height / 2 },
+      { x: padding, y: this.config.height - padding },
+      { x: this.config.width / 2, y: this.config.height - padding },
+      { x: this.config.width - padding, y: this.config.height - padding },
+    ];
+
+    const seedAnchors = clusterAnchors.concat(coverageAnchors);
+    for (let i = 0; i < seedAnchors.length && points.length < targetCount; i += 1) {
+      const seedPoint = seedAnchors[i];
       if (isFarEnough(seedPoint)) {
         registerPoint(seedPoint);
       }
@@ -566,6 +607,9 @@ export class GameEngine {
       corners: [],
       neighbors: [],
       borders: [],
+      water: false,
+      ocean: false,
+      coast: false,
     }));
     const corners: GraphCorner[] = [];
     const edges: GraphEdge[] = [];
@@ -589,6 +633,9 @@ export class GameEngine {
         centers: [],
         adjacent: [],
         protrudes: [],
+        water: false,
+        ocean: false,
+        coast: false,
       });
       cornerLookup.set(key, index);
       return index;
@@ -656,6 +703,108 @@ export class GameEngine {
     });
 
     return { centers, corners, edges };
+  }
+
+  private assignIslandWater(
+    graph: MapGraph,
+    cells: Vec2[][],
+    random: () => number,
+    waterLevel: number,
+    waterRoughness: number
+  ): void {
+    const width = this.config.width;
+    const height = this.config.height;
+    const normalizedWaterLevel = this.clamp(waterLevel, -40, 40) / 40;
+    const normalizedRoughness = this.clamp(waterRoughness, 0, 100) / 100;
+    const bumps = 3 + Math.floor(normalizedRoughness * 7) + Math.floor(random() * 3);
+    const startAngle = random() * Math.PI * 2;
+    const borderEpsilon = 1;
+    const baseRadius = 0.74 - normalizedWaterLevel * 0.18;
+    const primaryWaveAmplitude = 0.06 + normalizedRoughness * 0.14;
+    const secondaryWaveAmplitude = 0.03 + normalizedRoughness * 0.1;
+
+    const islandShape = (point: Vec2): boolean => {
+      const nx = (point.x / width) * 2 - 1;
+      const ny = (point.y / height) * 2 - 1;
+      const angle = Math.atan2(ny, nx);
+      const length = 0.5 * (Math.max(Math.abs(nx), Math.abs(ny)) + Math.hypot(nx, ny));
+      const radius = this.clamp(
+        baseRadius +
+          primaryWaveAmplitude * Math.sin(startAngle + bumps * angle + Math.cos((bumps + 2) * angle)) +
+          secondaryWaveAmplitude * Math.sin(startAngle * 0.7 + (bumps + 3) * angle),
+        0.16,
+        0.96
+      );
+      return length < radius;
+    };
+
+    const touchesBorder = (centerIndex: number): boolean => {
+      const cell = cells[centerIndex];
+      if (!cell || cell.length === 0) {
+        return true;
+      }
+      return cell.some(
+        (point) =>
+          point.x <= borderEpsilon ||
+          point.x >= width - borderEpsilon ||
+          point.y <= borderEpsilon ||
+          point.y >= height - borderEpsilon
+      );
+    };
+
+    graph.centers.forEach((center) => {
+      center.water = touchesBorder(center.index) || !islandShape(center.point);
+      center.ocean = false;
+      center.coast = false;
+    });
+
+    const queue: number[] = [];
+    graph.centers.forEach((center) => {
+      if (center.water && touchesBorder(center.index)) {
+        center.ocean = true;
+        queue.push(center.index);
+      }
+    });
+
+    for (let q = 0; q < queue.length; q += 1) {
+      const center = graph.centers[queue[q]];
+      for (let i = 0; i < center.neighbors.length; i += 1) {
+        const neighbor = graph.centers[center.neighbors[i]];
+        if (neighbor.water && !neighbor.ocean) {
+          neighbor.ocean = true;
+          queue.push(neighbor.index);
+        }
+      }
+    }
+
+    graph.centers.forEach((center) => {
+      if (!center.water) {
+        center.coast = center.neighbors.some((neighborIndex) => graph.centers[neighborIndex].ocean);
+      }
+    });
+
+    graph.corners.forEach((corner) => {
+      if (corner.centers.length === 0) {
+        corner.water = true;
+        corner.ocean = true;
+        corner.coast = false;
+        return;
+      }
+      let waterCount = 0;
+      let oceanCount = 0;
+      for (let i = 0; i < corner.centers.length; i += 1) {
+        const center = graph.centers[corner.centers[i]];
+        if (center.water) {
+          waterCount += 1;
+        }
+        if (center.ocean) {
+          oceanCount += 1;
+        }
+      }
+      corner.water = waterCount === corner.centers.length;
+      corner.ocean = oceanCount === corner.centers.length;
+      corner.coast = waterCount > 0 && waterCount < corner.centers.length;
+    });
   }
 
   private drawGraphOverlay(graph: MapGraph, terrainLayer: any): void {
