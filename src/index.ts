@@ -15,7 +15,15 @@ export default {
       });
     }
 
-    if (url.pathname === '/client.js') {
+    if (url.pathname === '/client.js' || url.pathname.startsWith('/client/')) {
+      if (url.pathname.startsWith('/client/')) {
+        const lastSegment = url.pathname.split('/').at(-1) ?? '';
+        if (lastSegment && !lastSegment.includes('.')) {
+          const assetUrl = new URL(request.url);
+          assetUrl.pathname = `${url.pathname}.js`;
+          return env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+        }
+      }
       return env.ASSETS.fetch(request);
     }
 

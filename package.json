@@ -5,6 +5,10 @@
 	"scripts": {
 		"build:client": "tsc -p tsconfig.client.json",
 		"dev:client": "tsc -p tsconfig.client.json --watch",
+		"predev": "npm run build:client",
+		"predev:standalone": "npm run build:client",
+		"prestart": "npm run build:client",
+		"predeploy": "npm run build:client",
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"dev:standalone": "wrangler dev --local",
