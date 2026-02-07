@@ -2,13 +2,11 @@ const field = document.getElementById('field');
 const statusEl = document.getElementById('status');
 const sessionEl = document.getElementById('session');
 const fpsEl = document.getElementById('fps');
-const terrainPointsInput = document.getElementById('terrain-points');
 const terrainSpacingInput = document.getElementById('terrain-spacing');
 const terrainSeedInput = document.getElementById('terrain-seed');
 const terrainWaterLevelInput = document.getElementById('terrain-water-level');
 const terrainWaterRoughnessInput = document.getElementById('terrain-water-roughness');
 const terrainGraphsInput = document.getElementById('terrain-graphs');
-const terrainPointsValueEl = document.getElementById('terrain-points-value');
 const terrainSpacingValueEl = document.getElementById('terrain-spacing-value');
 const terrainWaterLevelValueEl = document.getElementById('terrain-water-level-value');
 const terrainWaterRoughnessValueEl = document.getElementById('terrain-water-roughness-value');
@@ -33,7 +31,6 @@ const fpsTracker = {
 };
 
 const terrainSettings = {
-  pointCount: 72,
   spacing: 32,
   showGraphs: false,
   seed: 1337,
@@ -164,13 +161,11 @@ function clamp(value, min, max) {
 }
 
 function readTerrainSettings() {
-  const parsedPointCount = Number.parseInt((terrainPointsInput && terrainPointsInput.value) || '72', 10);
   const parsedSpacing = Number.parseInt((terrainSpacingInput && terrainSpacingInput.value) || '32', 10);
   const parsedSeed = Number.parseInt((terrainSeedInput && terrainSeedInput.value) || '1337', 10);
   const parsedWaterLevel = Number.parseInt((terrainWaterLevelInput && terrainWaterLevelInput.value) || '0', 10);
   const parsedWaterRoughness = Number.parseInt((terrainWaterRoughnessInput && terrainWaterRoughnessInput.value) || '50', 10);
   return {
-    pointCount: clamp(Number.isNaN(parsedPointCount) ? 72 : parsedPointCount, 64, 2048),
     spacing: clamp(Number.isNaN(parsedSpacing) ? 32 : parsedSpacing, 32, 128),
     seed: clamp(Number.isNaN(parsedSeed) ? 1337 : parsedSeed, 0, 0xffffffff),
     waterLevel: clamp(Number.isNaN(parsedWaterLevel) ? 0 : parsedWaterLevel, -40, 40),
@@ -180,9 +175,6 @@ function readTerrainSettings() {
 }
 
 function syncTerrainControlLabels() {
-  if (terrainPointsValueEl) {
-    terrainPointsValueEl.textContent = String(terrainSettings.pointCount);
-  }
   if (terrainSpacingValueEl) {
     terrainSpacingValueEl.textContent = String(terrainSettings.spacing);
   }
@@ -195,15 +187,11 @@ function syncTerrainControlLabels() {
 }
 
 function applyTerrainSettings(nextSettings) {
-  terrainSettings.pointCount = nextSettings.pointCount;
   terrainSettings.spacing = nextSettings.spacing;
   terrainSettings.showGraphs = nextSettings.showGraphs;
   terrainSettings.seed = nextSettings.seed;
   terrainSettings.waterLevel = nextSettings.waterLevel;
   terrainSettings.waterRoughness = nextSettings.waterRoughness;
-  if (terrainPointsInput) {
-    terrainPointsInput.value = String(terrainSettings.pointCount);
-  }
   if (terrainSpacingInput) {
     terrainSpacingInput.value = String(terrainSettings.spacing);
   }
@@ -239,8 +227,8 @@ function drawVoronoiTerrain() {
 
   const seed = terrainSettings.seed >>> 0;
   const random = createRng(seed);
-  const padding = 28;
-  const sites = generatePoissonSites(terrainSettings.pointCount, terrainSettings.spacing, padding, random);
+  const padding = 0;
+  const sites = generatePoissonSites(terrainSettings.spacing, padding, random);
   const cells = new Array(sites.length);
 
   sites.forEach((site, index) => {
@@ -290,23 +278,15 @@ function drawVoronoiTerrain() {
   }
 }
 
-function generatePoissonSites(targetCount, spacing, padding, random) {
-  let minDistance = spacing;
-  for (let pass = 0; pass < 6; pass += 1) {
-    const sites = samplePoissonDisc(targetCount, minDistance, padding, random);
-    if (sites.length >= targetCount || minDistance <= 4) {
-      return sites;
-    }
-    minDistance *= 0.88;
-  }
-  return samplePoissonDisc(targetCount, Math.max(4, spacing * 0.6), padding, random);
+function generatePoissonSites(spacing, padding, random) {
+  return samplePoissonDisc(spacing, padding, random);
 }
 
-function samplePoissonDisc(targetCount, minDistance, padding, random) {
+function samplePoissonDisc(minDistance, padding, random) {
   const maxAttemptsPerActivePoint = 30;
   const width = PHONE_WIDTH - padding * 2;
   const height = PHONE_HEIGHT - padding * 2;
-  if (width <= 0 || height <= 0 || targetCount <= 0) {
+  if (width <= 0 || height <= 0) {
     return [];
   }
 
@@ -316,11 +296,6 @@ function samplePoissonDisc(targetCount, minDistance, padding, random) {
   const grid = new Array(gridWidth * gridHeight).fill(-1);
   const points = [];
   const active = [];
-  const centerX = PHONE_WIDTH / 2;
-  const centerY = PHONE_HEIGHT / 2;
-  const clusterCount = 3 + Math.floor(random() * 3);
-  const anchorRingRadius = Math.min(width, height) * 0.18;
-  const clusterAnchors = [];
 
   const toGridX = (x) => Math.floor((x - padding) / cellSize);
   const toGridY = (y) => Math.floor((y - padding) / cellSize);
@@ -365,38 +340,12 @@ function samplePoissonDisc(targetCount, minDistance, padding, random) {
     return true;
   };
 
-  for (let i = 0; i < clusterCount; i += 1) {
-    const angle = (i / clusterCount) * Math.PI * 2 + random() * 0.9;
-    const radius = random() * anchorRingRadius;
-    clusterAnchors.push({
-      x: clamp(centerX + Math.cos(angle) * radius, padding, PHONE_WIDTH - padding),
-      y: clamp(centerY + Math.sin(angle) * radius, padding, PHONE_HEIGHT - padding),
-    });
-  }
+  registerPoint({
+    x: padding + random() * width,
+    y: padding + random() * height,
+  });
 
-  const coverageAnchors = [
-    { x: padding, y: padding },
-    { x: PHONE_WIDTH / 2, y: padding },
-    { x: PHONE_WIDTH - padding, y: padding },
-    { x: padding, y: PHONE_HEIGHT / 2 },
-    { x: PHONE_WIDTH - padding, y: PHONE_HEIGHT / 2 },
-    { x: padding, y: PHONE_HEIGHT - padding },
-    { x: PHONE_WIDTH / 2, y: PHONE_HEIGHT - padding },
-    { x: PHONE_WIDTH - padding, y: PHONE_HEIGHT - padding },
-  ];
-
-  const seedAnchors = clusterAnchors.concat(coverageAnchors);
-  for (let i = 0; i < seedAnchors.length && points.length < targetCount; i += 1) {
-    const seedPoint = seedAnchors[i];
-    if (isFarEnough(seedPoint)) {
-      registerPoint(seedPoint);
-    }
-  }
-  if (points.length === 0) {
-    registerPoint({ x: centerX, y: centerY });
-  }
-
-  while (active.length > 0 && points.length < targetCount) {
+  while (active.length > 0) {
     const activeListIndex = Math.floor(random() * active.length);
     const origin = points[active[activeListIndex]];
     let foundCandidate = false;
@@ -1066,11 +1015,6 @@ function sendLaunch(text) {
 }
 
 applyTerrainSettings(readTerrainSettings());
-if (terrainPointsInput) {
-  terrainPointsInput.addEventListener('input', () => {
-    applyTerrainSettings(readTerrainSettings());
-  });
-}
 if (terrainSpacingInput) {
   terrainSpacingInput.addEventListener('input', () => {
     applyTerrainSettings(readTerrainSettings());

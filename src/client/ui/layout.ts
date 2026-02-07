@@ -1,5 +1,4 @@
 type TerrainSettings = {
-  pointCount: number;
   spacing: number;
   showGraphs: boolean;
   seed: number;
@@ -30,13 +29,11 @@ export function createPageLayout(): PageLayout {
   const statusEl = document.getElementById('status');
   const sessionEl = document.getElementById('session');
   const fpsEl = document.getElementById('fps');
-  const terrainPointsInput = document.getElementById('terrain-points') as HTMLInputElement | null;
   const terrainSpacingInput = document.getElementById('terrain-spacing') as HTMLInputElement | null;
   const terrainSeedInput = document.getElementById('terrain-seed') as HTMLInputElement | null;
   const terrainWaterLevelInput = document.getElementById('terrain-water-level') as HTMLInputElement | null;
   const terrainWaterRoughnessInput = document.getElementById('terrain-water-roughness') as HTMLInputElement | null;
   const terrainGraphsInput = document.getElementById('terrain-graphs') as HTMLInputElement | null;
-  const terrainPointsValue = document.getElementById('terrain-points-value');
   const terrainSpacingValue = document.getElementById('terrain-spacing-value');
   const terrainWaterLevelValue = document.getElementById('terrain-water-level-value');
   const terrainWaterRoughnessValue = document.getElementById('terrain-water-roughness-value');
@@ -48,20 +45,16 @@ export function createPageLayout(): PageLayout {
   };
 
   const readTerrainSettings = (): TerrainSettings => {
-    const pointCount = clamp(parseIntWithFallback(terrainPointsInput?.value, 72), 64, 2048);
     const spacing = clamp(parseIntWithFallback(terrainSpacingInput?.value, 32), 32, 128);
     const seed = clamp(parseIntWithFallback(terrainSeedInput?.value, 1337), 0, 0xffffffff);
     const waterLevel = clamp(parseIntWithFallback(terrainWaterLevelInput?.value, 0), -40, 40);
     const waterRoughness = clamp(parseIntWithFallback(terrainWaterRoughnessInput?.value, 50), 0, 100);
     const showGraphs = Boolean(terrainGraphsInput?.checked);
-    return { pointCount, spacing, showGraphs, seed, waterLevel, waterRoughness };
+    return { spacing, showGraphs, seed, waterLevel, waterRoughness };
   };
 
   const syncTerrainLabels = (): void => {
     const settings = readTerrainSettings();
-    if (terrainPointsValue) {
-      terrainPointsValue.textContent = settings.pointCount.toString();
-    }
     if (terrainSpacingValue) {
       terrainSpacingValue.textContent = settings.spacing.toString();
     }
@@ -114,7 +107,6 @@ export function createPageLayout(): PageLayout {
         syncTerrainLabels();
         onChange(readTerrainSettings());
       };
-      terrainPointsInput?.addEventListener('input', notify);
       terrainSpacingInput?.addEventListener('input', notify);
       terrainSeedInput?.addEventListener('change', notify);
       terrainWaterLevelInput?.addEventListener('input', notify);

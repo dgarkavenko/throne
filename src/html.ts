@@ -125,10 +125,6 @@ export const html = `<!doctype html>
       <div class="fps" id="fps">FPS: --</div>
       <div class="controls">
         <div class="control">
-          <label for="terrain-points">Points <span id="terrain-points-value">72</span></label>
-          <input id="terrain-points" type="range" min="64" max="2048" step="1" value="72" />
-        </div>
-        <div class="control">
           <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">32</span></label>
           <input id="terrain-spacing" type="range" min="32" max="128" step="1" value="32" />
         </div>

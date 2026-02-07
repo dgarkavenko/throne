@@ -19,7 +19,6 @@ type Vec2 = {
 };
 
 type TerrainControls = {
-  pointCount: number;
   spacing: number;
   showGraphs: boolean;
   seed: number;
@@ -74,7 +73,6 @@ export class GameEngine {
   private typingPositions = new Map<string, { x: number; y: number }>();
   private readonly config: GameConfig;
   private terrainControls: TerrainControls = {
-    pointCount: 72,
     spacing: 32,
     showGraphs: false,
     seed: 1337,
@@ -121,7 +119,6 @@ export class GameEngine {
   }
 
   setVoronoiControls(
-    pointCount: number,
     spacing: number,
     showGraphs: boolean,
     seed: number,
@@ -130,7 +127,6 @@ export class GameEngine {
   ): void {
     const safeValue = (value: number, fallback: number): number => (Number.isFinite(value) ? value : fallback);
     this.terrainControls = {
-      pointCount: this.clamp(Math.round(safeValue(pointCount, 72)), 64, 2048),
       spacing: this.clamp(Math.round(safeValue(spacing, 32)), 32, 128),
       showGraphs,
       seed: this.clamp(Math.floor(safeValue(seed, 1337)), 0, 0xffffffff),
@@ -300,13 +296,8 @@ export class GameEngine {
 
     const seed = this.terrainControls.seed >>> 0;
     const random = this.createRng(seed);
-    const padding = 28;
-    const sites = this.generatePoissonSites(
-      this.terrainControls.pointCount,
-      this.terrainControls.spacing,
-      padding,
-      random
-    );
+    const padding = 0;
+    const sites = this.generatePoissonSites(this.terrainControls.spacing, padding, random);
     const cells: Vec2[][] = new Array(sites.length);
     sites.forEach((site, index) => {
       cells[index] = this.buildVoronoiCell(site, sites);
@@ -361,23 +352,15 @@ export class GameEngine {
     }
   }
 
-  private generatePoissonSites(targetCount: number, spacing: number, padding: number, random: () => number): Vec2[] {
-    let minDistance = spacing;
-    for (let pass = 0; pass < 6; pass += 1) {
-      const sites = this.samplePoissonDisc(targetCount, minDistance, padding, random);
-      if (sites.length >= targetCount || minDistance <= 4) {
-        return sites;
-      }
-      minDistance *= 0.88;
-    }
-    return this.samplePoissonDisc(targetCount, Math.max(4, spacing * 0.6), padding, random);
+  private generatePoissonSites(spacing: number, padding: number, random: () => number): Vec2[] {
+    return this.samplePoissonDisc(spacing, padding, random);
   }
 
-  private samplePoissonDisc(targetCount: number, minDistance: number, padding: number, random: () => number): Vec2[] {
+  private samplePoissonDisc(minDistance: number, padding: number, random: () => number): Vec2[] {
     const maxAttemptsPerActivePoint = 30;
     const width = this.config.width - padding * 2;
     const height = this.config.height - padding * 2;
-    if (width <= 0 || height <= 0 || targetCount <= 0) {
+    if (width <= 0 || height <= 0) {
       return [];
     }
 
@@ -387,11 +370,6 @@ export class GameEngine {
     const grid = new Array<number>(gridWidth * gridHeight).fill(-1);
     const points: Vec2[] = [];
     const active: number[] = [];
-    const centerX = this.config.width / 2;
-    const centerY = this.config.height / 2;
-    const clusterCount = 3 + Math.floor(random() * 3);
-    const anchorRingRadius = Math.min(width, height) * 0.18;
-    const clusterAnchors: Vec2[] = [];
 
     const toGridX = (x: number): number => Math.floor((x - padding) / cellSize);
     const toGridY = (y: number): number => Math.floor((y - padding) / cellSize);
@@ -439,38 +417,12 @@ export class GameEngine {
       return true;
     };
 
-    for (let i = 0; i < clusterCount; i += 1) {
-      const angle = (i / clusterCount) * Math.PI * 2 + random() * 0.9;
-      const radius = random() * anchorRingRadius;
-      clusterAnchors.push({
-        x: this.clamp(centerX + Math.cos(angle) * radius, padding, this.config.width - padding),
-        y: this.clamp(centerY + Math.sin(angle) * radius, padding, this.config.height - padding),
-      });
-    }
+    registerPoint({
+      x: padding + random() * width,
+      y: padding + random() * height,
+    });
 
-    const coverageAnchors: Vec2[] = [
-      { x: padding, y: padding },
-      { x: this.config.width / 2, y: padding },
-      { x: this.config.width - padding, y: padding },
-      { x: padding, y: this.config.height / 2 },
-      { x: this.config.width - padding, y: this.config.height / 2 },
-      { x: padding, y: this.config.height - padding },
-      { x: this.config.width / 2, y: this.config.height - padding },
-      { x: this.config.width - padding, y: this.config.height - padding },
-    ];
-
-    const seedAnchors = clusterAnchors.concat(coverageAnchors);
-    for (let i = 0; i < seedAnchors.length && points.length < targetCount; i += 1) {
-      const seedPoint = seedAnchors[i];
-      if (isFarEnough(seedPoint)) {
-        registerPoint(seedPoint);
-      }
-    }
-    if (points.length === 0) {
-      registerPoint({ x: centerX, y: centerY });
-    }
-
-    while (active.length > 0 && points.length < targetCount) {
+    while (active.length > 0) {
       const activeListIndex = Math.floor(random() * active.length);
       const originIndex = active[activeListIndex];
       const origin = points[originIndex];

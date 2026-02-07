@@ -67,7 +67,6 @@ async function startClient(): Promise<void> {
   await engine.init(layout.field);
   const terrainSettings = layout.getTerrainSettings();
   engine.setVoronoiControls(
-    terrainSettings.pointCount,
     terrainSettings.spacing,
     terrainSettings.showGraphs,
     terrainSettings.seed,
@@ -76,7 +75,6 @@ async function startClient(): Promise<void> {
   );
   layout.onTerrainSettingsChange((nextSettings) => {
     engine.setVoronoiControls(
-      nextSettings.pointCount,
       nextSettings.spacing,
       nextSettings.showGraphs,
       nextSettings.seed,
