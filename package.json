@@ -3,6 +3,8 @@
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
+		"build:client": "tsc -p tsconfig.client.json",
+		"dev:client": "tsc -p tsconfig.client.json --watch",
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"dev:standalone": "wrangler dev --local",

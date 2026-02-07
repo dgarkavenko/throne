@@ -318,7 +318,7 @@ function renderPlayers() {
       fontSize: 28,
       fill: player.color || '#f5f5f5',
     });
-    const avatar = (player.emoji || 'ðŸª§') + ':';
+    const avatar = (player.emoji || '\ud83e\udea7') + ':';
     const typingText = player.typing ? ' ' + player.typing : '';
     const row = new PIXI.Container();
     const avatarText = new PIXI.Text(avatar, style);
