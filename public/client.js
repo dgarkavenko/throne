@@ -2,8 +2,13 @@ const field = document.getElementById('field');
 const statusEl = document.getElementById('status');
 const sessionEl = document.getElementById('session');
 const fpsEl = document.getElementById('fps');
+const terrainPointsInput = document.getElementById('terrain-points');
+const terrainSpacingInput = document.getElementById('terrain-spacing');
+const terrainGraphsInput = document.getElementById('terrain-graphs');
+const terrainPointsValueEl = document.getElementById('terrain-points-value');
+const terrainSpacingValueEl = document.getElementById('terrain-spacing-value');
 
-const PHONE_WIDTH = 390;
+const PHONE_WIDTH = 1560;
 const PHONE_HEIGHT = 844;
 const COLLIDER_SCALE = 0.9;
 
@@ -22,10 +27,17 @@ const fpsTracker = {
   frames: 0,
 };
 
+const terrainSettings = {
+  pointCount: 72,
+  spacing: 18,
+  showGraphs: false,
+};
+
 const game = {
   app: null,
   engine: null,
   layers: {
+    terrain: null,
     world: null,
     ui: null,
   },
@@ -100,7 +112,7 @@ async function initScene() {
   await appInstance.init({
     width: PHONE_WIDTH,
     height: PHONE_HEIGHT,
-    background: 0x0b0e12,
+    backgroundAlpha: 0,
     antialias: true,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
@@ -110,15 +122,19 @@ async function initScene() {
     field.appendChild(appInstance.canvas ?? appInstance.view);
   }
 
+  const terrainLayer = new PIXI.Container();
   const worldLayer = new PIXI.Container();
   const uiLayer = new PIXI.Container();
   uiLayer.x = 24;
   uiLayer.y = 24;
+  appInstance.stage.addChild(terrainLayer);
   appInstance.stage.addChild(worldLayer);
   appInstance.stage.addChild(uiLayer);
+  game.layers.terrain = terrainLayer;
   game.layers.world = worldLayer;
   game.layers.ui = uiLayer;
 
+  drawVoronoiTerrain();
   setupPhysics();
   bindMainLoop();
   // enableSpawnOnClick();
@@ -133,6 +149,484 @@ function parseColor(value, fallback) {
   const normalized = value.replace('#', '');
   const parsed = Number.parseInt(normalized, 16);
   return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function readTerrainSettings() {
+  const parsedPointCount = Number.parseInt((terrainPointsInput && terrainPointsInput.value) || '72', 10);
+  const parsedSpacing = Number.parseInt((terrainSpacingInput && terrainSpacingInput.value) || '18', 10);
+  return {
+    pointCount: clamp(Number.isNaN(parsedPointCount) ? 72 : parsedPointCount, 64, 1024),
+    spacing: clamp(Number.isNaN(parsedSpacing) ? 18 : parsedSpacing, 8, 128),
+    showGraphs: Boolean(terrainGraphsInput && terrainGraphsInput.checked),
+  };
+}
+
+function syncTerrainControlLabels() {
+  if (terrainPointsValueEl) {
+    terrainPointsValueEl.textContent = String(terrainSettings.pointCount);
+  }
+  if (terrainSpacingValueEl) {
+    terrainSpacingValueEl.textContent = String(terrainSettings.spacing);
+  }
+}
+
+function applyTerrainSettings(nextSettings) {
+  terrainSettings.pointCount = nextSettings.pointCount;
+  terrainSettings.spacing = nextSettings.spacing;
+  terrainSettings.showGraphs = nextSettings.showGraphs;
+  if (terrainPointsInput) {
+    terrainPointsInput.value = String(terrainSettings.pointCount);
+  }
+  if (terrainSpacingInput) {
+    terrainSpacingInput.value = String(terrainSettings.spacing);
+  }
+  if (terrainGraphsInput) {
+    terrainGraphsInput.checked = terrainSettings.showGraphs;
+  }
+  syncTerrainControlLabels();
+  if (game.layers.terrain) {
+    drawVoronoiTerrain();
+  }
+}
+
+function drawVoronoiTerrain() {
+  if (!game.layers.terrain || !window.PIXI) {
+    return;
+  }
+  const terrainLayer = game.layers.terrain;
+  terrainLayer.removeChildren();
+
+  const waterTint = new PIXI.Graphics();
+  waterTint.rect(0, 0, PHONE_WIDTH, PHONE_HEIGHT);
+  waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
+  terrainLayer.addChild(waterTint);
+
+  const seed = (Math.random() * 0xffffffff) >>> 0;
+  const random = createRng(seed);
+  const padding = 28;
+  const sites = generatePoissonSites(terrainSettings.pointCount, terrainSettings.spacing, padding, random);
+  const palette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
+  const cells = new Array(sites.length);
+
+  sites.forEach((site, index) => {
+    const cell = buildVoronoiCell(site, sites);
+    cells[index] = cell;
+    if (cell.length < 3) {
+      return;
+    }
+    const terrain = new PIXI.Graphics();
+    terrain.poly(flattenPolygon(cell), true);
+    terrain.fill({ color: palette[Math.floor(random() * palette.length)], alpha: 0.74 });
+    terrain.stroke({ width: 1.2, color: 0xcadfb8, alpha: 0.45 });
+    terrainLayer.addChild(terrain);
+  });
+
+  if (terrainSettings.showGraphs) {
+    const graph = buildMapGraph(sites, cells);
+    drawGraphOverlay(graph, terrainLayer);
+  }
+}
+
+function generatePoissonSites(targetCount, spacing, padding, random) {
+  let minDistance = spacing;
+  let clusterLimit = 1.2;
+  for (let pass = 0; pass < 6; pass += 1) {
+    const sites = samplePoissonDisc(targetCount, minDistance, padding, random, clusterLimit);
+    if (sites.length >= targetCount || minDistance <= 4) {
+      return sites;
+    }
+    minDistance *= 0.86;
+    clusterLimit *= 1.25;
+  }
+  return samplePoissonDisc(targetCount, Math.max(4, spacing * 0.6), padding, random, 3.4);
+}
+
+function samplePoissonDisc(targetCount, minDistance, padding, random, clusterLimit) {
+  const maxAttemptsPerActivePoint = 30;
+  const width = PHONE_WIDTH - padding * 2;
+  const height = PHONE_HEIGHT - padding * 2;
+  if (width <= 0 || height <= 0 || targetCount <= 0) {
+    return [];
+  }
+
+  const cellSize = minDistance / Math.sqrt(2);
+  const gridWidth = Math.max(1, Math.ceil(width / cellSize));
+  const gridHeight = Math.max(1, Math.ceil(height / cellSize));
+  const grid = new Array(gridWidth * gridHeight).fill(-1);
+  const points = [];
+  const active = [];
+  const centerX = PHONE_WIDTH / 2;
+  const centerY = PHONE_HEIGHT / 2;
+  const clusterCount = 3 + Math.floor(random() * 3);
+  const anchorRingRadius = Math.min(width, height) * 0.18;
+  const clusterRadiusX = width * 0.24;
+  const clusterRadiusY = height * 0.26;
+  const clusterAnchors = [];
+
+  const toGridX = (x) => Math.floor((x - padding) / cellSize);
+  const toGridY = (y) => Math.floor((y - padding) / cellSize);
+  const isInBounds = (point) =>
+    point.x >= padding && point.x <= PHONE_WIDTH - padding && point.y >= padding && point.y <= PHONE_HEIGHT - padding;
+  const isInClusterBounds = (point) => {
+    let bestMetric = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < clusterAnchors.length; i += 1) {
+      const anchor = clusterAnchors[i];
+      const dx = (point.x - anchor.x) / clusterRadiusX;
+      const dy = (point.y - anchor.y) / clusterRadiusY;
+      const metric = dx * dx + dy * dy;
+      if (metric < bestMetric) {
+        bestMetric = metric;
+      }
+    }
+    if (!Number.isFinite(bestMetric)) {
+      return true;
+    }
+    return bestMetric <= clusterLimit;
+  };
+
+  const registerPoint = (point) => {
+    points.push(point);
+    const index = points.length - 1;
+    active.push(index);
+    const gx = clamp(toGridX(point.x), 0, gridWidth - 1);
+    const gy = clamp(toGridY(point.y), 0, gridHeight - 1);
+    grid[gy * gridWidth + gx] = index;
+  };
+
+  const isFarEnough = (point) => {
+    if (!isInBounds(point) || !isInClusterBounds(point)) {
+      return false;
+    }
+    const gx = clamp(toGridX(point.x), 0, gridWidth - 1);
+    const gy = clamp(toGridY(point.y), 0, gridHeight - 1);
+    const minGridX = Math.max(0, gx - 2);
+    const maxGridX = Math.min(gridWidth - 1, gx + 2);
+    const minGridY = Math.max(0, gy - 2);
+    const maxGridY = Math.min(gridHeight - 1, gy + 2);
+    const minDistanceSquared = minDistance * minDistance;
+
+    for (let y = minGridY; y <= maxGridY; y += 1) {
+      for (let x = minGridX; x <= maxGridX; x += 1) {
+        const pointIndex = grid[y * gridWidth + x];
+        if (pointIndex < 0) {
+          continue;
+        }
+        const other = points[pointIndex];
+        const dx = other.x - point.x;
+        const dy = other.y - point.y;
+        if (dx * dx + dy * dy < minDistanceSquared) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  for (let i = 0; i < clusterCount; i += 1) {
+    const angle = (i / clusterCount) * Math.PI * 2 + random() * 0.9;
+    const radius = random() * anchorRingRadius;
+    clusterAnchors.push({
+      x: clamp(centerX + Math.cos(angle) * radius, padding, PHONE_WIDTH - padding),
+      y: clamp(centerY + Math.sin(angle) * radius, padding, PHONE_HEIGHT - padding),
+    });
+  }
+
+  for (let i = 0; i < clusterAnchors.length && points.length < targetCount; i += 1) {
+    const seedPoint = clusterAnchors[i];
+    if (isFarEnough(seedPoint)) {
+      registerPoint(seedPoint);
+    }
+  }
+  if (points.length === 0) {
+    registerPoint({ x: centerX, y: centerY });
+  }
+
+  while (active.length > 0 && points.length < targetCount) {
+    const activeListIndex = Math.floor(random() * active.length);
+    const origin = points[active[activeListIndex]];
+    let foundCandidate = false;
+
+    for (let attempt = 0; attempt < maxAttemptsPerActivePoint; attempt += 1) {
+      const angle = random() * Math.PI * 2;
+      const radius = minDistance * (1 + random());
+      const candidate = {
+        x: origin.x + Math.cos(angle) * radius,
+        y: origin.y + Math.sin(angle) * radius,
+      };
+      if (!isFarEnough(candidate)) {
+        continue;
+      }
+      registerPoint(candidate);
+      foundCandidate = true;
+      break;
+    }
+
+    if (!foundCandidate) {
+      const lastIndex = active.length - 1;
+      active[activeListIndex] = active[lastIndex];
+      active.pop();
+    }
+  }
+
+  return points;
+}
+
+function buildVoronoiCell(site, sites) {
+  let polygon = [
+    { x: 0, y: 0 },
+    { x: PHONE_WIDTH, y: 0 },
+    { x: PHONE_WIDTH, y: PHONE_HEIGHT },
+    { x: 0, y: PHONE_HEIGHT },
+  ];
+
+  for (let i = 0; i < sites.length; i += 1) {
+    const other = sites[i];
+    if (other === site) {
+      continue;
+    }
+    const midpoint = {
+      x: (site.x + other.x) * 0.5,
+      y: (site.y + other.y) * 0.5,
+    };
+    const normal = {
+      x: other.x - site.x,
+      y: other.y - site.y,
+    };
+    polygon = clipPolygonWithHalfPlane(polygon, midpoint, normal);
+    if (polygon.length < 3) {
+      return [];
+    }
+  }
+
+  return polygon;
+}
+
+function clipPolygonWithHalfPlane(polygon, midpoint, normal) {
+  if (polygon.length === 0) {
+    return [];
+  }
+  const clipped = [];
+  const epsilon = 1e-6;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const current = polygon[i];
+    const next = polygon[(i + 1) % polygon.length];
+    const currentValue = evaluateLine(current, midpoint, normal);
+    const nextValue = evaluateLine(next, midpoint, normal);
+    const currentInside = currentValue <= epsilon;
+    const nextInside = nextValue <= epsilon;
+
+    if (currentInside && nextInside) {
+      clipped.push(next);
+    } else if (currentInside && !nextInside) {
+      clipped.push(intersectSegmentWithLine(current, next, midpoint, currentValue, nextValue));
+    } else if (!currentInside && nextInside) {
+      clipped.push(intersectSegmentWithLine(current, next, midpoint, currentValue, nextValue));
+      clipped.push(next);
+    }
+  }
+  return clipped;
+}
+
+function evaluateLine(point, midpoint, normal) {
+  return (point.x - midpoint.x) * normal.x + (point.y - midpoint.y) * normal.y;
+}
+
+function intersectSegmentWithLine(start, end, midpoint, startValue, endValue) {
+  const denominator = startValue - endValue;
+  if (Math.abs(denominator) < 1e-9) {
+    return {
+      x: (start.x + end.x) * 0.5,
+      y: (start.y + end.y) * 0.5,
+    };
+  }
+  const t = startValue / denominator;
+  const clampedT = Math.max(0, Math.min(1, t));
+  const intersection = {
+    x: start.x + (end.x - start.x) * clampedT,
+    y: start.y + (end.y - start.y) * clampedT,
+  };
+  if (Number.isFinite(intersection.x) && Number.isFinite(intersection.y)) {
+    return intersection;
+  }
+  return {
+    x: midpoint.x,
+    y: midpoint.y,
+  };
+}
+
+function flattenPolygon(polygon) {
+  const flat = [];
+  for (let i = 0; i < polygon.length; i += 1) {
+    flat.push(polygon[i].x, polygon[i].y);
+  }
+  return flat;
+}
+
+function buildMapGraph(sites, cells) {
+  const centers = sites.map((site, index) => ({
+    index,
+    point: site,
+    corners: [],
+    neighbors: [],
+    borders: [],
+  }));
+  const corners = [];
+  const edges = [];
+  const cornerLookup = new Map();
+  const edgeLookup = new Map();
+
+  const quantize = (value) => Math.round(value * 1000);
+  const cornerKey = (point) => quantize(point.x) + ':' + quantize(point.y);
+  const edgeKey = (a, b) => (a < b ? a + ':' + b : b + ':' + a);
+
+  const getCornerIndex = (point) => {
+    const key = cornerKey(point);
+    const existing = cornerLookup.get(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const index = corners.length;
+    corners.push({
+      index,
+      point: { x: point.x, y: point.y },
+      centers: [],
+      adjacent: [],
+      protrudes: [],
+    });
+    cornerLookup.set(key, index);
+    return index;
+  };
+
+  cells.forEach((cell, centerIndex) => {
+    if (!cell || cell.length < 3) {
+      return;
+    }
+    const center = centers[centerIndex];
+    const cellCornerIndices = [];
+    for (let i = 0; i < cell.length; i += 1) {
+      const cornerIndex = getCornerIndex(cell[i]);
+      cellCornerIndices.push(cornerIndex);
+      pushUnique(corners[cornerIndex].centers, centerIndex);
+      pushUnique(center.corners, cornerIndex);
+    }
+    for (let i = 0; i < cellCornerIndices.length; i += 1) {
+      const a = cellCornerIndices[i];
+      const b = cellCornerIndices[(i + 1) % cellCornerIndices.length];
+      const key = edgeKey(a, b);
+      let borderIndex = edgeLookup.get(key);
+      if (borderIndex === undefined) {
+        borderIndex = edges.length;
+        const cornerA = corners[a].point;
+        const cornerB = corners[b].point;
+        edges.push({
+          index: borderIndex,
+          centers: [centerIndex, -1],
+          corners: [a, b],
+          midpoint: {
+            x: (cornerA.x + cornerB.x) * 0.5,
+            y: (cornerA.y + cornerB.y) * 0.5,
+          },
+        });
+        edgeLookup.set(key, borderIndex);
+      } else {
+        const edge = edges[borderIndex];
+        if (edge.centers[0] !== centerIndex && edge.centers[1] !== centerIndex) {
+          edge.centers[1] = centerIndex;
+        }
+      }
+      pushUnique(center.borders, borderIndex);
+    }
+  });
+
+  edges.forEach((edge) => {
+    const cornerA = edge.corners[0];
+    const cornerB = edge.corners[1];
+    pushUnique(corners[cornerA].adjacent, cornerB);
+    pushUnique(corners[cornerB].adjacent, cornerA);
+    pushUnique(corners[cornerA].protrudes, edge.index);
+    pushUnique(corners[cornerB].protrudes, edge.index);
+
+    const centerA = edge.centers[0];
+    const centerB = edge.centers[1];
+    if (centerA >= 0) {
+      pushUnique(centers[centerA].borders, edge.index);
+    }
+    if (centerB >= 0) {
+      pushUnique(centers[centerB].borders, edge.index);
+    }
+    if (centerA >= 0 && centerB >= 0) {
+      pushUnique(centers[centerA].neighbors, centerB);
+      pushUnique(centers[centerB].neighbors, centerA);
+    }
+  });
+
+  return { centers, corners, edges };
+}
+
+function drawGraphOverlay(graph, terrainLayer) {
+  if (!window.PIXI) {
+    return;
+  }
+  const graphLayer = new PIXI.Container();
+
+  const polygonGraph = new PIXI.Graphics();
+  graph.edges.forEach((edge) => {
+    const cornerA = graph.corners[edge.corners[0]].point;
+    const cornerB = graph.corners[edge.corners[1]].point;
+    polygonGraph.moveTo(cornerA.x, cornerA.y);
+    polygonGraph.lineTo(cornerB.x, cornerB.y);
+  });
+  polygonGraph.stroke({ width: 1.3, color: 0xff4d4f, alpha: 0.75 });
+  graphLayer.addChild(polygonGraph);
+
+  const dualGraph = new PIXI.Graphics();
+  graph.edges.forEach((edge) => {
+    const centerA = edge.centers[0];
+    const centerB = edge.centers[1];
+    if (centerA < 0 || centerB < 0) {
+      return;
+    }
+    const a = graph.centers[centerA].point;
+    const b = graph.centers[centerB].point;
+    dualGraph.moveTo(a.x, a.y);
+    dualGraph.lineTo(b.x, b.y);
+  });
+  dualGraph.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
+  graphLayer.addChild(dualGraph);
+
+  const cornerNodes = new PIXI.Graphics();
+  graph.corners.forEach((corner) => {
+    cornerNodes.circle(corner.point.x, corner.point.y, 1.8);
+  });
+  cornerNodes.fill({ color: 0xf3fff7, alpha: 0.9 });
+  graphLayer.addChild(cornerNodes);
+
+  const centerNodes = new PIXI.Graphics();
+  graph.centers.forEach((center) => {
+    centerNodes.circle(center.point.x, center.point.y, 2.3);
+  });
+  centerNodes.fill({ color: 0xfff0c9, alpha: 0.95 });
+  graphLayer.addChild(centerNodes);
+
+  terrainLayer.addChild(graphLayer);
+}
+
+function pushUnique(values, value) {
+  if (!values.includes(value)) {
+    values.push(value);
+  }
+}
+
+function createRng(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
 }
 
 function setupPhysics() {
@@ -416,6 +910,23 @@ function sendLaunch(text) {
       text,
     })
   );
+}
+
+applyTerrainSettings(readTerrainSettings());
+if (terrainPointsInput) {
+  terrainPointsInput.addEventListener('input', () => {
+    applyTerrainSettings(readTerrainSettings());
+  });
+}
+if (terrainSpacingInput) {
+  terrainSpacingInput.addEventListener('input', () => {
+    applyTerrainSettings(readTerrainSettings());
+  });
+}
+if (terrainGraphsInput) {
+  terrainGraphsInput.addEventListener('change', () => {
+    applyTerrainSettings(readTerrainSettings());
+  });
 }
 
 void initScene();

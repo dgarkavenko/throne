@@ -21,7 +21,20 @@ export class RoomDurableObject implements DurableObject {
   private hostId: string | null = null;
   private sessionStart: number | null = null;
   private history: RoomHistoryEntry[] = [];
-  private emojis = ['\ud83d\udc99', '\ud83d\udd25', '\ud83c\udf1c', '\u2728', '\ud83d\udc7e', '\ud83d\udc8e', '\ud83c\udf38', '\ud83c\udf19', '\ud83e\uddf8', '\ud83e\udee7', '\ud83c\udf2c\ufe0f', '\ud83c\udf89'];
+  private emojis = [
+    '\ud83e\udd34',
+    '\ud83d\udc78',
+    '\ud83e\udec5',
+    '\ud83e\uddd9',
+    '\ud83e\uddd9\u200d\u2640\ufe0f',
+    '\ud83e\uddd9\u200d\u2642\ufe0f',
+    '\ud83e\udddd',
+    '\ud83e\udddd\u200d\u2640\ufe0f',
+    '\ud83e\udddd\u200d\u2642\ufe0f',
+    '\ud83e\udd3a',
+    '\ud83d\udc68\u200d\ud83c\udf3e',
+    '\ud83d\udc69\u200d\ud83c\udf3e',
+  ];
   private colors = ['#f6c1c7', '#f7d6b2', '#f8f1b4', '#c7f0d9', '#c4d7f7', '#d9c4f7', '#f7c4e3', '#c7f3f6', '#f6c7a6', '#d7f6b4', '#c9f6d7', '#f3c9f6'];
 
   async fetch(request: Request): Promise<Response> {
@@ -193,7 +206,7 @@ export class RoomDurableObject implements DurableObject {
 
   private pickEmoji(): string {
     const emoji = this.emojis[Math.floor(Math.random() * this.emojis.length)];
-    return emoji ?? '\ud83e\udee7';
+    return emoji ?? '\ud83e\udd34';
   }
 
   private pickColor(): string {

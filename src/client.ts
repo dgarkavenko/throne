@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-const GAME_WIDTH = 390;
+const GAME_WIDTH = 1560;
 const GAME_HEIGHT = 844;
 const COLLIDER_SCALE = 0.9;
 
@@ -65,6 +65,12 @@ async function startClient(): Promise<void> {
   });
 
   await engine.init(layout.field);
+  const terrainSettings = layout.getTerrainSettings();
+  engine.setVoronoiControls(terrainSettings.pointCount, terrainSettings.spacing, terrainSettings.showGraphs);
+  layout.onTerrainSettingsChange((nextSettings) => {
+    engine.setVoronoiControls(nextSettings.pointCount, nextSettings.spacing, nextSettings.showGraphs);
+  });
+
   engine.start((deltaMs, now) => {
     void deltaMs;
     updateFpsCounter(now, layout.setFps);

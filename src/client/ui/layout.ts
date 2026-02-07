@@ -4,6 +4,8 @@ type PageLayout = {
   setSessionElapsed: (elapsedMs: number | null) => void;
   setFps: (fps: number | null) => void;
   setConnected: (isConnected: boolean) => void;
+  getTerrainSettings: () => { pointCount: number; spacing: number; showGraphs: boolean };
+  onTerrainSettingsChange: (onChange: (settings: { pointCount: number; spacing: number; showGraphs: boolean }) => void) => void;
 };
 
 function formatDuration(ms: number): string {
@@ -19,6 +21,32 @@ export function createPageLayout(): PageLayout {
   const statusEl = document.getElementById('status');
   const sessionEl = document.getElementById('session');
   const fpsEl = document.getElementById('fps');
+  const terrainPointsInput = document.getElementById('terrain-points') as HTMLInputElement | null;
+  const terrainSpacingInput = document.getElementById('terrain-spacing') as HTMLInputElement | null;
+  const terrainGraphsInput = document.getElementById('terrain-graphs') as HTMLInputElement | null;
+  const terrainPointsValue = document.getElementById('terrain-points-value');
+  const terrainSpacingValue = document.getElementById('terrain-spacing-value');
+
+  const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
+
+  const readTerrainSettings = (): { pointCount: number; spacing: number; showGraphs: boolean } => {
+    const pointCount = clamp(Number.parseInt(terrainPointsInput?.value || '72', 10), 64, 1024);
+    const spacing = clamp(Number.parseInt(terrainSpacingInput?.value || '18', 10), 8, 128);
+    const showGraphs = Boolean(terrainGraphsInput?.checked);
+    return { pointCount, spacing, showGraphs };
+  };
+
+  const syncTerrainLabels = (): void => {
+    const settings = readTerrainSettings();
+    if (terrainPointsValue) {
+      terrainPointsValue.textContent = settings.pointCount.toString();
+    }
+    if (terrainSpacingValue) {
+      terrainSpacingValue.textContent = settings.spacing.toString();
+    }
+  };
+
+  syncTerrainLabels();
 
   return {
     field,
@@ -50,6 +78,18 @@ export function createPageLayout(): PageLayout {
     },
     setConnected(isConnected) {
       document.body.classList.toggle('connected', isConnected);
+    },
+    getTerrainSettings() {
+      return readTerrainSettings();
+    },
+    onTerrainSettingsChange(onChange) {
+      const notify = () => {
+        syncTerrainLabels();
+        onChange(readTerrainSettings());
+      };
+      terrainPointsInput?.addEventListener('input', notify);
+      terrainSpacingInput?.addEventListener('input', notify);
+      terrainGraphsInput?.addEventListener('change', notify);
     },
   };
 }

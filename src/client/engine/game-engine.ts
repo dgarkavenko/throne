@@ -13,16 +13,62 @@ type GameConfig = {
   uiOffset: { x: number; y: number };
 };
 
+type Vec2 = {
+  x: number;
+  y: number;
+};
+
+type TerrainControls = {
+  pointCount: number;
+  spacing: number;
+  showGraphs: boolean;
+};
+
+type GraphCenter = {
+  index: number;
+  point: Vec2;
+  corners: number[];
+  neighbors: number[];
+  borders: number[];
+};
+
+type GraphCorner = {
+  index: number;
+  point: Vec2;
+  centers: number[];
+  adjacent: number[];
+  protrudes: number[];
+};
+
+type GraphEdge = {
+  index: number;
+  centers: [number, number];
+  corners: [number, number];
+  midpoint: Vec2;
+};
+
+type MapGraph = {
+  centers: GraphCenter[];
+  corners: GraphCorner[];
+  edges: GraphEdge[];
+};
+
 export class GameEngine {
   private app: any = null;
   private engine: any = null;
   private layers = {
+    terrain: null as any,
     world: null as any,
     ui: null as any,
   };
   private entities = new Set<GameEntity>();
   private typingPositions = new Map<string, { x: number; y: number }>();
   private readonly config: GameConfig;
+  private terrainControls: TerrainControls = {
+    pointCount: 72,
+    spacing: 18,
+    showGraphs: false,
+  };
 
   constructor(config: GameConfig) {
     this.config = config;
@@ -36,7 +82,7 @@ export class GameEngine {
     await appInstance.init({
       width: this.config.width,
       height: this.config.height,
-      background: 0x0b0e12,
+      backgroundAlpha: 0,
       antialias: true,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
@@ -46,16 +92,29 @@ export class GameEngine {
       field.appendChild(appInstance.canvas ?? appInstance.view);
     }
 
+    const terrainLayer = new window.PIXI.Container();
     const worldLayer = new window.PIXI.Container();
     const uiLayer = new window.PIXI.Container();
     uiLayer.x = this.config.uiOffset.x;
     uiLayer.y = this.config.uiOffset.y;
+    appInstance.stage.addChild(terrainLayer);
     appInstance.stage.addChild(worldLayer);
     appInstance.stage.addChild(uiLayer);
+    this.layers.terrain = terrainLayer;
     this.layers.world = worldLayer;
     this.layers.ui = uiLayer;
 
+    this.drawVoronoiTerrain();
     this.setupPhysics();
+  }
+
+  setVoronoiControls(pointCount: number, spacing: number, showGraphs: boolean): void {
+    this.terrainControls = {
+      pointCount: this.clamp(Math.round(pointCount), 64, 1024),
+      spacing: this.clamp(Math.round(spacing), 8, 128),
+      showGraphs,
+    };
+    this.drawVoronoiTerrain();
   }
 
   start(onFrame?: (deltaMs: number, now: number) => void): void {
@@ -169,7 +228,7 @@ export class GameEngine {
         fontSize: 28,
         fill: player.color || '#f5f5f5',
       });
-      const avatar = (player.emoji || '\ud83e\udea7') + ':';
+      const avatar = (player.emoji || '\ud83e\udd34') + ':';
       const typingText = player.typing ? ' ' + player.typing : '';
       const row = new window.PIXI.Container();
       const avatarText = new window.PIXI.Text(avatar, style);
@@ -201,6 +260,466 @@ export class GameEngine {
     return {
       x: this.config.width / 2 + (Math.random() - 0.5) * jitter,
       y: y + (Math.random() - 0.5) * jitter,
+    };
+  }
+
+  private drawVoronoiTerrain(): void {
+    if (!this.layers.terrain || !window.PIXI) {
+      return;
+    }
+    const terrainLayer = this.layers.terrain;
+    terrainLayer.removeChildren();
+
+    const waterTint = new window.PIXI.Graphics();
+    waterTint.rect(0, 0, this.config.width, this.config.height);
+    waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
+    terrainLayer.addChild(waterTint);
+
+    const seed = (Math.random() * 0xffffffff) >>> 0;
+    const random = this.createRng(seed);
+    const padding = 28;
+    const sites = this.generatePoissonSites(
+      this.terrainControls.pointCount,
+      this.terrainControls.spacing,
+      padding,
+      random
+    );
+    const palette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
+    const cells: Vec2[][] = new Array(sites.length);
+
+    sites.forEach((site, index) => {
+      const cell = this.buildVoronoiCell(site, sites);
+      cells[index] = cell;
+      if (cell.length < 3) {
+        return;
+      }
+      const terrain = new window.PIXI.Graphics();
+      terrain.poly(this.flattenPolygon(cell), true);
+      terrain.fill({ color: palette[Math.floor(random() * palette.length)], alpha: 0.74 });
+      terrain.stroke({ width: 1.2, color: 0xcadfb8, alpha: 0.45 });
+      terrainLayer.addChild(terrain);
+    });
+
+    if (this.terrainControls.showGraphs) {
+      const graph = this.buildMapGraph(sites, cells);
+      this.drawGraphOverlay(graph, terrainLayer);
+    }
+  }
+
+  private generatePoissonSites(targetCount: number, spacing: number, padding: number, random: () => number): Vec2[] {
+    let minDistance = spacing;
+    let clusterLimit = 1.2;
+    for (let pass = 0; pass < 6; pass += 1) {
+      const sites = this.samplePoissonDisc(targetCount, minDistance, padding, random, clusterLimit);
+      if (sites.length >= targetCount || minDistance <= 4) {
+        return sites;
+      }
+      minDistance *= 0.86;
+      clusterLimit *= 1.25;
+    }
+    return this.samplePoissonDisc(targetCount, Math.max(4, spacing * 0.6), padding, random, 3.4);
+  }
+
+  private samplePoissonDisc(
+    targetCount: number,
+    minDistance: number,
+    padding: number,
+    random: () => number,
+    clusterLimit: number
+  ): Vec2[] {
+    const maxAttemptsPerActivePoint = 30;
+    const width = this.config.width - padding * 2;
+    const height = this.config.height - padding * 2;
+    if (width <= 0 || height <= 0 || targetCount <= 0) {
+      return [];
+    }
+
+    const cellSize = minDistance / Math.sqrt(2);
+    const gridWidth = Math.max(1, Math.ceil(width / cellSize));
+    const gridHeight = Math.max(1, Math.ceil(height / cellSize));
+    const grid = new Array<number>(gridWidth * gridHeight).fill(-1);
+    const points: Vec2[] = [];
+    const active: number[] = [];
+    const centerX = this.config.width / 2;
+    const centerY = this.config.height / 2;
+    const clusterCount = 3 + Math.floor(random() * 3);
+    const anchorRingRadius = Math.min(width, height) * 0.18;
+    const clusterRadiusX = width * 0.24;
+    const clusterRadiusY = height * 0.26;
+    const clusterAnchors: Vec2[] = [];
+
+    const toGridX = (x: number): number => Math.floor((x - padding) / cellSize);
+    const toGridY = (y: number): number => Math.floor((y - padding) / cellSize);
+    const isInBounds = (point: Vec2): boolean =>
+      point.x >= padding &&
+      point.x <= this.config.width - padding &&
+      point.y >= padding &&
+      point.y <= this.config.height - padding;
+    const isInClusterBounds = (point: Vec2): boolean => {
+      let bestMetric = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < clusterAnchors.length; i += 1) {
+        const anchor = clusterAnchors[i];
+        const dx = (point.x - anchor.x) / clusterRadiusX;
+        const dy = (point.y - anchor.y) / clusterRadiusY;
+        const metric = dx * dx + dy * dy;
+        if (metric < bestMetric) {
+          bestMetric = metric;
+        }
+      }
+      if (!Number.isFinite(bestMetric)) {
+        return true;
+      }
+      return bestMetric <= clusterLimit;
+    };
+
+    const registerPoint = (point: Vec2): void => {
+      points.push(point);
+      const index = points.length - 1;
+      active.push(index);
+      const gx = this.clamp(toGridX(point.x), 0, gridWidth - 1);
+      const gy = this.clamp(toGridY(point.y), 0, gridHeight - 1);
+      grid[gy * gridWidth + gx] = index;
+    };
+
+    const isFarEnough = (point: Vec2): boolean => {
+      if (!isInBounds(point) || !isInClusterBounds(point)) {
+        return false;
+      }
+      const gx = this.clamp(toGridX(point.x), 0, gridWidth - 1);
+      const gy = this.clamp(toGridY(point.y), 0, gridHeight - 1);
+      const minGridX = Math.max(0, gx - 2);
+      const maxGridX = Math.min(gridWidth - 1, gx + 2);
+      const minGridY = Math.max(0, gy - 2);
+      const maxGridY = Math.min(gridHeight - 1, gy + 2);
+      const minDistanceSquared = minDistance * minDistance;
+
+      for (let y = minGridY; y <= maxGridY; y += 1) {
+        for (let x = minGridX; x <= maxGridX; x += 1) {
+          const pointIndex = grid[y * gridWidth + x];
+          if (pointIndex < 0) {
+            continue;
+          }
+          const other = points[pointIndex];
+          const dx = other.x - point.x;
+          const dy = other.y - point.y;
+          if (dx * dx + dy * dy < minDistanceSquared) {
+            return false;
+          }
+        }
+      }
+      return true;
+    };
+
+    for (let i = 0; i < clusterCount; i += 1) {
+      const angle = (i / clusterCount) * Math.PI * 2 + random() * 0.9;
+      const radius = random() * anchorRingRadius;
+      clusterAnchors.push({
+        x: this.clamp(centerX + Math.cos(angle) * radius, padding, this.config.width - padding),
+        y: this.clamp(centerY + Math.sin(angle) * radius, padding, this.config.height - padding),
+      });
+    }
+
+    for (let i = 0; i < clusterAnchors.length && points.length < targetCount; i += 1) {
+      const seedPoint = clusterAnchors[i];
+      if (isFarEnough(seedPoint)) {
+        registerPoint(seedPoint);
+      }
+    }
+    if (points.length === 0) {
+      registerPoint({ x: centerX, y: centerY });
+    }
+
+    while (active.length > 0 && points.length < targetCount) {
+      const activeListIndex = Math.floor(random() * active.length);
+      const originIndex = active[activeListIndex];
+      const origin = points[originIndex];
+      let foundCandidate = false;
+
+      for (let attempt = 0; attempt < maxAttemptsPerActivePoint; attempt += 1) {
+        const angle = random() * Math.PI * 2;
+        const radius = minDistance * (1 + random());
+        const candidate = {
+          x: origin.x + Math.cos(angle) * radius,
+          y: origin.y + Math.sin(angle) * radius,
+        };
+        if (!isFarEnough(candidate)) {
+          continue;
+        }
+        registerPoint(candidate);
+        foundCandidate = true;
+        break;
+      }
+
+      if (!foundCandidate) {
+        const lastIndex = active.length - 1;
+        active[activeListIndex] = active[lastIndex];
+        active.pop();
+      }
+    }
+
+    return points;
+  }
+
+  private buildVoronoiCell(site: Vec2, sites: Vec2[]): Vec2[] {
+    let polygon: Vec2[] = [
+      { x: 0, y: 0 },
+      { x: this.config.width, y: 0 },
+      { x: this.config.width, y: this.config.height },
+      { x: 0, y: this.config.height },
+    ];
+
+    for (let i = 0; i < sites.length; i += 1) {
+      const other = sites[i];
+      if (other === site) {
+        continue;
+      }
+      const midpoint = {
+        x: (site.x + other.x) * 0.5,
+        y: (site.y + other.y) * 0.5,
+      };
+      const normal = {
+        x: other.x - site.x,
+        y: other.y - site.y,
+      };
+      polygon = this.clipPolygonWithHalfPlane(polygon, midpoint, normal);
+      if (polygon.length < 3) {
+        return [];
+      }
+    }
+
+    return polygon;
+  }
+
+  private clipPolygonWithHalfPlane(polygon: Vec2[], midpoint: Vec2, normal: Vec2): Vec2[] {
+    if (polygon.length === 0) {
+      return [];
+    }
+    const clipped: Vec2[] = [];
+    const epsilon = 1e-6;
+
+    for (let i = 0; i < polygon.length; i += 1) {
+      const current = polygon[i];
+      const next = polygon[(i + 1) % polygon.length];
+      const currentValue = this.evaluateLine(current, midpoint, normal);
+      const nextValue = this.evaluateLine(next, midpoint, normal);
+      const currentInside = currentValue <= epsilon;
+      const nextInside = nextValue <= epsilon;
+
+      if (currentInside && nextInside) {
+        clipped.push(next);
+      } else if (currentInside && !nextInside) {
+        clipped.push(this.intersectSegmentWithLine(current, next, midpoint, currentValue, nextValue));
+      } else if (!currentInside && nextInside) {
+        clipped.push(this.intersectSegmentWithLine(current, next, midpoint, currentValue, nextValue));
+        clipped.push(next);
+      }
+    }
+
+    return clipped;
+  }
+
+  private evaluateLine(point: Vec2, midpoint: Vec2, normal: Vec2): number {
+    return (point.x - midpoint.x) * normal.x + (point.y - midpoint.y) * normal.y;
+  }
+
+  private intersectSegmentWithLine(
+    start: Vec2,
+    end: Vec2,
+    midpoint: Vec2,
+    startValue: number,
+    endValue: number
+  ): Vec2 {
+    const denominator = startValue - endValue;
+    if (Math.abs(denominator) < 1e-9) {
+      return {
+        x: (start.x + end.x) * 0.5,
+        y: (start.y + end.y) * 0.5,
+      };
+    }
+    const t = startValue / denominator;
+    const clampedT = Math.max(0, Math.min(1, t));
+    const intersection = {
+      x: start.x + (end.x - start.x) * clampedT,
+      y: start.y + (end.y - start.y) * clampedT,
+    };
+    if (Number.isFinite(intersection.x) && Number.isFinite(intersection.y)) {
+      return intersection;
+    }
+    return {
+      x: midpoint.x,
+      y: midpoint.y,
+    };
+  }
+
+  private flattenPolygon(polygon: Vec2[]): number[] {
+    const flat: number[] = [];
+    for (let i = 0; i < polygon.length; i += 1) {
+      flat.push(polygon[i].x, polygon[i].y);
+    }
+    return flat;
+  }
+
+  private buildMapGraph(sites: Vec2[], cells: Vec2[][]): MapGraph {
+    const centers: GraphCenter[] = sites.map((site, index) => ({
+      index,
+      point: site,
+      corners: [],
+      neighbors: [],
+      borders: [],
+    }));
+    const corners: GraphCorner[] = [];
+    const edges: GraphEdge[] = [];
+    const cornerLookup = new Map<string, number>();
+    const edgeLookup = new Map<string, number>();
+
+    const quantize = (value: number): number => Math.round(value * 1000);
+    const cornerKey = (point: Vec2): string => quantize(point.x) + ':' + quantize(point.y);
+    const edgeKey = (a: number, b: number): string => (a < b ? a + ':' + b : b + ':' + a);
+
+    const getCornerIndex = (point: Vec2): number => {
+      const key = cornerKey(point);
+      const existing = cornerLookup.get(key);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const index = corners.length;
+      corners.push({
+        index,
+        point: { x: point.x, y: point.y },
+        centers: [],
+        adjacent: [],
+        protrudes: [],
+      });
+      cornerLookup.set(key, index);
+      return index;
+    };
+
+    cells.forEach((cell, centerIndex) => {
+      if (!cell || cell.length < 3) {
+        return;
+      }
+      const center = centers[centerIndex];
+      const cellCornerIndices: number[] = [];
+      for (let i = 0; i < cell.length; i += 1) {
+        const cornerIndex = getCornerIndex(cell[i]);
+        cellCornerIndices.push(cornerIndex);
+        this.pushUnique(corners[cornerIndex].centers, centerIndex);
+        this.pushUnique(center.corners, cornerIndex);
+      }
+      for (let i = 0; i < cellCornerIndices.length; i += 1) {
+        const a = cellCornerIndices[i];
+        const b = cellCornerIndices[(i + 1) % cellCornerIndices.length];
+        const key = edgeKey(a, b);
+        let borderIndex = edgeLookup.get(key);
+        if (borderIndex === undefined) {
+          borderIndex = edges.length;
+          const cornerA = corners[a].point;
+          const cornerB = corners[b].point;
+          edges.push({
+            index: borderIndex,
+            centers: [centerIndex, -1],
+            corners: [a, b],
+            midpoint: {
+              x: (cornerA.x + cornerB.x) * 0.5,
+              y: (cornerA.y + cornerB.y) * 0.5,
+            },
+          });
+          edgeLookup.set(key, borderIndex);
+        } else {
+          const edge = edges[borderIndex];
+          if (edge.centers[0] !== centerIndex && edge.centers[1] !== centerIndex) {
+            edge.centers[1] = centerIndex;
+          }
+        }
+        this.pushUnique(center.borders, borderIndex);
+      }
+    });
+
+    edges.forEach((edge) => {
+      const [cornerA, cornerB] = edge.corners;
+      this.pushUnique(corners[cornerA].adjacent, cornerB);
+      this.pushUnique(corners[cornerB].adjacent, cornerA);
+      this.pushUnique(corners[cornerA].protrudes, edge.index);
+      this.pushUnique(corners[cornerB].protrudes, edge.index);
+
+      const [centerA, centerB] = edge.centers;
+      if (centerA >= 0) {
+        this.pushUnique(centers[centerA].borders, edge.index);
+      }
+      if (centerB >= 0) {
+        this.pushUnique(centers[centerB].borders, edge.index);
+      }
+      if (centerA >= 0 && centerB >= 0) {
+        this.pushUnique(centers[centerA].neighbors, centerB);
+        this.pushUnique(centers[centerB].neighbors, centerA);
+      }
+    });
+
+    return { centers, corners, edges };
+  }
+
+  private drawGraphOverlay(graph: MapGraph, terrainLayer: any): void {
+    if (!window.PIXI) {
+      return;
+    }
+    const graphLayer = new window.PIXI.Container();
+
+    const polygonGraph = new window.PIXI.Graphics();
+    graph.edges.forEach((edge) => {
+      const cornerA = graph.corners[edge.corners[0]].point;
+      const cornerB = graph.corners[edge.corners[1]].point;
+      polygonGraph.moveTo(cornerA.x, cornerA.y);
+      polygonGraph.lineTo(cornerB.x, cornerB.y);
+    });
+    polygonGraph.stroke({ width: 1.3, color: 0xff4d4f, alpha: 0.75 });
+    graphLayer.addChild(polygonGraph);
+
+    const dualGraph = new window.PIXI.Graphics();
+    graph.edges.forEach((edge) => {
+      const [centerA, centerB] = edge.centers;
+      if (centerA < 0 || centerB < 0) {
+        return;
+      }
+      const a = graph.centers[centerA].point;
+      const b = graph.centers[centerB].point;
+      dualGraph.moveTo(a.x, a.y);
+      dualGraph.lineTo(b.x, b.y);
+    });
+    dualGraph.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
+    graphLayer.addChild(dualGraph);
+
+    const cornerNodes = new window.PIXI.Graphics();
+    graph.corners.forEach((corner) => {
+      cornerNodes.circle(corner.point.x, corner.point.y, 1.8);
+    });
+    cornerNodes.fill({ color: 0xf3fff7, alpha: 0.9 });
+    graphLayer.addChild(cornerNodes);
+
+    const centerNodes = new window.PIXI.Graphics();
+    graph.centers.forEach((center) => {
+      centerNodes.circle(center.point.x, center.point.y, 2.3);
+    });
+    centerNodes.fill({ color: 0xfff0c9, alpha: 0.95 });
+    graphLayer.addChild(centerNodes);
+
+    terrainLayer.addChild(graphLayer);
+  }
+
+  private pushUnique(values: number[], value: number): void {
+    if (!values.includes(value)) {
+      values.push(value);
+    }
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  private createRng(seed: number): () => number {
+    let state = seed >>> 0;
+    return () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 4294967296;
     };
   }
 
