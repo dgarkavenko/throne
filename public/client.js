@@ -166,7 +166,7 @@ function readTerrainSettings() {
   const parsedWaterLevel = Number.parseInt((terrainWaterLevelInput && terrainWaterLevelInput.value) || '0', 10);
   const parsedWaterRoughness = Number.parseInt((terrainWaterRoughnessInput && terrainWaterRoughnessInput.value) || '50', 10);
   return {
-    spacing: clamp(Number.isNaN(parsedSpacing) ? 32 : parsedSpacing, 32, 128),
+    spacing: clamp(Number.isNaN(parsedSpacing) ? 32 : parsedSpacing, 16, 128),
     seed: clamp(Number.isNaN(parsedSeed) ? 1337 : parsedSeed, 0, 0xffffffff),
     waterLevel: clamp(Number.isNaN(parsedWaterLevel) ? 0 : parsedWaterLevel, -40, 40),
     waterRoughness: clamp(Number.isNaN(parsedWaterRoughness) ? 50 : parsedWaterRoughness, 0, 100),

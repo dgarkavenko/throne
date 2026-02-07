@@ -126,7 +126,7 @@ export const html = `<!doctype html>
       <div class="controls">
         <div class="control">
           <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">32</span></label>
-          <input id="terrain-spacing" type="range" min="32" max="128" step="1" value="32" />
+          <input id="terrain-spacing" type="range" min="16" max="128" step="1" value="32" />
         </div>
         <div class="control">
           <label for="terrain-seed">Seed</label>

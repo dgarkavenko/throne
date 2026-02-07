@@ -45,7 +45,7 @@ export function createPageLayout(): PageLayout {
   };
 
   const readTerrainSettings = (): TerrainSettings => {
-    const spacing = clamp(parseIntWithFallback(terrainSpacingInput?.value, 32), 32, 128);
+    const spacing = clamp(parseIntWithFallback(terrainSpacingInput?.value, 32), 16, 128);
     const seed = clamp(parseIntWithFallback(terrainSeedInput?.value, 1337), 0, 0xffffffff);
     const waterLevel = clamp(parseIntWithFallback(terrainWaterLevelInput?.value, 0), -40, 40);
     const waterRoughness = clamp(parseIntWithFallback(terrainWaterRoughnessInput?.value, 50), 0, 100);

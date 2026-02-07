@@ -127,7 +127,7 @@ export class GameEngine {
   ): void {
     const safeValue = (value: number, fallback: number): number => (Number.isFinite(value) ? value : fallback);
     this.terrainControls = {
-      spacing: this.clamp(Math.round(safeValue(spacing, 32)), 32, 128),
+      spacing: this.clamp(Math.round(safeValue(spacing, 32)), 16, 128),
       showGraphs,
       seed: this.clamp(Math.floor(safeValue(seed, 1337)), 0, 0xffffffff),
       waterLevel: this.clamp(Math.round(safeValue(waterLevel, 0)), -40, 40),
