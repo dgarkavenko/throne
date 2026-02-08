@@ -263,6 +263,12 @@ export const html = `<!doctype html>
               </label>
               <input id="terrain-river-branch-chance" type="range" min="0" max="1" step="0.05" value="0.25" />
             </div>
+            <div class="control">
+              <label for="terrain-river-climb-chance">
+                Climb Chance <span id="terrain-river-climb-chance-value">0.35</span>
+              </label>
+              <input id="terrain-river-climb-chance" type="range" min="0" max="1" step="0.05" value="0.35" />
+            </div>
           </details>
           <details class="control-group">
             <summary>Land</summary>

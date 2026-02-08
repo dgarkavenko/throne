@@ -39,6 +39,7 @@ export type TerrainControls = {
 	waterWarpStrength: number;
 	riverDensity: number;
 	riverBranchChance: number;
+	riverClimbChance: number;
 	landRelief: number;
 	ridgeStrength: number;
 	ridgeCount: number;
@@ -516,6 +517,16 @@ type RiverCandidate = {
 	nextElevation: number;
 };
 
+type RiverTrace = {
+	points: Vec2[];
+	edges: number[];
+	faces: number[];
+	vertices: number[];
+	maxElevation: number;
+	length: number;
+	startFace: number;
+};
+
 function buildRivers(
 	mesh: MeshGraph,
 	refinedGeometry: RefinedGeometry,
@@ -524,6 +535,7 @@ function buildRivers(
 ): RiverPath[] {
 	const riverDensity = clamp(controls.riverDensity ?? 0, 0, 2);
 	const riverBranchChance = clamp(controls.riverBranchChance ?? 0.25, 0, 1);
+	const riverClimbChance = clamp(controls.riverClimbChance ?? 0.35, 0, 1);
 	const riverSeed = (controls.seed ^ 0x9e3779b9) >>> 0;
 	if (riverDensity <= 0) {
 		return [];
@@ -556,56 +568,177 @@ function buildRivers(
 		return [];
 	}
 
-	const baseCount = Math.max(1, Math.round(shorelineVertices.length / 60));
+	const isShorelineFace = new Array<boolean>(mesh.faces.length).fill(false);
+	for (let i = 0; i < mesh.faces.length; i += 1) {
+		const face = mesh.faces[i];
+		if (face.elevation >= 1 && isFaceShoreline(mesh, face.index)) {
+			isShorelineFace[face.index] = true;
+		}
+	}
+
+	const shorelineVerticesByFace: number[][] = new Array(mesh.faces.length);
+	for (let i = 0; i < shorelineVerticesByFace.length; i += 1) {
+		shorelineVerticesByFace[i] = [];
+	}
+	for (let i = 0; i < shorelineVertices.length; i += 1) {
+		const vertexIndex = shorelineVertices[i];
+		const vertex = mesh.vertices[vertexIndex];
+		for (let j = 0; j < vertex.faces.length; j += 1) {
+			const faceIndex = vertex.faces[j];
+			if (isShorelineFace[faceIndex]) {
+				shorelineVerticesByFace[faceIndex].push(vertexIndex);
+			}
+		}
+	}
+
+	const shorelineFaces: number[] = [];
+	for (let i = 0; i < mesh.faces.length; i += 1) {
+		if (isShorelineFace[i] && shorelineVerticesByFace[i].length > 0) {
+			shorelineFaces.push(i);
+		}
+	}
+	if (shorelineFaces.length === 0) {
+		return [];
+	}
+
+	const baseCount = Math.max(1, Math.round(shorelineFaces.length / 10));
 	const desiredCount = Math.round(baseCount * riverDensity);
 	if (desiredCount <= 0) {
 		return [];
 	}
 
-	const mouthCandidates: Array<{ vertex: number; startFace: number }> = [];
-	for (let i = 0; i < shorelineVertices.length; i += 1) {
-		const vertexIndex = shorelineVertices[i];
-		const startFace = pickStartFaceForMouth(mesh, vertexIndex, random);
-		if (startFace < 0) {
-			continue;
-		}
-		if (!hasValidRiverStart(mesh, vertexIndex, startFace)) {
-			continue;
-		}
-		mouthCandidates.push({ vertex: vertexIndex, startFace });
-	}
-	if (mouthCandidates.length === 0) {
+	const startFaces = pickRandomShorelineFaces(shorelineFaces, desiredCount, random);
+	if (startFaces.length === 0) {
 		return [];
 	}
 
-	const mouths = pickRiverMouthsWithFaces(mouthCandidates, desiredCount, random);
-	const usedEdges = new Set<number>();
 	const riverPolylineCache = new Map<number, Vec2[]>();
 	const maxSteps = clamp(Math.round(mesh.vertices.length * 0.15), 40, 260);
-	const paths: RiverPath[] = [];
+	const candidates: RiverTrace[] = [];
 
-	for (let i = 0; i < mouths.length; i += 1) {
-		const mouth = mouths[i];
-		const visitedFaces = new Set<number>([mouth.startFace]);
-		const riverPaths = growRiverPath(
+	for (let i = 0; i < startFaces.length; i += 1) {
+		const startFace = startFaces[i];
+		const startVertices = shorelineVerticesByFace[startFace];
+		if (!startVertices || startVertices.length === 0) {
+			continue;
+		}
+		const startVertex = startVertices[Math.floor(random() * startVertices.length)];
+		if (!hasValidRiverStart(mesh, startVertex, startFace)) {
+			continue;
+		}
+		const trace = traceRiverPath(
 			mesh,
 			refinedGeometry,
 			controls,
 			riverSeed,
 			riverPolylineCache,
-			usedEdges,
+			riverClimbChance,
 			random,
-			mouth.vertex,
-			mouth.startFace,
+			startVertex,
+			startFace,
 			maxSteps,
-			0,
-			0,
-			riverBranchChance,
-			visitedFaces
+			new Set<number>(),
+			new Set<number>()
 		);
-		for (let j = 0; j < riverPaths.length; j += 1) {
-			if (riverPaths[j].points.length >= 2) {
-				paths.push(riverPaths[j]);
+		if (trace && trace.points.length >= 2) {
+			candidates.push(trace);
+		}
+	}
+
+	if (candidates.length === 0) {
+		return [];
+	}
+
+	const ranked = candidates.slice().sort((a, b) => {
+		if (b.length !== a.length) {
+			return b.length - a.length;
+		}
+		if (b.maxElevation !== a.maxElevation) {
+			return b.maxElevation - a.maxElevation;
+		}
+		const aTie = hash2D(a.startFace, 991, riverSeed);
+		const bTie = hash2D(b.startFace, 991, riverSeed);
+		return aTie - bTie;
+	});
+
+	const mainCount = Math.max(1, Math.round(ranked.length * 0.5));
+	const usedEdges = new Set<number>();
+	const usedFaces = new Set<number>();
+	const branchFaces = new Set<number>();
+	const mainTraces: RiverTrace[] = [];
+
+	for (let i = 0; i < ranked.length && mainTraces.length < mainCount; i += 1) {
+		const trace = ranked[i];
+		let overlaps = false;
+		for (let e = 0; e < trace.edges.length; e += 1) {
+			if (usedEdges.has(trace.edges[e])) {
+				overlaps = true;
+				break;
+			}
+		}
+		if (overlaps) {
+			continue;
+		}
+		mainTraces.push(trace);
+		for (let e = 0; e < trace.edges.length; e += 1) {
+			usedEdges.add(trace.edges[e]);
+		}
+		for (let f = 0; f < trace.faces.length; f += 1) {
+			usedFaces.add(trace.faces[f]);
+		}
+	}
+
+	if (mainTraces.length === 0) {
+		return [];
+	}
+
+	const paths: RiverPath[] = [];
+	for (let i = 0; i < mainTraces.length; i += 1) {
+		paths.push({ points: mainTraces[i].points, depth: 0 });
+	}
+
+	for (let i = 0; i < mainTraces.length; i += 1) {
+		const main = mainTraces[i];
+		const vertexCount = main.vertices.length;
+		for (let j = 1; j < vertexCount - 1; j += 1) {
+			if (random() >= riverBranchChance) {
+				continue;
+			}
+			const startVertex = main.vertices[j];
+			const startFace = main.faces[j];
+			const branchTrace = traceRiverPath(
+				mesh,
+				refinedGeometry,
+				controls,
+				riverSeed,
+				riverPolylineCache,
+				riverClimbChance,
+				random,
+				startVertex,
+				startFace,
+				maxSteps,
+				usedEdges,
+				branchFaces
+			);
+			if (!branchTrace || branchTrace.points.length < 2) {
+				continue;
+			}
+			let overlaps = false;
+			for (let e = 0; e < branchTrace.edges.length; e += 1) {
+				if (usedEdges.has(branchTrace.edges[e])) {
+					overlaps = true;
+					break;
+				}
+			}
+			if (overlaps) {
+				continue;
+			}
+			paths.push({ points: branchTrace.points, depth: 1 });
+			for (let e = 0; e < branchTrace.edges.length; e += 1) {
+				usedEdges.add(branchTrace.edges[e]);
+			}
+			for (let f = 0; f < branchTrace.faces.length; f += 1) {
+				branchFaces.add(branchTrace.faces[f]);
 			}
 		}
 	}
@@ -624,235 +757,202 @@ function isFaceShoreline(mesh: MeshGraph, faceIndex: number): boolean {
 	return false;
 }
 
-function pickStartFaceForMouth(mesh: MeshGraph, vertexIndex: number, random: () => number): number {
-	const vertex = mesh.vertices[vertexIndex];
-	const shorelineFaces = vertex.faces.filter(
-		(faceIndex) => mesh.faces[faceIndex].elevation >= 1 && isFaceShoreline(mesh, faceIndex)
-	);
-	if (shorelineFaces.length === 0) {
-		return -1;
-	}
-	let minElevation = Number.POSITIVE_INFINITY;
-	for (let i = 0; i < shorelineFaces.length; i += 1) {
-		minElevation = Math.min(minElevation, mesh.faces[shorelineFaces[i]].elevation);
-	}
-	const lowest = shorelineFaces.filter(
-		(faceIndex) => mesh.faces[faceIndex].elevation === minElevation
-	);
-	return lowest[Math.floor(random() * lowest.length)] ?? -1;
-}
-
 function hasValidRiverStart(mesh: MeshGraph, vertexIndex: number, startFace: number): boolean {
 	const currentElevation = mesh.faces[startFace].elevation;
-	const vertex = mesh.vertices[vertexIndex];
-	for (let i = 0; i < vertex.edges.length; i += 1) {
-		const edgeIndex = vertex.edges[i];
-		const edge = mesh.edges[edgeIndex];
-		const [faceA, faceB] = edge.faces;
-		if (faceA < 0 || faceB < 0) {
-			continue;
-		}
-		if (mesh.faces[faceA].elevation < 1 || mesh.faces[faceB].elevation < 1) {
-			continue;
-		}
-		let nextFace: number | null = null;
-		if (faceA === startFace || faceB === startFace) {
-			nextFace = faceA === startFace ? faceB : faceA;
-		} else {
-			const elevA = mesh.faces[faceA].elevation;
-			const elevB = mesh.faces[faceB].elevation;
-			if (elevA >= currentElevation || elevB >= currentElevation) {
-				nextFace = elevA >= elevB ? faceA : faceB;
-			}
-		}
-		if (nextFace === null) {
-			continue;
-		}
-		if (mesh.faces[nextFace].elevation < currentElevation) {
-			continue;
-		}
-		return true;
+	if (currentElevation < 1) {
+		return false;
 	}
-	return false;
+	const visitedFaces = new Set<number>([startFace]);
+	const candidates = collectRiverCandidates(
+		mesh,
+		new Set<number>(),
+		visitedFaces,
+		vertexIndex,
+		startFace,
+		currentElevation
+	);
+	if (candidates.length === 0) {
+		return false;
+	}
+	let hasHigher = false;
+	let hasFlat = false;
+	for (let i = 0; i < candidates.length; i += 1) {
+		const elevation = candidates[i].nextElevation;
+		if (elevation > currentElevation) {
+			hasHigher = true;
+			break;
+		}
+		if (elevation === currentElevation) {
+			hasFlat = true;
+		}
+	}
+	return hasHigher || hasFlat;
 }
 
-function pickRiverMouthsWithFaces(
-	candidates: Array<{ vertex: number; startFace: number }>,
+function pickRandomShorelineFaces(
+	faces: number[],
 	desiredCount: number,
 	random: () => number
-): Array<{ vertex: number; startFace: number }> {
-	const pool = candidates.slice();
+): number[] {
+	const pool = faces.slice();
 	const count = Math.min(desiredCount, pool.length);
-	const mouths: Array<{ vertex: number; startFace: number }> = [];
+	const picks: number[] = [];
 	for (let i = 0; i < count; i += 1) {
 		const idx = Math.floor(random() * pool.length);
 		const pick = pool[idx];
-		mouths.push(pick);
+		picks.push(pick);
 		pool[idx] = pool[pool.length - 1];
 		pool.pop();
 		if (pool.length === 0) {
 			break;
 		}
 	}
-	return mouths;
+	return picks;
 }
 
-function growRiverPath(
+function traceRiverPath(
 	mesh: MeshGraph,
 	refinedGeometry: RefinedGeometry,
 	controls: TerrainControls,
 	riverSeed: number,
 	riverPolylineCache: Map<number, Vec2[]>,
-	usedEdges: Set<number>,
+	riverClimbChance: number,
 	random: () => number,
 	startVertex: number,
 	startFace: number,
 	maxSteps: number,
-	depth: number,
-	initialFlatSteps: number,
-	branchChance: number,
-	visitedFaces: Set<number>
-): RiverPath[] {
-	const paths: RiverPath[] = [];
-	const points: Vec2[] = [];
+	blockedEdges: Set<number>,
+	blockedFaces: Set<number>
+): RiverTrace | null {
 	let currentVertex = startVertex;
 	let currentFace = startFace;
 	let currentElevation = mesh.faces[currentFace].elevation;
 	if (currentElevation < 1) {
-		return paths;
+		return null;
 	}
-	let flatSteps = initialFlatSteps;
+	const points: Vec2[] = [];
+	const edges: number[] = [];
+	const faces: number[] = [startFace];
+	const vertices: number[] = [startVertex];
+	const visitedFaces = new Set<number>(blockedFaces);
+	visitedFaces.add(startFace);
+	let maxElevation = currentElevation;
+	let flatSteps = 0;
 	let steps = 0;
 
 	while (steps < maxSteps) {
 		const candidates = collectRiverCandidates(
 			mesh,
-			usedEdges,
+			blockedEdges,
 			visitedFaces,
 			currentVertex,
 			currentFace,
-			currentElevation,
-			flatSteps
+			currentElevation
 		);
 		if (candidates.length === 0) {
 			break;
 		}
-		let remaining = candidates.slice();
-		let main: RiverCandidate | null = null;
-		let branch: RiverCandidate | null = null;
-		let mainSegment: Vec2[] = [];
-		let branchSegment: Vec2[] = [];
-		while (remaining.length > 0 && !main) {
-			const selection = chooseRiverEdges(remaining, random, depth, branchChance);
-			const candidateMain = selection.main;
-			const segment = collectRiverEdgePolyline(
-				mesh,
-				refinedGeometry,
-				controls,
-				riverSeed,
-				riverPolylineCache,
-				candidateMain.edgeIndex,
-				currentVertex,
-				candidateMain.nextVertex
-			);
-			if (segment.length < 2 || (points.length > 0 && !pointsEqual(points[points.length - 1], segment[0]))) {
-				remaining = remaining.filter((candidate) => candidate !== candidateMain);
-				continue;
-			}
-			main = candidateMain;
-			mainSegment = segment;
-			branch = selection.branch;
-			if (branch) {
-				const candidateBranch = collectRiverEdgePolyline(
-					mesh,
-					refinedGeometry,
-					controls,
-					riverSeed,
-					riverPolylineCache,
-					branch.edgeIndex,
-					currentVertex,
-					branch.nextVertex
-				);
-				if (
-					candidateBranch.length < 2 ||
-					(points.length > 0 && !pointsEqual(points[points.length - 1], candidateBranch[0]))
-				) {
-					branch = null;
-				} else {
-					branchSegment = candidateBranch;
-				}
+		const higherCandidates = candidates.filter(
+			(candidate) => candidate.nextElevation > currentElevation
+		);
+		const equalCandidates = candidates.filter(
+			(candidate) => candidate.nextElevation === currentElevation
+		);
+		let usableCandidates: RiverCandidate[] = [];
+		if (higherCandidates.length > 0) {
+			usableCandidates = higherCandidates;
+		} else if (equalCandidates.length > 0) {
+			const canContinueFlat =
+				flatSteps < 3 || (riverClimbChance > 0 && random() < riverClimbChance);
+			if (canContinueFlat) {
+				usableCandidates = equalCandidates;
 			}
 		}
-		if (!main) {
+		if (usableCandidates.length === 0) {
 			break;
 		}
 
-		if (branch) {
-			usedEdges.add(branch.edgeIndex);
-			const nextFlatSteps = branch.nextElevation === currentElevation ? flatSteps + 1 : 0;
-			const branchVisited = new Set<number>(visitedFaces);
-			branchVisited.add(branch.nextFace);
-			const branchPaths = growRiverPath(
+		let bestElevation = -Infinity;
+		for (let i = 0; i < usableCandidates.length; i += 1) {
+			bestElevation = Math.max(bestElevation, usableCandidates[i].nextElevation);
+		}
+		let remaining = usableCandidates.filter(
+			(candidate) => candidate.nextElevation === bestElevation
+		);
+		let selected: RiverCandidate | null = null;
+		let segment: Vec2[] = [];
+		while (remaining.length > 0 && !selected) {
+			const idx = Math.floor(random() * remaining.length);
+			const candidate = remaining[idx];
+			const candidateSegment = collectRiverEdgePolyline(
 				mesh,
 				refinedGeometry,
 				controls,
 				riverSeed,
 				riverPolylineCache,
-				usedEdges,
-				random,
-				branch.nextVertex,
-				branch.nextFace,
-				Math.max(0, maxSteps - steps - 1),
-				depth + 1,
-				nextFlatSteps,
-				branchChance,
-				branchVisited
+				candidate.edgeIndex,
+				currentVertex,
+				candidate.nextVertex
 			);
-			if (branchPaths.length === 0) {
-				if (branchSegment.length >= 2) {
-					paths.push({ points: branchSegment, depth: depth + 1 });
-				}
-			} else {
-				for (let i = 0; i < branchPaths.length; i += 1) {
-					const merged = concatPathsIfConnected(branchSegment, branchPaths[i].points);
-					if (merged) {
-						paths.push({ points: merged, depth: branchPaths[i].depth });
-					}
-				}
+			if (
+				candidateSegment.length < 2 ||
+				(points.length > 0 &&
+					!pointsEqual(points[points.length - 1], candidateSegment[0]))
+			) {
+				remaining[idx] = remaining[remaining.length - 1];
+				remaining.pop();
+				continue;
 			}
+			selected = candidate;
+			segment = candidateSegment;
+		}
+		if (!selected) {
+			break;
 		}
 
-		usedEdges.add(main.edgeIndex);
-		appendPath(points, mainSegment);
-		const nextElevation = main.nextElevation;
+		appendPath(points, segment);
+		edges.push(selected.edgeIndex);
+		vertices.push(selected.nextVertex);
+		faces.push(selected.nextFace);
+		visitedFaces.add(selected.nextFace);
+
+		const nextElevation = selected.nextElevation;
 		flatSteps = nextElevation === currentElevation ? flatSteps + 1 : 0;
-		currentVertex = main.nextVertex;
-		currentFace = main.nextFace;
+		currentVertex = selected.nextVertex;
+		currentFace = selected.nextFace;
 		currentElevation = nextElevation;
-		visitedFaces.add(currentFace);
+		maxElevation = Math.max(maxElevation, nextElevation);
 		steps += 1;
 	}
 
-	if (points.length >= 2) {
-		paths.push({ points, depth });
+	if (points.length < 2) {
+		return null;
 	}
-	return paths;
+	const length = computePathLength(points);
+	return {
+		points,
+		edges,
+		faces,
+		vertices,
+		maxElevation,
+		length,
+		startFace,
+	};
 }
 
 function collectRiverCandidates(
 	mesh: MeshGraph,
-	usedEdges: Set<number>,
+	blockedEdges: Set<number>,
 	visitedFaces: Set<number>,
 	currentVertex: number,
 	currentFace: number,
-	currentElevation: number,
-	flatSteps: number
+	currentElevation: number
 ): RiverCandidate[] {
 	const candidates: RiverCandidate[] = [];
 	const vertex = mesh.vertices[currentVertex];
 	for (let i = 0; i < vertex.edges.length; i += 1) {
 		const edgeIndex = vertex.edges[i];
-		if (usedEdges.has(edgeIndex)) {
+		if (blockedEdges.has(edgeIndex)) {
 			continue;
 		}
 		const edge = mesh.edges[edgeIndex];
@@ -860,63 +960,24 @@ function collectRiverCandidates(
 		if (faceA < 0 || faceB < 0) {
 			continue;
 		}
-		if (mesh.faces[faceA].elevation < 1 || mesh.faces[faceB].elevation < 1) {
+		if (faceA !== currentFace && faceB !== currentFace) {
 			continue;
 		}
-		const nextVertex = edge.vertices[0] === currentVertex ? edge.vertices[1] : edge.vertices[0];
-		let nextFace: number | null = null;
-		if (faceA === currentFace || faceB === currentFace) {
-			nextFace = faceA === currentFace ? faceB : faceA;
-		} else {
-			const elevA = mesh.faces[faceA].elevation;
-			const elevB = mesh.faces[faceB].elevation;
-			if (elevA >= currentElevation || elevB >= currentElevation) {
-				nextFace = elevA >= elevB ? faceA : faceB;
-			}
-		}
-		if (nextFace === null) {
-			continue;
-		}
+		const nextFace = faceA === currentFace ? faceB : faceA;
 		if (visitedFaces.has(nextFace)) {
+			continue;
+		}
+		if (mesh.faces[nextFace].elevation < 1) {
 			continue;
 		}
 		const nextElevation = mesh.faces[nextFace].elevation;
 		if (nextElevation < currentElevation) {
 			continue;
 		}
-		if (nextElevation === currentElevation && flatSteps >= 3) {
-			continue;
-		}
+		const nextVertex = edge.vertices[0] === currentVertex ? edge.vertices[1] : edge.vertices[0];
 		candidates.push({ edgeIndex, nextVertex, nextFace, nextElevation });
 	}
 	return candidates;
-}
-
-function chooseRiverEdges(
-	candidates: RiverCandidate[],
-	random: () => number,
-	depth: number,
-	branchChance: number
-): { main: RiverCandidate; branch: RiverCandidate | null } {
-	let bestElevation = -Infinity;
-	for (let i = 0; i < candidates.length; i += 1) {
-		bestElevation = Math.max(bestElevation, candidates[i].nextElevation);
-	}
-	const bestCandidates = candidates.filter((candidate) => candidate.nextElevation === bestElevation);
-	const main = bestCandidates[Math.floor(random() * bestCandidates.length)];
-
-	const remaining = candidates.filter((candidate) => candidate !== main);
-	let branch: RiverCandidate | null = null;
-	if (remaining.length > 0 && depth < 2 && random() < branchChance) {
-		let altElevation = -Infinity;
-		for (let i = 0; i < remaining.length; i += 1) {
-			altElevation = Math.max(altElevation, remaining[i].nextElevation);
-		}
-		const altCandidates = remaining.filter((candidate) => candidate.nextElevation === altElevation);
-		branch = altCandidates[Math.floor(random() * altCandidates.length)];
-	}
-
-	return { main, branch };
 }
 
 function getRiverBasePolyline(
