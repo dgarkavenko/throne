@@ -1,6 +1,10 @@
 type TerrainSettings = {
   spacing: number;
-  showGraphs: boolean;
+  showPolygonGraph: boolean;
+  showDualGraph: boolean;
+  showCornerNodes: boolean;
+  showCenterNodes: boolean;
+  showInsertedPoints: boolean;
   seed: number;
   waterLevel: number;
   waterRoughness: number;
@@ -33,7 +37,11 @@ export function createPageLayout(): PageLayout {
   const terrainSeedInput = document.getElementById('terrain-seed') as HTMLInputElement | null;
   const terrainWaterLevelInput = document.getElementById('terrain-water-level') as HTMLInputElement | null;
   const terrainWaterRoughnessInput = document.getElementById('terrain-water-roughness') as HTMLInputElement | null;
-  const terrainGraphsInput = document.getElementById('terrain-graphs') as HTMLInputElement | null;
+  const terrainGraphPolygonsInput = document.getElementById('terrain-graph-polygons') as HTMLInputElement | null;
+  const terrainGraphDualInput = document.getElementById('terrain-graph-dual') as HTMLInputElement | null;
+  const terrainGraphCornersInput = document.getElementById('terrain-graph-corners') as HTMLInputElement | null;
+  const terrainGraphCentersInput = document.getElementById('terrain-graph-centers') as HTMLInputElement | null;
+  const terrainGraphInsertedInput = document.getElementById('terrain-graph-inserted') as HTMLInputElement | null;
   const terrainSpacingValue = document.getElementById('terrain-spacing-value');
   const terrainWaterLevelValue = document.getElementById('terrain-water-level-value');
   const terrainWaterRoughnessValue = document.getElementById('terrain-water-roughness-value');
@@ -49,8 +57,22 @@ export function createPageLayout(): PageLayout {
     const seed = clamp(parseIntWithFallback(terrainSeedInput?.value, 1337), 0, 0xffffffff);
     const waterLevel = clamp(parseIntWithFallback(terrainWaterLevelInput?.value, 0), -40, 40);
     const waterRoughness = clamp(parseIntWithFallback(terrainWaterRoughnessInput?.value, 50), 0, 100);
-    const showGraphs = Boolean(terrainGraphsInput?.checked);
-    return { spacing, showGraphs, seed, waterLevel, waterRoughness };
+    const showPolygonGraph = Boolean(terrainGraphPolygonsInput?.checked);
+    const showDualGraph = Boolean(terrainGraphDualInput?.checked);
+    const showCornerNodes = Boolean(terrainGraphCornersInput?.checked);
+    const showCenterNodes = Boolean(terrainGraphCentersInput?.checked);
+    const showInsertedPoints = Boolean(terrainGraphInsertedInput?.checked);
+    return {
+      spacing,
+      showPolygonGraph,
+      showDualGraph,
+      showCornerNodes,
+      showCenterNodes,
+      showInsertedPoints,
+      seed,
+      waterLevel,
+      waterRoughness,
+    };
   };
 
   const syncTerrainLabels = (): void => {
@@ -111,7 +133,11 @@ export function createPageLayout(): PageLayout {
       terrainSeedInput?.addEventListener('change', notify);
       terrainWaterLevelInput?.addEventListener('input', notify);
       terrainWaterRoughnessInput?.addEventListener('input', notify);
-      terrainGraphsInput?.addEventListener('change', notify);
+      terrainGraphPolygonsInput?.addEventListener('change', notify);
+      terrainGraphDualInput?.addEventListener('change', notify);
+      terrainGraphCornersInput?.addEventListener('change', notify);
+      terrainGraphCentersInput?.addEventListener('change', notify);
+      terrainGraphInsertedInput?.addEventListener('change', notify);
     },
   };
 }

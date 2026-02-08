@@ -45,7 +45,7 @@ Minimal real-time chat + terrain playground running on Cloudflare Workers with D
   - Seed
   - Water level
   - Water roughness
-  - Optional graph visualization
+  - Optional mesh visualization
 - Session timer and FPS display.
 - Room selection via query param:
   - `/?room=lobby` (default is `lobby`).

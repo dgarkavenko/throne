@@ -17,6 +17,11 @@ main {
   gap: 1rem;
   justify-items: center;
 }
+.layout {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
 .session {
   font-size: 0.95rem;
   letter-spacing: 0.01em;
@@ -47,19 +52,18 @@ main {
   opacity: 0.75;
 }
 .controls {
-  width: min(100%, 1560px);
+  width: 260px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  justify-content: center;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: stretch;
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   opacity: 0.9;
 }
 .control {
-  min-width: 220px;
+  min-width: 0;
   display: grid;
   gap: 0.35rem;
 }
@@ -83,7 +87,7 @@ main {
   font-size: 0.82rem;
 }
 .control.toggle {
-  min-width: 180px;
+  min-width: 0;
   align-items: center;
 }
 .control.toggle label {
@@ -100,6 +104,19 @@ main {
   body {
     align-items: flex-start;
     padding: 1rem 0;
+  }
+  .layout {
+    flex-direction: column;
+    align-items: center;
+  }
+  .controls {
+    width: min(100%, 1560px);
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .control {
+    min-width: 180px;
   }
   #field {
     width: min(100vw, 1560px);
@@ -123,31 +140,57 @@ export const html = `<!doctype html>
     <main>
       <div class="session" id="session">Session: --:--</div>
       <div class="fps" id="fps">FPS: --</div>
-      <div class="controls">
-        <div class="control">
-          <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">32</span></label>
-          <input id="terrain-spacing" type="range" min="16" max="128" step="1" value="32" />
+      <div class="layout">
+        <div class="controls">
+          <div class="control">
+            <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">32</span></label>
+            <input id="terrain-spacing" type="range" min="16" max="128" step="1" value="32" />
+          </div>
+          <div class="control">
+            <label for="terrain-seed">Seed</label>
+            <input id="terrain-seed" type="number" min="0" max="4294967295" step="1" value="1337" />
+          </div>
+          <div class="control">
+            <label for="terrain-water-level">Water Level <span id="terrain-water-level-value">0</span></label>
+            <input id="terrain-water-level" type="range" min="-40" max="40" step="1" value="0" />
+          </div>
+          <div class="control">
+            <label for="terrain-water-roughness">Water Roughness <span id="terrain-water-roughness-value">50</span></label>
+            <input id="terrain-water-roughness" type="range" min="0" max="100" step="1" value="50" />
+          </div>
+          <div class="control toggle">
+            <label for="terrain-graph-polygons">
+              <input id="terrain-graph-polygons" type="checkbox" />
+              Mesh Polygons
+            </label>
+          </div>
+          <div class="control toggle">
+            <label for="terrain-graph-dual">
+              <input id="terrain-graph-dual" type="checkbox" />
+              Mesh Dual
+            </label>
+          </div>
+          <div class="control toggle">
+            <label for="terrain-graph-corners">
+              <input id="terrain-graph-corners" type="checkbox" />
+              Mesh Vertices
+            </label>
+          </div>
+          <div class="control toggle">
+            <label for="terrain-graph-centers">
+              <input id="terrain-graph-centers" type="checkbox" />
+              Mesh Faces
+            </label>
+          </div>
+          <div class="control toggle">
+            <label for="terrain-graph-inserted">
+              <input id="terrain-graph-inserted" type="checkbox" />
+              Inserted Points
+            </label>
+          </div>
         </div>
-        <div class="control">
-          <label for="terrain-seed">Seed</label>
-          <input id="terrain-seed" type="number" min="0" max="4294967295" step="1" value="1337" />
-        </div>
-        <div class="control">
-          <label for="terrain-water-level">Water Level <span id="terrain-water-level-value">0</span></label>
-          <input id="terrain-water-level" type="range" min="-40" max="40" step="1" value="0" />
-        </div>
-        <div class="control">
-          <label for="terrain-water-roughness">Water Roughness <span id="terrain-water-roughness-value">50</span></label>
-          <input id="terrain-water-roughness" type="range" min="0" max="100" step="1" value="50" />
-        </div>
-        <div class="control toggle">
-          <label for="terrain-graphs">
-            <input id="terrain-graphs" type="checkbox" />
-            Show Graphs
-          </label>
-        </div>
+        <div id="field"></div>
       </div>
-      <div id="field"></div>
       <div class="status" id="status">Connecting...</div>
     </main>
 

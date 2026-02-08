@@ -43,9 +43,9 @@ async function startClient() {
     });
     await engine.init(layout.field);
     const terrainSettings = layout.getTerrainSettings();
-    engine.setVoronoiControls(terrainSettings.spacing, terrainSettings.showGraphs, terrainSettings.seed, terrainSettings.waterLevel, terrainSettings.waterRoughness);
+    engine.setVoronoiControls(terrainSettings);
     layout.onTerrainSettingsChange((nextSettings) => {
-        engine.setVoronoiControls(nextSettings.spacing, nextSettings.showGraphs, nextSettings.seed, nextSettings.waterLevel, nextSettings.waterRoughness);
+        engine.setVoronoiControls(nextSettings);
     });
     engine.start((deltaMs, now) => {
         void deltaMs;

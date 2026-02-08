@@ -1,602 +1,849 @@
 export type TerrainControls = {
-  spacing: number;
-  showGraphs: boolean;
-  seed: number;
-  waterLevel: number;
-  waterRoughness: number;
+	spacing: number;
+	showPolygonGraph: boolean;
+	showDualGraph: boolean;
+	showCornerNodes: boolean;
+	showCenterNodes: boolean;
+	showInsertedPoints: boolean;
+	seed: number;
+	waterLevel: number;
+	waterRoughness: number;
 };
 
 type Vec2 = {
-  x: number;
-  y: number;
+	x: number;
+	y: number;
 };
 
-type GraphCenter = {
-  index: number;
-  point: Vec2;
-  corners: number[];
-  neighbors: number[];
-  borders: number[];
-  water: boolean;
-  ocean: boolean;
-  coast: boolean;
+enum WaterKind {
+	Land = 'land',
+	Water = 'water',
+	Ocean = 'ocean',
+	Coast = 'coast',
+}
+
+type MeshFace = {
+	// Index into mesh.faces.
+	index: number;
+	// Site location for this face.
+	point: Vec2;
+	// Indices into mesh.vertices that bound this face polygon.
+	vertices: number[];
+	// Adjacent face indices that share an edge with this face.
+	adjacentFaces: number[];
+	// Indices into mesh.edges that border this face.
+	edges: number[];
+	// Water classification used for rendering.
+	waterKind: WaterKind;
 };
 
-type GraphCorner = {
-  index: number;
-  point: Vec2;
-  centers: number[];
-  adjacent: number[];
-  protrudes: number[];
-  water: boolean;
-  ocean: boolean;
-  coast: boolean;
+type MeshVertex = {
+	// Index into mesh.vertices.
+	index: number;
+	// Vertex position.
+	point: Vec2;
+	// Indices into mesh.faces that meet at this vertex.
+	faces: number[];
+	// Indices into mesh.vertices connected by an edge.
+	adjacentVertices: number[];
+	// Indices into mesh.edges that touch this vertex.
+	edges: number[];
+	// Water classification used for rendering.
+	waterKind: WaterKind;
 };
 
-type GraphEdge = {
-  index: number;
-  centers: [number, number];
-  corners: [number, number];
-  midpoint: Vec2;
+type MeshEdge = {
+	// Index into mesh.edges.
+	index: number;
+	// Indices of adjacent faces (-1 for border).
+	faces: [number, number];
+	// Indices of endpoint vertices.
+	vertices: [number, number];
+	// Midpoint of the edge segment.
+	midpoint: Vec2;
 };
 
-type MapGraph = {
-  centers: GraphCenter[];
-  corners: GraphCorner[];
-  edges: GraphEdge[];
+type MeshGraph = {
+	faces: MeshFace[];
+	vertices: MeshVertex[];
+	edges: MeshEdge[];
 };
 
 type TerrainConfig = {
-  width: number;
-  height: number;
+	width: number;
+	height: number;
 };
 
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+const lerpVec2 = (a: Vec2, b: Vec2, t: number): Vec2 => ({
+	x: lerp(a.x, b.x, t),
+	y: lerp(a.y, b.y, t),
+});
+
 export function drawVoronoiTerrain(
-  config: TerrainConfig,
-  controls: TerrainControls,
-  terrainLayer: any
+	config: TerrainConfig,
+	controls: TerrainControls,
+	terrainLayer: any
 ): void {
-  if (!terrainLayer || !window.PIXI) {
-    return;
-  }
-  terrainLayer.removeChildren();
+	if (!terrainLayer || !window.PIXI) {
+		return;
+	}
+	const baseLayer = ensureBaseLayer(terrainLayer);
+	const meshOverlay = ensureMeshOverlay(terrainLayer);
+	baseLayer.removeChildren();
 
-  const waterTint = new window.PIXI.Graphics();
-  waterTint.rect(0, 0, config.width, config.height);
-  waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
-  terrainLayer.addChild(waterTint);
+	const waterTint = new window.PIXI.Graphics();
+	waterTint.rect(0, 0, config.width, config.height);
+	waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
+	baseLayer.addChild(waterTint);
 
-  const seed = controls.seed >>> 0;
-  const random = createRng(seed);
-  const padding = 0;
-  const sites = generatePoissonSites(config, controls.spacing, padding, random);
-  const cells: Vec2[][] = new Array(sites.length);
-  sites.forEach((site, index) => {
-    cells[index] = buildVoronoiCell(config, site, sites);
-  });
+	const seed = controls.seed >>> 0;
+	const random = createRng(seed);
+	const padding = 0;
+	const sites = generatePoissonSites(config, controls.spacing, padding, random);
+	const cells: Vec2[][] = new Array(sites.length);
+	sites.forEach((site, index) => {
+		cells[index] = buildVoronoiCell(config, site, sites);
+	});
 
-  const graph = buildMapGraph(sites, cells);
-  assignIslandWater(config, graph, cells, random, controls.waterLevel, controls.waterRoughness);
-  const landPalette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
+	const mesh = buildMeshGraph(sites, cells);
+	assignIslandWater(config, mesh, cells, random, controls.waterLevel, controls.waterRoughness);
+	const landPalette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
+	const insertedPoints: Vec2[] = [];
 
-  graph.centers.forEach((center) => {
-    const cell = cells[center.index];
-    if (!cell || cell.length < 3) {
-      return;
-    }
-    let fillColor = landPalette[Math.floor(random() * landPalette.length)];
-    let fillAlpha = 0.78;
-    let strokeColor = 0xcadfb8;
-    let strokeAlpha = 0.42;
+	mesh.faces.forEach((face) => {
+		face.adjacentFaces.forEach((adjacentId) => {
+			if (adjacentId < face.index) {
+				return;
+			}
 
-    if (center.ocean) {
-      fillColor = 0x153961;
-      fillAlpha = 0.88;
-      strokeColor = 0x7aa3ce;
-      strokeAlpha = 0.36;
-    } else if (center.water) {
-      fillColor = 0x2d5f8d;
-      fillAlpha = 0.84;
-      strokeColor = 0x9dc2e6;
-      strokeAlpha = 0.35;
-    } else if (center.coast) {
-      fillColor = 0x8c7b4f;
-      fillAlpha = 0.82;
-      strokeColor = 0xdac38e;
-      strokeAlpha = 0.38;
-    }
+			if (face.waterKind == WaterKind.Ocean && mesh.faces[adjacentId].waterKind == WaterKind.Ocean)
+			{
+				return;
+			}
 
-    const terrain = new window.PIXI.Graphics();
-    terrain.poly(flattenPolygon(cell), true);
-    terrain.fill({ color: fillColor, alpha: fillAlpha });
-    terrain.stroke({ width: 1.2, color: strokeColor, alpha: strokeAlpha });
-    terrainLayer.addChild(terrain);
-  });
+			const edgeId = findSharedEdgeIndex(mesh, face.index, adjacentId);
 
-  if (controls.showGraphs) {
-    drawGraphOverlay(graph, terrainLayer);
-  }
+			if (edgeId < 0) {
+				return;
+			}
+
+			const sharedEdge = mesh.edges[edgeId];
+			const e0 = mesh.vertices[sharedEdge.vertices[0]].point;
+			const e1 = mesh.vertices[sharedEdge.vertices[1]].point;
+
+			const dx = e1.x - e0.x;
+			const dy = e1.y - e0.y;
+			const dist = Math.hypot(dx, dy);
+
+			const c0 = face.point;
+			const c1 = mesh.faces[adjacentId].point;
+
+			const inter = generateIntermediate(c0, c1, e0, e1, 0);
+			//const inter = [];
+			if (inter.length > 0) {
+				insertedPoints.push(...inter);
+
+				const cell0 = cells[face.index];
+				const insert0 = findEdgeInsertion(cell0, e0, e1);
+				if (insert0) {
+					insertAfter(cell0, insert0.index, insert0.reverse ? inter.slice().reverse() : inter);
+				}
+
+				const cell1 = cells[adjacentId];
+				const insert1 = findEdgeInsertion(cell1, e0, e1);
+				if (insert1) {
+					insertAfter(cell1, insert1.index, insert1.reverse ? inter.slice().reverse() : inter);
+				}
+			}
+		});
+	});
+
+	mesh.faces.forEach((face) => {
+		const cell = cells[face.index];
+		if (!cell || cell.length < 3) {
+			return;
+		}
+		let fillColor = landPalette[Math.floor(random() * landPalette.length)];
+		let fillAlpha = 0.78;
+		let strokeColor = 0xcadfb8;
+		let strokeAlpha = 0.42;
+
+		if (face.waterKind === WaterKind.Ocean) {
+			fillColor = 0x153961;
+			fillAlpha = 0.88;
+			strokeColor = 0x7aa3ce;
+			strokeAlpha = 0.36;
+		} else if (face.waterKind === WaterKind.Water) {
+			fillColor = 0x2d5f8d;
+			fillAlpha = 0.84;
+			strokeColor = 0x9dc2e6;
+			strokeAlpha = 0.35;
+		} else if (face.waterKind === WaterKind.Coast) {
+			fillColor = 0x8c7b4f;
+			fillAlpha = 0.82;
+			strokeColor = 0xdac38e;
+			strokeAlpha = 0.38;
+		}
+
+		const terrain = new window.PIXI.Graphics();
+		terrain.poly(flattenPolygon(cell), true);
+		terrain.fill({ color: fillColor, alpha: fillAlpha });
+		terrain.stroke({ width: 1.2, color: strokeColor, alpha: strokeAlpha });
+		baseLayer.addChild(terrain);
+	});
+
+	renderMeshOverlay(mesh, insertedPoints, meshOverlay);
+	setGraphOverlayVisibility(terrainLayer, controls);
+}
+
+function midpoint(p1: Vec2, p2: Vec2): Vec2 {
+	return {
+		x: (p1.x + p2.x) * 0.5,
+		y: (p1.y + p2.y) * 0.5,
+	};
+};
+
+function generateIntermediate(c0: Vec2, c1: Vec2, e0: Vec2, e1: Vec2, iteration: number): Vec2[]
+{
+	const dx = e1.x - e0.x;
+	const dy = e1.y - e0.y;
+	const dist = Math.hypot(dx, dy);
+	if (dist < 5 || iteration > 8)
+	{
+		return[];
+	}
+	
+	let mid = lerpVec2(c0, c1, Math.random() * .3 + 0.35);
+	iteration += 1;
+	let left = generateIntermediate(midpoint(e0, c0), midpoint(e0, c1), e0, mid, iteration);
+	let right = generateIntermediate(midpoint(e1, c0), midpoint(e1, c1), mid, e1, iteration);
+
+	return left.concat(mid).concat(right);
+}
+
+function findSharedEdgeIndex(mesh: MeshGraph, face1: number, face2: number): number {
+	if (face1 < 0 || face2 < 0) {
+		return -1;
+	}
+	const face = mesh.faces[face1];
+	if (!face) {
+		return -1;
+	}
+	for (let i = 0; i < face.edges.length; i += 1) {
+		const edgeIndex = face.edges[i];
+		const edge = mesh.edges[edgeIndex];
+		if (!edge) {
+			continue;
+		}
+		const [a, b] = edge.faces;
+		if ((a === face1 && b === face2) || (a === face2 && b === face1)) {
+			return edgeIndex;
+		}
+	}
+	return -1;
+}
+
+function findVertexIndex(cell: Vec2[], vertex: Vec2, epsilon = 1e-3): number {
+	const epsilonSq = epsilon * epsilon;
+	for (let i = 0; i < cell.length; i += 1) {
+		const point = cell[i];
+		const dx = point.x - vertex.x;
+		const dy = point.y - vertex.y;
+		if (dx * dx + dy * dy <= epsilonSq) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+function insertAfter(cell: Vec2[], vertexIndex: number, points: Vec2[]): void {
+	if (points.length === 0) {
+		return;
+	}
+	cell.splice(vertexIndex + 1, 0, ...points);
+}
+
+function findEdgeInsertion(
+	cell: Vec2[] | undefined,
+	a: Vec2,
+	b: Vec2
+): { index: number; reverse: boolean } | null {
+	if (!cell || cell.length < 2) {
+		return null;
+	}
+	const ia = findVertexIndex(cell, a);
+	const ib = findVertexIndex(cell, b);
+	if (ia < 0 || ib < 0) {
+		return null;
+	}
+	const nextOfA = (ia + 1) % cell.length;
+	if (nextOfA === ib) {
+		return { index: ia, reverse: false };
+	}
+	const nextOfB = (ib + 1) % cell.length;
+	if (nextOfB === ia) {
+		return { index: ib, reverse: true };
+	}
+	return null;
 }
 
 function generatePoissonSites(
-  config: TerrainConfig,
-  spacing: number,
-  padding: number,
-  random: () => number
+	config: TerrainConfig,
+	spacing: number,
+	padding: number,
+	random: () => number
 ): Vec2[] {
-  return samplePoissonDisc(config, spacing, padding, random);
+	return samplePoissonDisc(config, spacing, padding, random);
 }
 
 function samplePoissonDisc(
-  config: TerrainConfig,
-  minDistance: number,
-  padding: number,
-  random: () => number
+	config: TerrainConfig,
+	minDistance: number,
+	padding: number,
+	random: () => number
 ): Vec2[] {
-  const maxAttemptsPerActivePoint = 30;
-  const width = config.width - padding * 2;
-  const height = config.height - padding * 2;
-  if (width <= 0 || height <= 0) {
-    return [];
-  }
+	const maxAttemptsPerActivePoint = 30;
+	const width = config.width - padding * 2;
+	const height = config.height - padding * 2;
+	if (width <= 0 || height <= 0) {
+		return [];
+	}
 
-  const cellSize = minDistance / Math.sqrt(2);
-  const gridWidth = Math.max(1, Math.ceil(width / cellSize));
-  const gridHeight = Math.max(1, Math.ceil(height / cellSize));
-  const grid = new Array<number>(gridWidth * gridHeight).fill(-1);
-  const points: Vec2[] = [];
-  const active: number[] = [];
+	const cellSize = minDistance / Math.sqrt(2);
+	const gridWidth = Math.max(1, Math.ceil(width / cellSize));
+	const gridHeight = Math.max(1, Math.ceil(height / cellSize));
+	const grid = new Array<number>(gridWidth * gridHeight).fill(-1);
+	const points: Vec2[] = [];
+	const active: number[] = [];
 
-  const toGridX = (x: number): number => Math.floor((x - padding) / cellSize);
-  const toGridY = (y: number): number => Math.floor((y - padding) / cellSize);
-  const isInBounds = (point: Vec2): boolean =>
-    point.x >= padding &&
-    point.x <= config.width - padding &&
-    point.y >= padding &&
-    point.y <= config.height - padding;
+	const toGridX = (x: number): number => Math.floor((x - padding) / cellSize);
+	const toGridY = (y: number): number => Math.floor((y - padding) / cellSize);
+	const isInBounds = (point: Vec2): boolean =>
+		point.x >= padding &&
+		point.x <= config.width - padding &&
+		point.y >= padding &&
+		point.y <= config.height - padding;
 
-  const registerPoint = (point: Vec2): void => {
-    points.push(point);
-    const index = points.length - 1;
-    active.push(index);
-    const gx = clamp(toGridX(point.x), 0, gridWidth - 1);
-    const gy = clamp(toGridY(point.y), 0, gridHeight - 1);
-    grid[gy * gridWidth + gx] = index;
-  };
+	const registerPoint = (point: Vec2): void => {
+		points.push(point);
+		const index = points.length - 1;
+		active.push(index);
+		const gx = clamp(toGridX(point.x), 0, gridWidth - 1);
+		const gy = clamp(toGridY(point.y), 0, gridHeight - 1);
+		grid[gy * gridWidth + gx] = index;
+	};
 
-  const isFarEnough = (point: Vec2): boolean => {
-    if (!isInBounds(point)) {
-      return false;
-    }
-    const gx = clamp(toGridX(point.x), 0, gridWidth - 1);
-    const gy = clamp(toGridY(point.y), 0, gridHeight - 1);
-    const minGridX = Math.max(0, gx - 2);
-    const maxGridX = Math.min(gridWidth - 1, gx + 2);
-    const minGridY = Math.max(0, gy - 2);
-    const maxGridY = Math.min(gridHeight - 1, gy + 2);
-    const minDistanceSquared = minDistance * minDistance;
+	const isFarEnough = (point: Vec2): boolean => {
+		if (!isInBounds(point)) {
+			return false;
+		}
+		const gx = clamp(toGridX(point.x), 0, gridWidth - 1);
+		const gy = clamp(toGridY(point.y), 0, gridHeight - 1);
+		const minGridX = Math.max(0, gx - 2);
+		const maxGridX = Math.min(gridWidth - 1, gx + 2);
+		const minGridY = Math.max(0, gy - 2);
+		const maxGridY = Math.min(gridHeight - 1, gy + 2);
+		const minDistanceSquared = minDistance * minDistance;
 
-    for (let y = minGridY; y <= maxGridY; y += 1) {
-      for (let x = minGridX; x <= maxGridX; x += 1) {
-        const pointIndex = grid[y * gridWidth + x];
-        if (pointIndex < 0) {
-          continue;
-        }
-        const other = points[pointIndex];
-        const dx = other.x - point.x;
-        const dy = other.y - point.y;
-        if (dx * dx + dy * dy < minDistanceSquared) {
-          return false;
-        }
-      }
-    }
-    return true;
-  };
+		for (let y = minGridY; y <= maxGridY; y += 1) {
+			for (let x = minGridX; x <= maxGridX; x += 1) {
+				const pointIndex = grid[y * gridWidth + x];
+				if (pointIndex < 0) {
+					continue;
+				}
+				const other = points[pointIndex];
+				const dx = other.x - point.x;
+				const dy = other.y - point.y;
+				if (dx * dx + dy * dy < minDistanceSquared) {
+					return false;
+				}
+			}
+		}
+		return true;
+	};
 
-  registerPoint({
-    x: padding + random() * width,
-    y: padding + random() * height,
-  });
+	registerPoint({
+		x: padding + random() * width,
+		y: padding + random() * height,
+	});
 
-  while (active.length > 0) {
-    const activeListIndex = Math.floor(random() * active.length);
-    const originIndex = active[activeListIndex];
-    const origin = points[originIndex];
-    let foundCandidate = false;
+	while (active.length > 0) {
+		const activeListIndex = Math.floor(random() * active.length);
+		const originIndex = active[activeListIndex];
+		const origin = points[originIndex];
+		let foundCandidate = false;
 
-    for (let attempt = 0; attempt < maxAttemptsPerActivePoint; attempt += 1) {
-      const angle = random() * Math.PI * 2;
-      const radius = minDistance * (1 + random());
-      const candidate = {
-        x: origin.x + Math.cos(angle) * radius,
-        y: origin.y + Math.sin(angle) * radius,
-      };
-      if (!isFarEnough(candidate)) {
-        continue;
-      }
-      registerPoint(candidate);
-      foundCandidate = true;
-      break;
-    }
+		for (let attempt = 0; attempt < maxAttemptsPerActivePoint; attempt += 1) {
+			const angle = random() * Math.PI * 2;
+			const radius = minDistance * (1 + random());
+			const candidate = {
+				x: origin.x + Math.cos(angle) * radius,
+				y: origin.y + Math.sin(angle) * radius,
+			};
+			if (!isFarEnough(candidate)) {
+				continue;
+			}
+			registerPoint(candidate);
+			foundCandidate = true;
+			break;
+		}
 
-    if (!foundCandidate) {
-      const lastIndex = active.length - 1;
-      active[activeListIndex] = active[lastIndex];
-      active.pop();
-    }
-  }
+		if (!foundCandidate) {
+			const lastIndex = active.length - 1;
+			active[activeListIndex] = active[lastIndex];
+			active.pop();
+		}
+	}
 
-  return points;
+	return points;
 }
 
 function buildVoronoiCell(config: TerrainConfig, site: Vec2, sites: Vec2[]): Vec2[] {
-  let polygon: Vec2[] = [
-    { x: 0, y: 0 },
-    { x: config.width, y: 0 },
-    { x: config.width, y: config.height },
-    { x: 0, y: config.height },
-  ];
+	let polygon: Vec2[] = [
+		{ x: 0, y: 0 },
+		{ x: config.width, y: 0 },
+		{ x: config.width, y: config.height },
+		{ x: 0, y: config.height },
+	];
 
-  for (let i = 0; i < sites.length; i += 1) {
-    const other = sites[i];
-    if (other === site) {
-      continue;
-    }
-    const midpoint = {
-      x: (site.x + other.x) * 0.5,
-      y: (site.y + other.y) * 0.5,
-    };
-    const normal = {
-      x: other.x - site.x,
-      y: other.y - site.y,
-    };
-    polygon = clipPolygonWithHalfPlane(polygon, midpoint, normal);
-    if (polygon.length < 3) {
-      return [];
-    }
-  }
+	for (let i = 0; i < sites.length; i += 1) {
+		const other = sites[i];
+		if (other === site) {
+			continue;
+		}
+		const midpoint = {
+			x: (site.x + other.x) * 0.5,
+			y: (site.y + other.y) * 0.5,
+		};
+		const normal = {
+			x: other.x - site.x,
+			y: other.y - site.y,
+		};
+		polygon = clipPolygonWithHalfPlane(polygon, midpoint, normal);
+		if (polygon.length < 3) {
+			return [];
+		}
+	}
 
-  return polygon;
+	return polygon;
 }
 
 function clipPolygonWithHalfPlane(polygon: Vec2[], midpoint: Vec2, normal: Vec2): Vec2[] {
-  if (polygon.length === 0) {
-    return [];
-  }
-  const clipped: Vec2[] = [];
-  const epsilon = 1e-6;
+	if (polygon.length === 0) {
+		return [];
+	}
+	const clipped: Vec2[] = [];
+	const epsilon = 1e-6;
 
-  for (let i = 0; i < polygon.length; i += 1) {
-    const current = polygon[i];
-    const next = polygon[(i + 1) % polygon.length];
-    const currentValue = evaluateLine(current, midpoint, normal);
-    const nextValue = evaluateLine(next, midpoint, normal);
-    const currentInside = currentValue <= epsilon;
-    const nextInside = nextValue <= epsilon;
+	for (let i = 0; i < polygon.length; i += 1) {
+		const current = polygon[i];
+		const next = polygon[(i + 1) % polygon.length];
+		const currentValue = evaluateLine(current, midpoint, normal);
+		const nextValue = evaluateLine(next, midpoint, normal);
+		const currentInside = currentValue <= epsilon;
+		const nextInside = nextValue <= epsilon;
 
-    if (currentInside && nextInside) {
-      clipped.push(next);
-    } else if (currentInside && !nextInside) {
-      clipped.push(intersectSegmentWithLine(current, next, midpoint, currentValue, nextValue));
-    } else if (!currentInside && nextInside) {
-      clipped.push(intersectSegmentWithLine(current, next, midpoint, currentValue, nextValue));
-      clipped.push(next);
-    }
-  }
+		if (currentInside && nextInside) {
+			clipped.push(next);
+		} else if (currentInside && !nextInside) {
+			clipped.push(intersectSegmentWithLine(current, next, midpoint, currentValue, nextValue));
+		} else if (!currentInside && nextInside) {
+			clipped.push(intersectSegmentWithLine(current, next, midpoint, currentValue, nextValue));
+			clipped.push(next);
+		}
+	}
 
-  return clipped;
+	return clipped;
 }
 
 function evaluateLine(point: Vec2, midpoint: Vec2, normal: Vec2): number {
-  return (point.x - midpoint.x) * normal.x + (point.y - midpoint.y) * normal.y;
+	return (point.x - midpoint.x) * normal.x + (point.y - midpoint.y) * normal.y;
 }
 
 function intersectSegmentWithLine(
-  start: Vec2,
-  end: Vec2,
-  midpoint: Vec2,
-  startValue: number,
-  endValue: number
+	start: Vec2,
+	end: Vec2,
+	midpoint: Vec2,
+	startValue: number,
+	endValue: number
 ): Vec2 {
-  const denominator = startValue - endValue;
-  if (Math.abs(denominator) < 1e-9) {
-    return {
-      x: (start.x + end.x) * 0.5,
-      y: (start.y + end.y) * 0.5,
-    };
-  }
-  const t = startValue / denominator;
-  const clampedT = Math.max(0, Math.min(1, t));
-  const intersection = {
-    x: start.x + (end.x - start.x) * clampedT,
-    y: start.y + (end.y - start.y) * clampedT,
-  };
-  if (Number.isFinite(intersection.x) && Number.isFinite(intersection.y)) {
-    return intersection;
-  }
-  return {
-    x: midpoint.x,
-    y: midpoint.y,
-  };
+	const denominator = startValue - endValue;
+	if (Math.abs(denominator) < 1e-9) {
+		return {
+			x: (start.x + end.x) * 0.5,
+			y: (start.y + end.y) * 0.5,
+		};
+	}
+	const t = startValue / denominator;
+	const clampedT = Math.max(0, Math.min(1, t));
+	const intersection = {
+		x: start.x + (end.x - start.x) * clampedT,
+		y: start.y + (end.y - start.y) * clampedT,
+	};
+	if (Number.isFinite(intersection.x) && Number.isFinite(intersection.y)) {
+		return intersection;
+	}
+	return {
+		x: midpoint.x,
+		y: midpoint.y,
+	};
 }
 
 function flattenPolygon(polygon: Vec2[]): number[] {
-  const flat: number[] = [];
-  for (let i = 0; i < polygon.length; i += 1) {
-    flat.push(polygon[i].x, polygon[i].y);
-  }
-  return flat;
+	const flat: number[] = [];
+	for (let i = 0; i < polygon.length; i += 1) {
+		flat.push(polygon[i].x, polygon[i].y);
+	}
+	return flat;
 }
 
-function buildMapGraph(sites: Vec2[], cells: Vec2[][]): MapGraph {
-  const centers: GraphCenter[] = sites.map((site, index) => ({
-    index,
-    point: site,
-    corners: [],
-    neighbors: [],
-    borders: [],
-    water: false,
-    ocean: false,
-    coast: false,
-  }));
-  const corners: GraphCorner[] = [];
-  const edges: GraphEdge[] = [];
-  const cornerLookup = new Map<string, number>();
-  const edgeLookup = new Map<string, number>();
+function buildMeshGraph(sites: Vec2[], cells: Vec2[][]): MeshGraph {
+	const faces: MeshFace[] = sites.map((site, index) => ({
+		index,
+		point: site,
+		vertices: [],
+		adjacentFaces: [],
+		edges: [],
+		waterKind: WaterKind.Land,
+	}));
+	const vertices: MeshVertex[] = [];
+	const edges: MeshEdge[] = [];
+	const cornerLookup = new Map<string, number>();
+	const edgeLookup = new Map<string, number>();
 
-  const quantize = (value: number): number => Math.round(value * 1000);
-  const cornerKey = (point: Vec2): string => quantize(point.x) + ':' + quantize(point.y);
-  const edgeKey = (a: number, b: number): string => (a < b ? a + ':' + b : b + ':' + a);
+	const quantize = (value: number): number => Math.round(value * 1000);
+	const cornerKey = (point: Vec2): string => quantize(point.x) + ':' + quantize(point.y);
+	const edgeKey = (a: number, b: number): string => (a < b ? a + ':' + b : b + ':' + a);
 
-  const getCornerIndex = (point: Vec2): number => {
-    const key = cornerKey(point);
-    const existing = cornerLookup.get(key);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const index = corners.length;
-    corners.push({
-      index,
-      point: { x: point.x, y: point.y },
-      centers: [],
-      adjacent: [],
-      protrudes: [],
-      water: false,
-      ocean: false,
-      coast: false,
-    });
-    cornerLookup.set(key, index);
-    return index;
-  };
+	const getCornerIndex = (point: Vec2): number => {
+		const key = cornerKey(point);
+		const existing = cornerLookup.get(key);
+		if (existing !== undefined) {
+			return existing;
+		}
+		const index = vertices.length;
+		vertices.push({
+			index,
+			point: { x: point.x, y: point.y },
+			faces: [],
+			adjacentVertices: [],
+			edges: [],
+			waterKind: WaterKind.Land,
+		});
+		cornerLookup.set(key, index);
+		return index;
+	};
 
-  cells.forEach((cell, centerIndex) => {
-    if (!cell || cell.length < 3) {
-      return;
-    }
-    const center = centers[centerIndex];
-    const cellCornerIndices: number[] = [];
-    for (let i = 0; i < cell.length; i += 1) {
-      const cornerIndex = getCornerIndex(cell[i]);
-      cellCornerIndices.push(cornerIndex);
-      pushUnique(corners[cornerIndex].centers, centerIndex);
-      pushUnique(center.corners, cornerIndex);
-    }
-    for (let i = 0; i < cellCornerIndices.length; i += 1) {
-      const a = cellCornerIndices[i];
-      const b = cellCornerIndices[(i + 1) % cellCornerIndices.length];
-      const key = edgeKey(a, b);
-      let borderIndex = edgeLookup.get(key);
-      if (borderIndex === undefined) {
-        borderIndex = edges.length;
-        const cornerA = corners[a].point;
-        const cornerB = corners[b].point;
-        edges.push({
-          index: borderIndex,
-          centers: [centerIndex, -1],
-          corners: [a, b],
-          midpoint: {
-            x: (cornerA.x + cornerB.x) * 0.5,
-            y: (cornerA.y + cornerB.y) * 0.5,
-          },
-        });
-        edgeLookup.set(key, borderIndex);
-      } else {
-        const edge = edges[borderIndex];
-        if (edge.centers[0] !== centerIndex && edge.centers[1] !== centerIndex) {
-          edge.centers[1] = centerIndex;
-        }
-      }
-      pushUnique(center.borders, borderIndex);
-    }
-  });
+	cells.forEach((cell, centerIndex) => {
+		if (!cell || cell.length < 3) {
+			return;
+		}
+		const face = faces[centerIndex];
+		const cellVertexIndices: number[] = [];
+		for (let i = 0; i < cell.length; i += 1) {
+			const cornerIndex = getCornerIndex(cell[i]);
+			cellVertexIndices.push(cornerIndex);
+			pushUnique(vertices[cornerIndex].faces, centerIndex);
+			pushUnique(face.vertices, cornerIndex);
+		}
+		for (let i = 0; i < cellVertexIndices.length; i += 1) {
+			const a = cellVertexIndices[i];
+			const b = cellVertexIndices[(i + 1) % cellVertexIndices.length];
+			const key = edgeKey(a, b);
+			let borderIndex = edgeLookup.get(key);
+			if (borderIndex === undefined) {
+				borderIndex = edges.length;
+				const vertexA = vertices[a].point;
+				const vertexB = vertices[b].point;
+				edges.push({
+					index: borderIndex,
+					faces: [centerIndex, -1],
+					vertices: [a, b],
+					midpoint: {
+						x: (vertexA.x + vertexB.x) * 0.5,
+						y: (vertexA.y + vertexB.y) * 0.5,
+					},
+				});
+				edgeLookup.set(key, borderIndex);
+			} else {
+				const edge = edges[borderIndex];
+				if (edge.faces[0] !== centerIndex && edge.faces[1] !== centerIndex) {
+					edge.faces[1] = centerIndex;
+				}
+			}
+			pushUnique(face.edges, borderIndex);
+		}
+	});
 
-  edges.forEach((edge) => {
-    const [cornerA, cornerB] = edge.corners;
-    pushUnique(corners[cornerA].adjacent, cornerB);
-    pushUnique(corners[cornerB].adjacent, cornerA);
-    pushUnique(corners[cornerA].protrudes, edge.index);
-    pushUnique(corners[cornerB].protrudes, edge.index);
+	edges.forEach((edge) => {
+		const [vertexA, vertexB] = edge.vertices;
+		pushUnique(vertices[vertexA].adjacentVertices, vertexB);
+		pushUnique(vertices[vertexB].adjacentVertices, vertexA);
+		pushUnique(vertices[vertexA].edges, edge.index);
+		pushUnique(vertices[vertexB].edges, edge.index);
 
-    const [centerA, centerB] = edge.centers;
-    if (centerA >= 0) {
-      pushUnique(centers[centerA].borders, edge.index);
-    }
-    if (centerB >= 0) {
-      pushUnique(centers[centerB].borders, edge.index);
-    }
-    if (centerA >= 0 && centerB >= 0) {
-      pushUnique(centers[centerA].neighbors, centerB);
-      pushUnique(centers[centerB].neighbors, centerA);
-    }
-  });
+		const [faceA, faceB] = edge.faces;
+		if (faceA >= 0) {
+			pushUnique(faces[faceA].edges, edge.index);
+		}
+		if (faceB >= 0) {
+			pushUnique(faces[faceB].edges, edge.index);
+		}
+		if (faceA >= 0 && faceB >= 0) {
+			pushUnique(faces[faceA].adjacentFaces, faceB);
+			pushUnique(faces[faceB].adjacentFaces, faceA);
+		}
+	});
 
-  return { centers, corners, edges };
+	return { faces, vertices, edges };
 }
 
 function assignIslandWater(
-  config: TerrainConfig,
-  graph: MapGraph,
-  cells: Vec2[][],
-  random: () => number,
-  waterLevel: number,
-  waterRoughness: number
+	config: TerrainConfig,
+	mesh: MeshGraph,
+	cells: Vec2[][],
+	random: () => number,
+	waterLevel: number,
+	waterRoughness: number
 ): void {
-  const width = config.width;
-  const height = config.height;
-  const normalizedWaterLevel = clamp(waterLevel, -40, 40) / 40;
-  const normalizedRoughness = clamp(waterRoughness, 0, 100) / 100;
-  const bumps = 3 + Math.floor(normalizedRoughness * 7) + Math.floor(random() * 3);
-  const startAngle = random() * Math.PI * 2;
-  const borderEpsilon = 1;
-  const baseRadius = 0.74 - normalizedWaterLevel * 0.18;
-  const primaryWaveAmplitude = 0.06 + normalizedRoughness * 0.14;
-  const secondaryWaveAmplitude = 0.03 + normalizedRoughness * 0.1;
+	const isWater = (kind: WaterKind): boolean =>
+		kind === WaterKind.Water || kind === WaterKind.Ocean;
+	const isOcean = (kind: WaterKind): boolean => kind === WaterKind.Ocean;
+	const width = config.width;
+	const height = config.height;
+	const normalizedWaterLevel = clamp(waterLevel, -40, 40) / 40;
+	const normalizedRoughness = clamp(waterRoughness, 0, 100) / 100;
+	const bumps = 3 + Math.floor(normalizedRoughness * 7) + Math.floor(random() * 3);
+	const startAngle = random() * Math.PI * 2;
+	const borderEpsilon = 1;
+	const baseRadius = 0.74 - normalizedWaterLevel * 0.18;
+	const primaryWaveAmplitude = 0.06 + normalizedRoughness * 0.14;
+	const secondaryWaveAmplitude = 0.03 + normalizedRoughness * 0.1;
 
-  const islandShape = (point: Vec2): boolean => {
-    const nx = (point.x / width) * 2 - 1;
-    const ny = (point.y / height) * 2 - 1;
-    const angle = Math.atan2(ny, nx);
-    const length = 0.5 * (Math.max(Math.abs(nx), Math.abs(ny)) + Math.hypot(nx, ny));
-    const radius = clamp(
-      baseRadius +
-        primaryWaveAmplitude * Math.sin(startAngle + bumps * angle + Math.cos((bumps + 2) * angle)) +
-        secondaryWaveAmplitude * Math.sin(startAngle * 0.7 + (bumps + 3) * angle),
-      0.16,
-      0.96
-    );
-    return length < radius;
-  };
+	const islandShape = (point: Vec2): boolean => {
+		const nx = (point.x / width) * 2 - 1;
+		const ny = (point.y / height) * 2 - 1;
+		const angle = Math.atan2(ny, nx);
+		const length = 0.5 * (Math.max(Math.abs(nx), Math.abs(ny)) + Math.hypot(nx, ny));
+		const radius = clamp(
+			baseRadius +
+			primaryWaveAmplitude * Math.sin(startAngle + bumps * angle + Math.cos((bumps + 2) * angle)) +
+			secondaryWaveAmplitude * Math.sin(startAngle * 0.7 + (bumps + 3) * angle),
+			0.16,
+			0.96
+		);
+		return length < radius;
+	};
 
-  const touchesBorder = (centerIndex: number): boolean => {
-    const cell = cells[centerIndex];
-    if (!cell || cell.length === 0) {
-      return true;
-    }
-    return cell.some(
-      (point) =>
-        point.x <= borderEpsilon ||
-        point.x >= width - borderEpsilon ||
-        point.y <= borderEpsilon ||
-        point.y >= height - borderEpsilon
-    );
-  };
+	const touchesBorder = (centerIndex: number): boolean => {
+		const cell = cells[centerIndex];
+		if (!cell || cell.length === 0) {
+			return true;
+		}
+		return cell.some(
+			(point) =>
+				point.x <= borderEpsilon ||
+				point.x >= width - borderEpsilon ||
+				point.y <= borderEpsilon ||
+				point.y >= height - borderEpsilon
+		);
+	};
 
-  graph.centers.forEach((center) => {
-    center.water = touchesBorder(center.index) || !islandShape(center.point);
-    center.ocean = false;
-    center.coast = false;
-  });
+	mesh.faces.forEach((face) => {
+		const water = touchesBorder(face.index) || !islandShape(face.point);
+		face.waterKind = water ? WaterKind.Water : WaterKind.Land;
+	});
 
-  const queue: number[] = [];
-  graph.centers.forEach((center) => {
-    if (center.water && touchesBorder(center.index)) {
-      center.ocean = true;
-      queue.push(center.index);
-    }
-  });
+	const queue: number[] = [];
+	mesh.faces.forEach((face) => {
+		if (isWater(face.waterKind) && touchesBorder(face.index)) {
+			face.waterKind = WaterKind.Ocean;
+			queue.push(face.index);
+		}
+	});
 
-  for (let q = 0; q < queue.length; q += 1) {
-    const center = graph.centers[queue[q]];
-    for (let i = 0; i < center.neighbors.length; i += 1) {
-      const neighbor = graph.centers[center.neighbors[i]];
-      if (neighbor.water && !neighbor.ocean) {
-        neighbor.ocean = true;
-        queue.push(neighbor.index);
-      }
-    }
-  }
+	for (let q = 0; q < queue.length; q += 1) {
+		const face = mesh.faces[queue[q]];
+		for (let i = 0; i < face.adjacentFaces.length; i += 1) {
+			const neighbor = mesh.faces[face.adjacentFaces[i]];
+			if (isWater(neighbor.waterKind) && !isOcean(neighbor.waterKind)) {
+				neighbor.waterKind = WaterKind.Ocean;
+				queue.push(neighbor.index);
+			}
+		}
+	}
 
-  graph.centers.forEach((center) => {
-    if (!center.water) {
-      center.coast = center.neighbors.some((neighborIndex) => graph.centers[neighborIndex].ocean);
-    }
-  });
+	mesh.faces.forEach((face) => {
+		if (!isWater(face.waterKind)) {
+			const isCoast = face.adjacentFaces.some((neighborIndex) =>
+				isOcean(mesh.faces[neighborIndex].waterKind)
+			);
+			if (isCoast) {
+				face.waterKind = WaterKind.Coast;
+			}
+		}
+	});
 
-  graph.corners.forEach((corner) => {
-    if (corner.centers.length === 0) {
-      corner.water = true;
-      corner.ocean = true;
-      corner.coast = false;
-      return;
-    }
-    let waterCount = 0;
-    let oceanCount = 0;
-    for (let i = 0; i < corner.centers.length; i += 1) {
-      const center = graph.centers[corner.centers[i]];
-      if (center.water) {
-        waterCount += 1;
-      }
-      if (center.ocean) {
-        oceanCount += 1;
-      }
-    }
-    corner.water = waterCount === corner.centers.length;
-    corner.ocean = oceanCount === corner.centers.length;
-    corner.coast = waterCount > 0 && waterCount < corner.centers.length;
-  });
+	mesh.vertices.forEach((vertex) => {
+		if (vertex.faces.length === 0) {
+			vertex.waterKind = WaterKind.Ocean;
+			return;
+		}
+		let waterCount = 0;
+		let oceanCount = 0;
+		for (let i = 0; i < vertex.faces.length; i += 1) {
+			const face = mesh.faces[vertex.faces[i]];
+			if (isWater(face.waterKind)) {
+				waterCount += 1;
+			}
+			if (isOcean(face.waterKind)) {
+				oceanCount += 1;
+			}
+		}
+		if (waterCount === vertex.faces.length) {
+			vertex.waterKind = oceanCount === vertex.faces.length ? WaterKind.Ocean : WaterKind.Water;
+		} else if (waterCount === 0) {
+			vertex.waterKind = WaterKind.Land;
+		} else {
+			vertex.waterKind = WaterKind.Coast;
+		}
+	});
 }
 
-function drawGraphOverlay(graph: MapGraph, terrainLayer: any): void {
-  if (!window.PIXI) {
-    return;
-  }
-  const graphLayer = new window.PIXI.Container();
+type MeshOverlay = {
+	container: any;
+	polygonGraph: any;
+	dualGraph: any;
+	cornerNodes: any;
+	centerNodes: any;
+	insertedNodes: any;
+};
 
-  const polygonGraph = new window.PIXI.Graphics();
-  graph.edges.forEach((edge) => {
-    const cornerA = graph.corners[edge.corners[0]].point;
-    const cornerB = graph.corners[edge.corners[1]].point;
-    polygonGraph.moveTo(cornerA.x, cornerA.y);
-    polygonGraph.lineTo(cornerB.x, cornerB.y);
-  });
-  polygonGraph.stroke({ width: 1.3, color: 0xff4d4f, alpha: 0.75 });
-  graphLayer.addChild(polygonGraph);
+const BASE_LAYER_KEY = '__terrainBaseLayer';
+const MESH_OVERLAY_KEY = '__terrainGraphOverlay';
 
-  const dualGraph = new window.PIXI.Graphics();
-  graph.edges.forEach((edge) => {
-    const [centerA, centerB] = edge.centers;
-    if (centerA < 0 || centerB < 0) {
-      return;
-    }
-    const a = graph.centers[centerA].point;
-    const b = graph.centers[centerB].point;
-    dualGraph.moveTo(a.x, a.y);
-    dualGraph.lineTo(b.x, b.y);
-  });
-  dualGraph.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
-  graphLayer.addChild(dualGraph);
+function ensureBaseLayer(terrainLayer: any): any {
+	const existing = terrainLayer[BASE_LAYER_KEY];
+	if (existing) {
+		terrainLayer.addChildAt(existing, 0);
+		return existing;
+	}
+	const baseLayer = new window.PIXI.Container();
+	terrainLayer[BASE_LAYER_KEY] = baseLayer;
+	terrainLayer.addChildAt(baseLayer, 0);
+	return baseLayer;
+}
 
-  const cornerNodes = new window.PIXI.Graphics();
-  graph.corners.forEach((corner) => {
-    cornerNodes.circle(corner.point.x, corner.point.y, 1.8);
-  });
-  cornerNodes.fill({ color: 0xf3fff7, alpha: 0.9 });
-  graphLayer.addChild(cornerNodes);
+function ensureMeshOverlay(terrainLayer: any): MeshOverlay {
+	const existing = terrainLayer[MESH_OVERLAY_KEY];
+	if (existing) {
+		const overlay = existing as MeshOverlay;
+		terrainLayer.setChildIndex(overlay.container, terrainLayer.children.length - 1);
+		return overlay;
+	}
+	const container = new window.PIXI.Container();
+	const polygonGraph = new window.PIXI.Graphics();
+	const dualGraph = new window.PIXI.Graphics();
+	const cornerNodes = new window.PIXI.Graphics();
+	const centerNodes = new window.PIXI.Graphics();
+	const insertedNodes = new window.PIXI.Graphics();
+	container.addChild(polygonGraph);
+	container.addChild(dualGraph);
+	container.addChild(cornerNodes);
+	container.addChild(centerNodes);
+	container.addChild(insertedNodes);
+	terrainLayer.addChild(container);
+	const overlay = { container, polygonGraph, dualGraph, cornerNodes, centerNodes, insertedNodes };
+	terrainLayer[MESH_OVERLAY_KEY] = overlay;
+	return overlay;
+}
 
-  const centerNodes = new window.PIXI.Graphics();
-  graph.centers.forEach((center) => {
-    centerNodes.circle(center.point.x, center.point.y, 2.3);
-  });
-  centerNodes.fill({ color: 0xfff0c9, alpha: 0.95 });
-  graphLayer.addChild(centerNodes);
+export function setGraphOverlayVisibility(terrainLayer: any, controls: TerrainControls): void {
+	if (!terrainLayer) {
+		return;
+	}
+	const overlay = terrainLayer[MESH_OVERLAY_KEY] as MeshOverlay | undefined;
+	if (!overlay) {
+		return;
+	}
+	overlay.polygonGraph.visible = controls.showPolygonGraph;
+	overlay.dualGraph.visible = controls.showDualGraph;
+	overlay.cornerNodes.visible = controls.showCornerNodes;
+	overlay.centerNodes.visible = controls.showCenterNodes;
+	overlay.insertedNodes.visible = controls.showInsertedPoints;
+	overlay.container.visible =
+		controls.showPolygonGraph ||
+		controls.showDualGraph ||
+		controls.showCornerNodes ||
+		controls.showCenterNodes ||
+		controls.showInsertedPoints;
+}
 
-  terrainLayer.addChild(graphLayer);
+function renderMeshOverlay(mesh: MeshGraph, insertedPoints: Vec2[], overlay: MeshOverlay): void {
+	overlay.polygonGraph.clear();
+	overlay.dualGraph.clear();
+	overlay.cornerNodes.clear();
+	overlay.centerNodes.clear();
+	overlay.insertedNodes.clear();
+
+	const polygonGraph = overlay.polygonGraph;
+	mesh.edges.forEach((edge) => {
+		const vertexA = mesh.vertices[edge.vertices[0]].point;
+		const vertexB = mesh.vertices[edge.vertices[1]].point;
+		polygonGraph.moveTo(vertexA.x, vertexA.y);
+		polygonGraph.lineTo(vertexB.x, vertexB.y);
+	});
+	polygonGraph.stroke({ width: 1.3, color: 0xff4d4f, alpha: 0.75 });
+
+	const dualGraph = overlay.dualGraph;
+	mesh.edges.forEach((edge) => {
+		const [faceA, faceB] = edge.faces;
+		if (faceA < 0 || faceB < 0) {
+			return;
+		}
+		const a = mesh.faces[faceA].point;
+		const b = mesh.faces[faceB].point;
+		dualGraph.moveTo(a.x, a.y);
+		dualGraph.lineTo(b.x, b.y);
+	});
+	dualGraph.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
+
+	const cornerNodes = overlay.cornerNodes;
+	mesh.vertices.forEach((vertex) => {
+		cornerNodes.circle(vertex.point.x, vertex.point.y, 1.8);
+	});
+	cornerNodes.fill({ color: 0xf3fff7, alpha: 0.9 });
+
+	const centerNodes = overlay.centerNodes;
+	mesh.faces.forEach((face) => {
+		centerNodes.circle(face.point.x, face.point.y, 2.3);
+	});
+	centerNodes.fill({ color: 0xff00c9, alpha: 0.95 });
+
+	const insertedNodes = overlay.insertedNodes;
+	for (let i = 0; i < insertedPoints.length; i += 1) {
+		const point = insertedPoints[i];
+		insertedNodes.circle(point.x, point.y, 2.2);
+	}
+	insertedNodes.fill({ color: 0xffe56b, alpha: 0.9 });
 }
 
 function pushUnique(values: number[], value: number): void {
-  if (!values.includes(value)) {
-    values.push(value);
-  }
+	if (!values.includes(value)) {
+		values.push(value);
+	}
 }
 
 function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
+	return Math.max(min, Math.min(max, value));
 }
 
 function createRng(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    return state / 4294967296;
-  };
+	let state = seed >>> 0;
+	return () => {
+		state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+		return state / 4294967296;
+	};
 }

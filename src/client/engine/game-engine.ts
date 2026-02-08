@@ -1,4 +1,4 @@
-import { drawVoronoiTerrain, type TerrainControls } from './terrain';
+import { drawVoronoiTerrain, setGraphOverlayVisibility, type TerrainControls } from './terrain';
 import type { PlayerState } from '../types';
 
 type GameEntity = {
@@ -27,11 +27,16 @@ export class GameEngine {
   private readonly config: GameConfig;
   private terrainControls: TerrainControls = {
     spacing: 32,
-    showGraphs: false,
+    showPolygonGraph: false,
+    showDualGraph: false,
+    showCornerNodes: false,
+    showCenterNodes: false,
+    showInsertedPoints: false,
     seed: 1337,
     waterLevel: 0,
     waterRoughness: 50,
   };
+  private hasTerrain = false;
 
   constructor(config: GameConfig) {
     this.config = config;
@@ -71,22 +76,34 @@ export class GameEngine {
     this.setupPhysics();
   }
 
-  setVoronoiControls(
-    spacing: number,
-    showGraphs: boolean,
-    seed: number,
-    waterLevel: number,
-    waterRoughness: number
-  ): void {
+  setVoronoiControls(nextControls: TerrainControls): void {
     const safeValue = (value: number, fallback: number): number => (Number.isFinite(value) ? value : fallback);
-    this.terrainControls = {
-      spacing: this.clamp(Math.round(safeValue(spacing, 32)), 16, 128),
-      showGraphs,
-      seed: this.clamp(Math.floor(safeValue(seed, 1337)), 0, 0xffffffff),
-      waterLevel: this.clamp(Math.round(safeValue(waterLevel, 0)), -40, 40),
-      waterRoughness: this.clamp(Math.round(safeValue(waterRoughness, 50)), 0, 100),
+    const sanitized: TerrainControls = {
+      spacing: this.clamp(Math.round(safeValue(nextControls.spacing, 32)), 16, 128),
+      showPolygonGraph: Boolean(nextControls.showPolygonGraph),
+      showDualGraph: Boolean(nextControls.showDualGraph),
+      showCornerNodes: Boolean(nextControls.showCornerNodes),
+      showCenterNodes: Boolean(nextControls.showCenterNodes),
+      showInsertedPoints: Boolean(nextControls.showInsertedPoints),
+      seed: this.clamp(Math.floor(safeValue(nextControls.seed, 1337)), 0, 0xffffffff),
+      waterLevel: this.clamp(Math.round(safeValue(nextControls.waterLevel, 0)), -40, 40),
+      waterRoughness: this.clamp(Math.round(safeValue(nextControls.waterRoughness, 50)), 0, 100),
     };
-    this.renderTerrain();
+
+    const needsRegeneration =
+      !this.hasTerrain ||
+      this.terrainControls.spacing !== sanitized.spacing ||
+      this.terrainControls.seed !== sanitized.seed ||
+      this.terrainControls.waterLevel !== sanitized.waterLevel ||
+      this.terrainControls.waterRoughness !== sanitized.waterRoughness;
+
+    this.terrainControls = sanitized;
+
+    if (needsRegeneration) {
+      this.renderTerrain();
+    } else if (this.layers.terrain) {
+      setGraphOverlayVisibility(this.layers.terrain, this.terrainControls);
+    }
   }
 
   start(onFrame?: (deltaMs: number, now: number) => void): void {
@@ -244,6 +261,7 @@ export class GameEngine {
       this.terrainControls,
       this.layers.terrain
     );
+    this.hasTerrain = true;
   }
 
   private clamp(value: number, min: number, max: number): number {
