@@ -9,6 +9,17 @@ type TerrainSettings = {
   provinceBorderWidth: number;
   showLandBorders: boolean;
   showShoreBorders: boolean;
+  landRelief: number;
+  ridgeStrength: number;
+  ridgeCount: number;
+  plateauStrength: number;
+  ridgeDistribution: number;
+  ridgeSeparation: number;
+  ridgeContinuity: number;
+  ridgeContinuityThreshold: number;
+  oceanPeakClamp: number;
+  ridgeOceanClamp: number;
+  ridgeWidth: number;
   seed: number;
   intermediateSeed: number;
   intermediateMaxIterations: number;
@@ -70,6 +81,19 @@ export function createPageLayout(): PageLayout {
   const terrainProvinceBorderWidthInput = document.getElementById('terrain-province-border-width') as HTMLInputElement | null;
   const terrainProvinceLandBordersInput = document.getElementById('terrain-province-land-borders') as HTMLInputElement | null;
   const terrainProvinceShoreBordersInput = document.getElementById('terrain-province-shore-borders') as HTMLInputElement | null;
+  const terrainLandReliefInput = document.getElementById('terrain-land-relief') as HTMLInputElement | null;
+  const terrainRidgeStrengthInput = document.getElementById('terrain-ridge-strength') as HTMLInputElement | null;
+  const terrainRidgeCountInput = document.getElementById('terrain-ridge-count') as HTMLInputElement | null;
+  const terrainPlateauStrengthInput = document.getElementById('terrain-plateau-strength') as HTMLInputElement | null;
+  const terrainRidgeDistributionInput = document.getElementById('terrain-ridge-distribution') as HTMLInputElement | null;
+  const terrainRidgeSeparationInput = document.getElementById('terrain-ridge-separation') as HTMLInputElement | null;
+  const terrainRidgeContinuityInput = document.getElementById('terrain-ridge-continuity') as HTMLInputElement | null;
+  const terrainRidgeContinuityThresholdInput = document.getElementById(
+    'terrain-ridge-continuity-threshold'
+  ) as HTMLInputElement | null;
+  const terrainOceanPeakClampInput = document.getElementById('terrain-ocean-peak-clamp') as HTMLInputElement | null;
+  const terrainRidgeOceanClampInput = document.getElementById('terrain-ridge-ocean-clamp') as HTMLInputElement | null;
+  const terrainRidgeWidthInput = document.getElementById('terrain-ridge-width') as HTMLInputElement | null;
   const terrainSpacingValue = document.getElementById('terrain-spacing-value');
   const terrainIntermediateIterationsValue = document.getElementById('terrain-intermediate-iterations-value');
   const terrainIntermediateDistanceValue = document.getElementById('terrain-intermediate-distance-value');
@@ -84,6 +108,19 @@ export function createPageLayout(): PageLayout {
   const terrainWaterWarpStrengthValue = document.getElementById('terrain-water-warp-strength-value');
   const terrainProvinceCountValue = document.getElementById('terrain-province-count-value');
   const terrainProvinceBorderWidthValue = document.getElementById('terrain-province-border-width-value');
+  const terrainLandReliefValue = document.getElementById('terrain-land-relief-value');
+  const terrainRidgeStrengthValue = document.getElementById('terrain-ridge-strength-value');
+  const terrainRidgeCountValue = document.getElementById('terrain-ridge-count-value');
+  const terrainPlateauStrengthValue = document.getElementById('terrain-plateau-strength-value');
+  const terrainRidgeDistributionValue = document.getElementById('terrain-ridge-distribution-value');
+  const terrainRidgeSeparationValue = document.getElementById('terrain-ridge-separation-value');
+  const terrainRidgeContinuityValue = document.getElementById('terrain-ridge-continuity-value');
+  const terrainRidgeContinuityThresholdValue = document.getElementById(
+    'terrain-ridge-continuity-threshold-value'
+  );
+  const terrainOceanPeakClampValue = document.getElementById('terrain-ocean-peak-clamp-value');
+  const terrainRidgeOceanClampValue = document.getElementById('terrain-ridge-ocean-clamp-value');
+  const terrainRidgeWidthValue = document.getElementById('terrain-ridge-width-value');
 
   const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
   const parseIntWithFallback = (value: string | undefined, fallback: number): number => {
@@ -126,6 +163,21 @@ export function createPageLayout(): PageLayout {
     const provinceBorderWidth = clamp(parseFloatWithFallback(terrainProvinceBorderWidthInput?.value, 6.5), 1, 24);
     const showLandBorders = Boolean(terrainProvinceLandBordersInput?.checked);
     const showShoreBorders = Boolean(terrainProvinceShoreBordersInput?.checked);
+    const landRelief = clamp(parseFloatWithFallback(terrainLandReliefInput?.value, 0.95), 0, 1);
+    const ridgeStrength = clamp(parseFloatWithFallback(terrainRidgeStrengthInput?.value, 0.85), 0, 1);
+    const ridgeCount = clamp(parseIntWithFallback(terrainRidgeCountInput?.value, 9), 1, 10);
+    const plateauStrength = clamp(parseFloatWithFallback(terrainPlateauStrengthInput?.value, 0.8), 0, 1);
+    const ridgeDistribution = clamp(parseFloatWithFallback(terrainRidgeDistributionInput?.value, 0.8), 0, 1);
+    const ridgeSeparation = clamp(parseFloatWithFallback(terrainRidgeSeparationInput?.value, 0.95), 0, 1);
+    const ridgeContinuity = clamp(parseFloatWithFallback(terrainRidgeContinuityInput?.value, 0.25), 0, 1);
+    const ridgeContinuityThreshold = clamp(
+      parseFloatWithFallback(terrainRidgeContinuityThresholdInput?.value, 0),
+      0,
+      1
+    );
+    const oceanPeakClamp = clamp(parseFloatWithFallback(terrainOceanPeakClampInput?.value, 0.05), 0, 1);
+    const ridgeOceanClamp = clamp(parseFloatWithFallback(terrainRidgeOceanClampInput?.value, 0.5), 0, 1);
+    const ridgeWidth = clamp(parseFloatWithFallback(terrainRidgeWidthInput?.value, 1), 0, 1);
     const showPolygonGraph = Boolean(terrainGraphPolygonsInput?.checked);
     const showDualGraph = Boolean(terrainGraphDualInput?.checked);
     const showCornerNodes = Boolean(terrainGraphCornersInput?.checked);
@@ -142,6 +194,17 @@ export function createPageLayout(): PageLayout {
       provinceBorderWidth,
       showLandBorders,
       showShoreBorders,
+      landRelief,
+      ridgeStrength,
+      ridgeCount,
+      plateauStrength,
+      ridgeDistribution,
+      ridgeSeparation,
+      ridgeContinuity,
+      ridgeContinuityThreshold,
+      oceanPeakClamp,
+      ridgeOceanClamp,
+      ridgeWidth,
       seed,
       intermediateSeed,
       intermediateMaxIterations,
@@ -201,6 +264,39 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainProvinceBorderWidthValue) {
       terrainProvinceBorderWidthValue.textContent = settings.provinceBorderWidth.toFixed(1);
+    }
+    if (terrainLandReliefValue) {
+      terrainLandReliefValue.textContent = settings.landRelief.toFixed(2);
+    }
+    if (terrainRidgeStrengthValue) {
+      terrainRidgeStrengthValue.textContent = settings.ridgeStrength.toFixed(2);
+    }
+    if (terrainRidgeCountValue) {
+      terrainRidgeCountValue.textContent = settings.ridgeCount.toString();
+    }
+    if (terrainPlateauStrengthValue) {
+      terrainPlateauStrengthValue.textContent = settings.plateauStrength.toFixed(2);
+    }
+    if (terrainRidgeDistributionValue) {
+      terrainRidgeDistributionValue.textContent = settings.ridgeDistribution.toFixed(2);
+    }
+    if (terrainRidgeSeparationValue) {
+      terrainRidgeSeparationValue.textContent = settings.ridgeSeparation.toFixed(2);
+    }
+    if (terrainRidgeContinuityValue) {
+      terrainRidgeContinuityValue.textContent = settings.ridgeContinuity.toFixed(2);
+    }
+    if (terrainRidgeContinuityThresholdValue) {
+      terrainRidgeContinuityThresholdValue.textContent = settings.ridgeContinuityThreshold.toFixed(2);
+    }
+    if (terrainOceanPeakClampValue) {
+      terrainOceanPeakClampValue.textContent = settings.oceanPeakClamp.toFixed(2);
+    }
+    if (terrainRidgeOceanClampValue) {
+      terrainRidgeOceanClampValue.textContent = settings.ridgeOceanClamp.toFixed(2);
+    }
+    if (terrainRidgeWidthValue) {
+      terrainRidgeWidthValue.textContent = settings.ridgeWidth.toFixed(2);
     }
   };
 
@@ -263,6 +359,17 @@ export function createPageLayout(): PageLayout {
     terrainProvinceBorderWidthInput?.addEventListener('input', notify);
     terrainProvinceLandBordersInput?.addEventListener('change', notify);
     terrainProvinceShoreBordersInput?.addEventListener('change', notify);
+    terrainLandReliefInput?.addEventListener('input', notify);
+    terrainRidgeStrengthInput?.addEventListener('input', notify);
+    terrainRidgeCountInput?.addEventListener('input', notify);
+    terrainPlateauStrengthInput?.addEventListener('input', notify);
+    terrainRidgeDistributionInput?.addEventListener('input', notify);
+    terrainRidgeSeparationInput?.addEventListener('input', notify);
+    terrainRidgeContinuityInput?.addEventListener('input', notify);
+    terrainRidgeContinuityThresholdInput?.addEventListener('input', notify);
+    terrainOceanPeakClampInput?.addEventListener('input', notify);
+    terrainRidgeOceanClampInput?.addEventListener('input', notify);
+    terrainRidgeWidthInput?.addEventListener('input', notify);
     terrainGraphPolygonsInput?.addEventListener('change', notify);
       terrainGraphDualInput?.addEventListener('change', notify);
       terrainGraphCornersInput?.addEventListener('change', notify);

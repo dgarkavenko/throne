@@ -229,6 +229,80 @@ export const html = `<!doctype html>
             </div>
           </details>
           <details class="control-group">
+            <summary>Land</summary>
+            <div class="control">
+                <label for="terrain-land-relief">
+                  Land Relief <span id="terrain-land-relief-value">0.95</span>
+                </label>
+                <input id="terrain-land-relief" type="range" min="0" max="1" step="0.05" value="0.95" />
+              </div>
+              <div class="control">
+                <label for="terrain-ridge-strength">
+                  Ridge Strength <span id="terrain-ridge-strength-value">0.85</span>
+                </label>
+                <input id="terrain-ridge-strength" type="range" min="0" max="1" step="0.05" value="0.85" />
+              </div>
+              <div class="control">
+                <label for="terrain-ridge-count">Ridge Count <span id="terrain-ridge-count-value">9</span></label>
+                <input id="terrain-ridge-count" type="range" min="1" max="10" step="1" value="9" />
+              </div>
+              <div class="control">
+                <label for="terrain-plateau-strength">
+                  Lowland Smoothing <span id="terrain-plateau-strength-value">0.80</span>
+                </label>
+                <input id="terrain-plateau-strength" type="range" min="0" max="1" step="0.05" value="0.8" />
+              </div>
+              <div class="control">
+                <label for="terrain-ridge-distribution">
+                  Ridge Distribution <span id="terrain-ridge-distribution-value">0.80</span>
+                </label>
+                <input id="terrain-ridge-distribution" type="range" min="0" max="1" step="0.05" value="0.8" />
+              </div>
+              <div class="control">
+                <label for="terrain-ridge-separation">
+                  Ridge Separation <span id="terrain-ridge-separation-value">0.95</span>
+                </label>
+              <input id="terrain-ridge-separation" type="range" min="0" max="1" step="0.05" value="0.95" />
+            </div>
+              <div class="control">
+                <label for="terrain-ridge-continuity">
+                  Ridge Continuity <span id="terrain-ridge-continuity-value">0.25</span>
+                </label>
+                <input id="terrain-ridge-continuity" type="range" min="0" max="1" step="0.05" value="0.25" />
+              </div>
+              <div class="control">
+                <label for="terrain-ridge-continuity-threshold">
+                  Ridge Continuity Threshold <span id="terrain-ridge-continuity-threshold-value">0.00</span>
+                </label>
+                <input
+                  id="terrain-ridge-continuity-threshold"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value="0"
+                />
+              </div>
+              <div class="control">
+                <label for="terrain-ocean-peak-clamp">
+                  Ocean Peak Clamp <span id="terrain-ocean-peak-clamp-value">0.05</span>
+                </label>
+                <input id="terrain-ocean-peak-clamp" type="range" min="0" max="1" step="0.05" value="0.05" />
+              </div>
+              <div class="control">
+                <label for="terrain-ridge-ocean-clamp">
+                  Ridge Ocean Clamp <span id="terrain-ridge-ocean-clamp-value">0.50</span>
+                </label>
+                <input id="terrain-ridge-ocean-clamp" type="range" min="0" max="1" step="0.05" value="0.5" />
+              </div>
+              <div class="control">
+                <label for="terrain-ridge-width">
+                  Ridge Width <span id="terrain-ridge-width-value">1.00</span>
+                </label>
+                <input id="terrain-ridge-width" type="range" min="0" max="1" step="0.05" value="1" />
+              </div>
+          </details>
+          <details class="control-group">
             <summary>Provinces</summary>
             <div class="control">
               <label for="terrain-province-count">

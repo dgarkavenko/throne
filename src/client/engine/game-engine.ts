@@ -34,8 +34,19 @@ export class GameEngine {
     showInsertedPoints: false,
     provinceCount: 8,
     provinceBorderWidth: 6.5,
-    showLandBorders: true,
-    showShoreBorders: true,
+      showLandBorders: true,
+      showShoreBorders: true,
+      landRelief: 0.95,
+      ridgeStrength: 0.85,
+      ridgeCount: 9,
+      plateauStrength: 0.8,
+      ridgeDistribution: 0.8,
+      ridgeSeparation: 0.95,
+      ridgeContinuity: 0.25,
+      ridgeContinuityThreshold: 0,
+      oceanPeakClamp: 0.05,
+      ridgeOceanClamp: 0.5,
+      ridgeWidth: 1,
     seed: 1337,
     intermediateSeed: 1337,
     intermediateMaxIterations: 8,
@@ -103,6 +114,21 @@ export class GameEngine {
       provinceBorderWidth: this.clamp(safeValue(nextControls.provinceBorderWidth, 6.5), 1, 24),
       showLandBorders: Boolean(nextControls.showLandBorders),
       showShoreBorders: Boolean(nextControls.showShoreBorders),
+      landRelief: this.clamp(Math.round(safeValue(nextControls.landRelief, 0.95) * 100) / 100, 0, 1),
+      ridgeStrength: this.clamp(Math.round(safeValue(nextControls.ridgeStrength, 0.85) * 100) / 100, 0, 1),
+      ridgeCount: this.clamp(Math.round(safeValue(nextControls.ridgeCount, 9)), 1, 10),
+      plateauStrength: this.clamp(Math.round(safeValue(nextControls.plateauStrength, 0.8) * 100) / 100, 0, 1),
+      ridgeDistribution: this.clamp(Math.round(safeValue(nextControls.ridgeDistribution, 0.8) * 100) / 100, 0, 1),
+      ridgeSeparation: this.clamp(Math.round(safeValue(nextControls.ridgeSeparation, 0.95) * 100) / 100, 0, 1),
+      ridgeContinuity: this.clamp(Math.round(safeValue(nextControls.ridgeContinuity, 0.25) * 100) / 100, 0, 1),
+      ridgeContinuityThreshold: this.clamp(
+        Math.round(safeValue(nextControls.ridgeContinuityThreshold, 0) * 100) / 100,
+        0,
+        1
+      ),
+      oceanPeakClamp: this.clamp(Math.round(safeValue(nextControls.oceanPeakClamp, 0.05) * 100) / 100, 0, 1),
+      ridgeOceanClamp: this.clamp(Math.round(safeValue(nextControls.ridgeOceanClamp, 0.5) * 100) / 100, 0, 1),
+      ridgeWidth: this.clamp(Math.round(safeValue(nextControls.ridgeWidth, 1) * 100) / 100, 0, 1),
       seed: this.clamp(Math.floor(safeValue(nextControls.seed, 1337)), 0, 0xffffffff),
       intermediateSeed: this.clamp(Math.floor(safeValue(nextControls.intermediateSeed, 1337)), 0, 0xffffffff),
       intermediateMaxIterations: this.clamp(Math.round(safeValue(nextControls.intermediateMaxIterations, 8)), 0, 12),
@@ -132,6 +158,17 @@ export class GameEngine {
       this.terrainControls.intermediateRelMagnitude !== sanitized.intermediateRelMagnitude ||
       this.terrainControls.intermediateAbsMagnitude !== sanitized.intermediateAbsMagnitude ||
       this.terrainControls.provinceCount !== sanitized.provinceCount ||
+      this.terrainControls.landRelief !== sanitized.landRelief ||
+      this.terrainControls.ridgeStrength !== sanitized.ridgeStrength ||
+      this.terrainControls.ridgeCount !== sanitized.ridgeCount ||
+      this.terrainControls.plateauStrength !== sanitized.plateauStrength ||
+      this.terrainControls.ridgeDistribution !== sanitized.ridgeDistribution ||
+      this.terrainControls.ridgeSeparation !== sanitized.ridgeSeparation ||
+      this.terrainControls.ridgeContinuity !== sanitized.ridgeContinuity ||
+      this.terrainControls.ridgeContinuityThreshold !== sanitized.ridgeContinuityThreshold ||
+      this.terrainControls.oceanPeakClamp !== sanitized.oceanPeakClamp ||
+      this.terrainControls.ridgeOceanClamp !== sanitized.ridgeOceanClamp ||
+      this.terrainControls.ridgeWidth !== sanitized.ridgeWidth ||
       this.terrainControls.waterLevel !== sanitized.waterLevel ||
       this.terrainControls.waterRoughness !== sanitized.waterRoughness ||
       this.terrainControls.waterNoiseScale !== sanitized.waterNoiseScale ||

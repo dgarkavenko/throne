@@ -22,7 +22,31 @@ export type TerrainControls = {
 	waterNoiseOctaves: number;
 	waterWarpScale: number;
 	waterWarpStrength: number;
+	landRelief: number;
+	ridgeStrength: number;
+	ridgeCount: number;
+	plateauStrength: number;
+	ridgeDistribution: number;
+	ridgeSeparation: number;
+	ridgeContinuity: number;
+	ridgeContinuityThreshold: number;
+	oceanPeakClamp: number;
+	ridgeWidth: number;
+	ridgeOceanClamp: number;
 };
+
+// Land generation controls:
+// landRelief: scales inland elevation (0..1).
+// ridgeStrength: height contribution from ridges (0..1).
+// ridgeCount: number of ridge seeds (1..10).
+// plateauStrength: lowland smoothing amount (0..1).
+// ridgeDistribution: spreads ridge influence further from seeds (0..1).
+// ridgeSeparation: favors peaks far from existing peaks (0..1).
+// ridgeContinuity: how far ridges connect toward nearest peaks (0..1).
+// ridgeContinuityThreshold: limits ridge connections to nearby peaks (0..1; 0 = no limit).
+// oceanPeakClamp: caps max elevation by ocean distance (0..1; 1 => cap at 2x sea distance).
+// ridgeWidth: widens ridge connections into neighboring tiles (0..1).
+// ridgeOceanClamp: caps ridge boost by ocean distance (0..1; 1 => ridge boost <= 2x sea distance).
 
 type Vec2 = {
 	x: number;
@@ -95,6 +119,8 @@ type TerrainConfig = {
 	width: number;
 	height: number;
 };
+
+const MAX_LAND_ELEVATION = 32;
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
@@ -174,10 +200,20 @@ export function drawVoronoiTerrain(
 		controls.waterNoiseStrength,
 		controls.waterNoiseOctaves,
 		controls.waterWarpScale,
-		controls.waterWarpStrength
+		controls.waterWarpStrength,
+		controls.landRelief,
+		controls.ridgeStrength,
+		controls.ridgeCount,
+		controls.plateauStrength,
+		controls.ridgeDistribution,
+		controls.ridgeSeparation,
+		controls.ridgeContinuity,
+		controls.ridgeContinuityThreshold,
+		controls.oceanPeakClamp,
+		controls.ridgeOceanClamp,
+		controls.ridgeWidth
 	);
-	const landPalette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
-	const mountainPalette = [0x6f6a62, 0x8c8479, 0xa39b8e, 0xb8b0a2];
+	const maxLandElevation = MAX_LAND_ELEVATION;
 	const provinceResult = buildProvinces(mesh, controls, random);
 	const refinedGeometry = buildRefinedGeometry(mesh, provinceResult, controls, intermediateRandom);
 
@@ -188,8 +224,8 @@ export function drawVoronoiTerrain(
 		if (!cell || cell.length < 3) {
 			return;
 		}
-		let fillColor = landPalette[Math.floor(random() * landPalette.length)];
-		let fillAlpha = 0.78;
+		let fillColor = 0x3f8a3f;
+		let fillAlpha = 0.86;
 
 		if (face.elevation <= 0) {
 			const maxDepth = 6;
@@ -198,12 +234,8 @@ export function drawVoronoiTerrain(
 			const deep = 0x0f2438;
 			fillColor = lerpColor(shallow, deep, depthT);
 			fillAlpha = 1;
-		} else if (face.elevation === 1) {
-			fillColor = 0x8c7b4f;
-			fillAlpha = 0.82;
-		} else if (face.elevation >= 3) {
-			const mountainIndex = Math.min(mountainPalette.length - 1, face.elevation - 3);
-			fillColor = mountainPalette[mountainIndex];
+		} else {
+			fillColor = landElevationToColor(face.elevation, maxLandElevation);
 			fillAlpha = 0.86;
 		}
 
@@ -376,6 +408,11 @@ function buildEdgePolylines(
 			provinceA >= 0 &&
 			provinceB >= 0 &&
 			provinceA !== provinceB;
+		const sameElevation = face0.elevation === face1.elevation;
+		if (sameElevation && !isProvinceBorder) {
+			edgePolylines[edgeIndex] = [v0, v1];
+			continue;
+		}
 		const noiseScale = isProvinceBorder ? borderNoiseScale : 1;
 		const iterationLimit = Math.max(
 			0,
@@ -809,8 +846,21 @@ function assignIslandElevation(
 	waterNoiseStrength: number,
 	waterNoiseOctaves: number,
 	waterWarpScale: number,
-	waterWarpStrength: number
+	waterWarpStrength: number,
+	landRelief: number,
+	ridgeStrength: number,
+	ridgeCount: number,
+	plateauStrength: number,
+	ridgeDistribution: number,
+	ridgeSeparation: number,
+	ridgeContinuity: number,
+	ridgeContinuityThreshold: number,
+	oceanPeakClamp: number,
+	ridgeOceanClamp: number,
+	ridgeWidth: number
 ): void {
+	// Land elevation is based on coastline distance plus ridge boosts, then optionally smoothed
+	// in lowlands and capped by ocean distance.
 	const width = config.width;
 	const height = config.height;
 	const normalizedWaterLevel = clamp(waterLevel, -40, 40) / 40;
@@ -892,42 +942,172 @@ function assignIslandElevation(
 		isLand[face.index] = land;
 	});
 
-	const landElevation = new Array<number>(faceCount).fill(Number.NaN);
-	const waterElevation = new Array<number>(faceCount).fill(Number.NaN);
-	const landQueue: number[] = [];
-	const waterQueue: number[] = [];
+	const maxElevation = MAX_LAND_ELEVATION;
+	const redistributionExponent = 1.6;
+	const landReliefClamped = clamp(landRelief, 0, 1);
+	const ridgeStrengthClamped = clamp(ridgeStrength, 0, 1);
+	const ridgeCountClamped = Math.round(clamp(ridgeCount, 1, 10));
+	const plateauStrengthClamped = clamp(plateauStrength, 0, 1);
+	const ridgeDistributionClamped = clamp(ridgeDistribution, 0, 1);
+	const ridgeSeparationClamped = clamp(ridgeSeparation, 0, 1);
+	const ridgeContinuityClamped = clamp(ridgeContinuity, 0, 1);
+	const ridgeContinuityThresholdClamped = clamp(ridgeContinuityThreshold, 0, 1);
+	const oceanPeakClampClamped = clamp(oceanPeakClamp, 0, 1);
+	const ridgeOceanClampClamped = clamp(ridgeOceanClamp, 0, 1);
+	const ridgeWidthClamped = clamp(ridgeWidth, 0, 1);
+	const lowlandMax = 10;
+
+	const landFaces: number[] = [];
+	const landBaseLevel = new Array<number>(faceCount).fill(1);
+	const landDistance = new Array<number>(faceCount).fill(-1);
+	const coastQueue: number[] = [];
 
 	if (hasWater && hasLand) {
 		mesh.faces.forEach((face) => {
-			if (isLand[face.index]) {
-				const isShore = face.adjacentFaces.some((neighborIndex) => !isLand[neighborIndex]);
-				if (isShore) {
-					landElevation[face.index] = 1;
-					landQueue.push(face.index);
-				}
-			} else {
-				const isShoreWater = face.adjacentFaces.some((neighborIndex) => isLand[neighborIndex]);
-				if (isShoreWater) {
-					waterElevation[face.index] = 0;
-					waterQueue.push(face.index);
-				}
+			if (!isLand[face.index]) {
+				return;
+			}
+			const isShore = face.adjacentFaces.some((neighborIndex) => !isLand[neighborIndex]);
+			if (isShore) {
+				landDistance[face.index] = 0;
+				coastQueue.push(face.index);
 			}
 		});
 
-		for (let q = 0; q < landQueue.length; q += 1) {
-			const face = mesh.faces[landQueue[q]];
-			const currentElevation = landElevation[face.index];
+		for (let q = 0; q < coastQueue.length; q += 1) {
+			const face = mesh.faces[coastQueue[q]];
+			const currentDistance = landDistance[face.index];
 			for (let i = 0; i < face.adjacentFaces.length; i += 1) {
 				const neighborIndex = face.adjacentFaces[i];
-				if (!isLand[neighborIndex]) {
+				if (!isLand[neighborIndex] || landDistance[neighborIndex] >= 0) {
 					continue;
 				}
-				if (Number.isNaN(landElevation[neighborIndex])) {
-					landElevation[neighborIndex] = currentElevation + 1;
-					landQueue.push(neighborIndex);
-				}
+				landDistance[neighborIndex] = currentDistance + 1;
+				coastQueue.push(neighborIndex);
 			}
 		}
+	}
+
+	let maxLandDistance = 0;
+	mesh.faces.forEach((face) => {
+		if (isLand[face.index]) {
+			landFaces.push(face.index);
+			maxLandDistance = Math.max(maxLandDistance, landDistance[face.index]);
+		}
+	});
+
+	if (hasLand) {
+		if (hasWater && maxLandDistance > 0) {
+			for (let i = 0; i < landFaces.length; i += 1) {
+				const faceIndex = landFaces[i];
+				const dist = Math.max(0, landDistance[faceIndex]);
+				const base = dist / maxLandDistance;
+				const redistributed = Math.pow(base, redistributionExponent);
+				const scaled = redistributed * landReliefClamped;
+				landBaseLevel[faceIndex] = clamp(
+					1 + Math.floor(scaled * (maxElevation - 1)),
+					1,
+					maxElevation
+				);
+			}
+		} else {
+			const uniformLevel = clamp(1 + Math.floor(landReliefClamped * (maxElevation - 1)), 1, maxElevation);
+			for (let i = 0; i < landFaces.length; i += 1) {
+				landBaseLevel[landFaces[i]] = uniformLevel;
+			}
+		}
+	}
+
+	const ridgeBoost = new Array<number>(faceCount).fill(0);
+	if (hasLand && ridgeStrengthClamped > 0 && ridgeCountClamped > 0) {
+		const ridgeSeeds = pickRidgeSeedsFromLocalMaxima(
+			mesh,
+			isLand,
+			landFaces,
+			landDistance,
+			ridgeCountClamped,
+			ridgeSeparationClamped,
+			random
+		);
+		const ridgeDistance = new Array<number>(faceCount).fill(-1);
+		const ridgeQueue: number[] = [];
+		ridgeSeeds.forEach((seed) => {
+			ridgeDistance[seed] = 0;
+			ridgeQueue.push(seed);
+		});
+		for (let q = 0; q < ridgeQueue.length; q += 1) {
+			const face = mesh.faces[ridgeQueue[q]];
+			const currentDistance = ridgeDistance[face.index];
+			for (let i = 0; i < face.adjacentFaces.length; i += 1) {
+				const neighborIndex = face.adjacentFaces[i];
+				if (!isLand[neighborIndex] || ridgeDistance[neighborIndex] >= 0) {
+					continue;
+				}
+				ridgeDistance[neighborIndex] = currentDistance + 1;
+				ridgeQueue.push(neighborIndex);
+			}
+		}
+
+		const ridgeRadiusScale =
+			lerp(0.25, 1.1, ridgeDistributionClamped) * lerp(1, 0.75, ridgeStrengthClamped);
+		const ridgeRadius =
+			maxLandDistance > 0
+				? Math.max(2, Math.round(maxLandDistance * ridgeRadiusScale))
+				: Math.max(2, Math.round(Math.sqrt(landFaces.length) * (0.25 + 0.9 * ridgeDistributionClamped)));
+		const ridgeExponent = lerp(2.2, 3.2, ridgeStrengthClamped) * lerp(1, 0.6, ridgeDistributionClamped);
+		for (let i = 0; i < landFaces.length; i += 1) {
+			const faceIndex = landFaces[i];
+			const dist = ridgeDistance[faceIndex];
+			if (dist < 0) {
+				continue;
+			}
+			const ridgeT = 1 - dist / ridgeRadius;
+			if (ridgeT <= 0) {
+				continue;
+			}
+			const ridgeShaped = Math.pow(ridgeT, ridgeExponent);
+			const coastT = maxLandDistance > 0 ? 1 - landDistance[faceIndex] / maxLandDistance : 0;
+			const coastBoost = lerp(1, 1 + 0.7 * coastT, ridgeDistributionClamped);
+			const boost = Math.round(
+				ridgeShaped *
+					coastBoost *
+					ridgeStrengthClamped *
+					(0.6 + 0.4 * landReliefClamped) *
+					(maxElevation - 1)
+			);
+			ridgeBoost[faceIndex] = clamp(boost, 0, maxElevation - 1);
+		}
+
+		if (ridgeContinuityClamped > 0 && ridgeSeeds.length > 1) {
+			connectRidgeSeeds(
+				mesh,
+				isLand,
+				ridgeSeeds,
+				ridgeBoost,
+				ridgeStrengthClamped,
+				ridgeContinuityClamped,
+				ridgeWidthClamped,
+				ridgeContinuityThresholdClamped,
+				maxElevation,
+				maxLandDistance,
+				landFaces.length
+			);
+		}
+	}
+
+	const waterElevation = new Array<number>(faceCount).fill(Number.NaN);
+	const waterQueue: number[] = [];
+	if (hasWater && hasLand) {
+		mesh.faces.forEach((face) => {
+			if (isLand[face.index]) {
+				return;
+			}
+			const isShoreWater = face.adjacentFaces.some((neighborIndex) => isLand[neighborIndex]);
+			if (isShoreWater) {
+				waterElevation[face.index] = 0;
+				waterQueue.push(face.index);
+			}
+		});
 
 		for (let q = 0; q < waterQueue.length; q += 1) {
 			const face = mesh.faces[waterQueue[q]];
@@ -945,22 +1125,80 @@ function assignIslandElevation(
 		}
 	}
 
-	mesh.faces.forEach((face) => {
-		if (!hasWater && hasLand) {
-			face.elevation = 2;
-			return;
+	if (hasLand && hasWater && ridgeOceanClampClamped > 0) {
+		for (let i = 0; i < landFaces.length; i += 1) {
+			const faceIndex = landFaces[i];
+			const dist = Math.max(0, landDistance[faceIndex]);
+			const cap = clamp(
+				Math.round(lerp(maxElevation - 1, dist * 2, ridgeOceanClampClamped)),
+				0,
+				maxElevation - 1
+			);
+			if (ridgeBoost[faceIndex] > cap) {
+				ridgeBoost[faceIndex] = cap;
+			}
 		}
+	}
+
+	const finalLandElevation = new Array<number>(faceCount).fill(0);
+	for (let i = 0; i < landFaces.length; i += 1) {
+		const faceIndex = landFaces[i];
+		const base = landBaseLevel[faceIndex];
+		const boost = ridgeBoost[faceIndex];
+		finalLandElevation[faceIndex] = clamp(base + boost, 1, maxElevation);
+	}
+
+	if (hasLand && plateauStrengthClamped > 0) {
+		const smoothed = new Array<number>(faceCount).fill(0);
+		for (let i = 0; i < landFaces.length; i += 1) {
+			const faceIndex = landFaces[i];
+			const current = finalLandElevation[faceIndex];
+			if (current <= 0 || current > lowlandMax) {
+				smoothed[faceIndex] = current;
+				continue;
+			}
+			let sum = current;
+			let count = 1;
+			const face = mesh.faces[faceIndex];
+			for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+				const neighbor = face.adjacentFaces[j];
+				const neighborElevation = finalLandElevation[neighbor];
+				if (!isLand[neighbor] || neighborElevation <= 0 || neighborElevation > lowlandMax) {
+					continue;
+				}
+				sum += neighborElevation;
+				count += 1;
+			}
+			const avg = sum / count;
+			const blended = lerp(current, avg, plateauStrengthClamped);
+			smoothed[faceIndex] = clamp(Math.round(blended), 1, maxElevation);
+		}
+	for (let i = 0; i < landFaces.length; i += 1) {
+		const faceIndex = landFaces[i];
+		finalLandElevation[faceIndex] = smoothed[faceIndex] || finalLandElevation[faceIndex];
+	}
+}
+
+if (hasLand && hasWater && oceanPeakClampClamped > 0) {
+	for (let i = 0; i < landFaces.length; i += 1) {
+		const faceIndex = landFaces[i];
+		const dist = Math.max(0, landDistance[faceIndex]);
+		const cap = clamp(Math.round(lerp(maxElevation, dist * 2, oceanPeakClampClamped)), 1, maxElevation);
+		finalLandElevation[faceIndex] = Math.min(finalLandElevation[faceIndex], cap);
+	}
+}
+
+mesh.faces.forEach((face) => {
+	if (isLand[face.index]) {
+		face.elevation = finalLandElevation[face.index];
+		return;
+	}
 		if (!hasLand && hasWater) {
 			face.elevation = 0;
 			return;
 		}
-		if (isLand[face.index]) {
-			const elevation = landElevation[face.index];
-			face.elevation = Number.isNaN(elevation) ? 2 : elevation;
-		} else {
-			const elevation = waterElevation[face.index];
-			face.elevation = Number.isNaN(elevation) ? 0 : elevation;
-		}
+		const elevation = waterElevation[face.index];
+		face.elevation = Number.isNaN(elevation) ? 0 : elevation;
 	});
 
 	mesh.vertices.forEach((vertex) => {
@@ -974,6 +1212,359 @@ function assignIslandElevation(
 		}
 		vertex.elevation = sum / vertex.faces.length;
 	});
+}
+
+function pickRidgeSeedsFromLocalMaxima(
+	mesh: MeshGraph,
+	isLand: boolean[],
+	landFaces: number[],
+	landDistance: number[],
+	count: number,
+	ridgeSeparation: number,
+	random: () => number
+): number[] {
+	if (landFaces.length === 0 || count <= 0) {
+		return [];
+	}
+	const candidates: number[] = [];
+	for (let i = 0; i < landFaces.length; i += 1) {
+		const faceIndex = landFaces[i];
+		const dist = landDistance[faceIndex];
+		if (dist <= 2) {
+			continue;
+		}
+		const face = mesh.faces[faceIndex];
+		let isLocalMax = true;
+		for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+			const neighbor = face.adjacentFaces[j];
+			if (!isLand[neighbor]) {
+				continue;
+			}
+			if (landDistance[neighbor] > dist) {
+				isLocalMax = false;
+				break;
+			}
+		}
+		if (isLocalMax) {
+			candidates.push(faceIndex);
+		}
+	}
+
+	if (candidates.length === 0) {
+		const fallback = landFaces
+			.slice()
+			.sort((a, b) => landDistance[b] - landDistance[a])
+			.filter((faceIndex) => landDistance[faceIndex] > 2);
+		candidates.push(...fallback);
+	}
+
+	if (candidates.length <= count) {
+		return candidates.slice(0, count);
+	}
+
+	const componentSeeds = pickComponentPeakSeeds(mesh, isLand, landDistance);
+	const picks: number[] = [];
+	componentSeeds.forEach((seed) => {
+		if (candidates.includes(seed)) {
+			picks.push(seed);
+		}
+	});
+
+	const weighted = candidates.map((faceIndex) => ({
+		faceIndex,
+		weight: Math.max(1, landDistance[faceIndex] * landDistance[faceIndex]),
+	}));
+	const targetCount = Math.min(count, weighted.length);
+	const separation = clamp(ridgeSeparation, 0, 1);
+	const maxSeaDistance = Math.max(1, ...landDistance.filter((dist) => dist >= 0));
+	let minX = Number.POSITIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	for (let i = 0; i < landFaces.length; i += 1) {
+		const point = mesh.faces[landFaces[i]].point;
+		minX = Math.min(minX, point.x);
+		minY = Math.min(minY, point.y);
+		maxX = Math.max(maxX, point.x);
+		maxY = Math.max(maxY, point.y);
+	}
+	const diag = Math.max(1, Math.hypot(maxX - minX, maxY - minY));
+
+	const pickBySeparation = (): number => {
+		if (picks.length === 0) {
+			let best = 0;
+			let bestSea = -Infinity;
+			for (let j = 0; j < weighted.length; j += 1) {
+				const faceIndex = weighted[j].faceIndex;
+				const distSea = landDistance[faceIndex];
+				if (distSea > bestSea) {
+					bestSea = distSea;
+					best = j;
+				}
+			}
+			return best;
+		}
+		const scores: number[] = new Array<number>(weighted.length);
+		let total = 0;
+		for (let j = 0; j < weighted.length; j += 1) {
+			const faceIndex = weighted[j].faceIndex;
+			const point = mesh.faces[faceIndex].point;
+			let minDist = Infinity;
+			for (let k = 0; k < picks.length; k += 1) {
+				const pickPoint = mesh.faces[picks[k]].point;
+				const dx = point.x - pickPoint.x;
+				const dy = point.y - pickPoint.y;
+				minDist = Math.min(minDist, Math.hypot(dx, dy));
+			}
+			const distSeaT = clamp(landDistance[faceIndex] / maxSeaDistance, 0, 1);
+			const distPeakT = clamp(minDist / diag, 0, 1);
+			const mix = lerp(distSeaT, distPeakT, separation);
+			const score = Math.max(0.001, mix * mix);
+			scores[j] = score;
+			total += score;
+		}
+		if (total <= 0) {
+			return 0;
+		}
+		let roll = random() * total;
+		for (let j = 0; j < scores.length; j += 1) {
+			roll -= scores[j];
+			if (roll <= 0) {
+				return j;
+			}
+		}
+		return scores.length - 1;
+	};
+
+	for (let i = picks.length; i < targetCount; i += 1) {
+		const chosenIndex = pickBySeparation();
+		picks.push(weighted[chosenIndex].faceIndex);
+		weighted.splice(chosenIndex, 1);
+	}
+
+	return picks;
+}
+
+function pickComponentPeakSeeds(mesh: MeshGraph, isLand: boolean[], landDistance: number[]): number[] {
+	const visited = new Array<boolean>(mesh.faces.length).fill(false);
+	const seeds: number[] = [];
+	for (let i = 0; i < mesh.faces.length; i += 1) {
+		if (!isLand[i] || visited[i]) {
+			continue;
+		}
+		const stack = [i];
+		visited[i] = true;
+		let bestFace = i;
+		let bestDist = landDistance[i];
+		while (stack.length > 0) {
+			const faceIndex = stack.pop() as number;
+			if (landDistance[faceIndex] > bestDist) {
+				bestDist = landDistance[faceIndex];
+				bestFace = faceIndex;
+			}
+			const face = mesh.faces[faceIndex];
+			for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+				const neighbor = face.adjacentFaces[j];
+				if (!isLand[neighbor] || visited[neighbor]) {
+					continue;
+				}
+				visited[neighbor] = true;
+				stack.push(neighbor);
+			}
+		}
+		if (bestDist > 0) {
+			seeds.push(bestFace);
+		}
+	}
+	return seeds;
+}
+
+function connectRidgeSeeds(
+	mesh: MeshGraph,
+	isLand: boolean[],
+	seeds: number[],
+	ridgeBoost: number[],
+	ridgeStrength: number,
+	ridgeContinuity: number,
+	ridgeWidth: number,
+	ridgeContinuityThreshold: number,
+	maxElevation: number,
+	maxLandDistance: number,
+	landFaceCount: number
+): void {
+	if (ridgeContinuity <= 0 || seeds.length < 2) {
+		return;
+	}
+	const connected: number[] = [seeds[0]];
+	const minBoostBase = Math.max(
+		1,
+		Math.round(ridgeStrength * ridgeContinuity * (maxElevation - 1) * 0.4)
+	);
+
+	const threshold = clamp(ridgeContinuityThreshold, 0, 1);
+	const maxDistanceBase =
+		maxLandDistance > 0
+			? maxLandDistance
+			: Math.max(2, Math.round(Math.sqrt(Math.max(1, landFaceCount))));
+	const minAllowed = Math.max(2, Math.round(maxDistanceBase * 0.1));
+	const maxAllowed =
+		threshold <= 0
+			? Number.POSITIVE_INFINITY
+			: Math.max(2, Math.round(lerp(maxDistanceBase, minAllowed, threshold)));
+
+	const widthSteps = Math.max(0, Math.round(lerp(0, 6, ridgeWidth)));
+
+	for (let i = 1; i < seeds.length; i += 1) {
+		const seed = seeds[i];
+		const target = findNearestSeed(mesh, seed, connected);
+		if (target < 0) {
+			connected.push(seed);
+			continue;
+		}
+		const path = findShortestLandPath(mesh, isLand, seed, target);
+		const pathLen = Math.max(1, path.length);
+		const pathSteps = Math.max(0, pathLen - 1);
+		if (pathSteps > maxAllowed) {
+			connected.push(seed);
+			continue;
+		}
+		const boostA = Math.max(ridgeBoost[seed], minBoostBase);
+		const boostB = Math.max(ridgeBoost[target], minBoostBase);
+		for (let p = 0; p < pathLen; p += 1) {
+			const faceIndex = path[p];
+			const t = pathLen > 1 ? p / (pathLen - 1) : 0;
+			const base = lerp(boostA, boostB, t);
+			const blended = lerp(ridgeBoost[faceIndex], base, ridgeContinuity);
+			const nextBoost = Math.round(Math.max(blended, minBoostBase * ridgeContinuity));
+			ridgeBoost[faceIndex] = clamp(
+				Math.max(ridgeBoost[faceIndex], nextBoost),
+				0,
+				maxElevation - 1
+			);
+			if (widthSteps > 0) {
+				applyRidgeWidth(
+					mesh,
+					isLand,
+					ridgeBoost,
+					faceIndex,
+					nextBoost,
+					widthSteps,
+					maxElevation
+				);
+			}
+		}
+		connected.push(seed);
+	}
+}
+
+function applyRidgeWidth(
+	mesh: MeshGraph,
+	isLand: boolean[],
+	ridgeBoost: number[],
+	centerFace: number,
+	centerBoost: number,
+	steps: number,
+	maxElevation: number
+): void {
+	if (steps <= 0) {
+		return;
+	}
+	const queue: Array<{ face: number; depth: number }> = [{ face: centerFace, depth: 0 }];
+	const visited = new Set<number>();
+	visited.add(centerFace);
+
+	for (let q = 0; q < queue.length; q += 1) {
+		const { face, depth } = queue[q];
+		if (depth >= steps) {
+			continue;
+		}
+		const nextDepth = depth + 1;
+		const falloff = Math.pow(1 - nextDepth / (steps + 1), 1.2);
+		const boost = Math.round(centerBoost * falloff);
+		const current = ridgeBoost[face];
+		if (boost > current) {
+			ridgeBoost[face] = clamp(boost, 0, maxElevation - 1);
+		}
+		const node = mesh.faces[face];
+		for (let i = 0; i < node.adjacentFaces.length; i += 1) {
+			const neighbor = node.adjacentFaces[i];
+			if (!isLand[neighbor] || visited.has(neighbor)) {
+				continue;
+			}
+			visited.add(neighbor);
+			queue.push({ face: neighbor, depth: nextDepth });
+		}
+	}
+}
+
+function findNearestSeed(mesh: MeshGraph, seed: number, candidates: number[]): number {
+	if (candidates.length === 0) {
+		return -1;
+	}
+	const seedPoint = mesh.faces[seed].point;
+	let best = candidates[0];
+	let bestDist = Number.POSITIVE_INFINITY;
+	for (let i = 0; i < candidates.length; i += 1) {
+		const candidate = candidates[i];
+		const point = mesh.faces[candidate].point;
+		const dx = point.x - seedPoint.x;
+		const dy = point.y - seedPoint.y;
+		const dist = dx * dx + dy * dy;
+		if (dist < bestDist) {
+			bestDist = dist;
+			best = candidate;
+		}
+	}
+	return best;
+}
+
+function findShortestLandPath(
+	mesh: MeshGraph,
+	isLand: boolean[],
+	start: number,
+	target: number
+): number[] {
+	if (start === target) {
+		return [start];
+	}
+	const prev = new Array<number>(mesh.faces.length).fill(-1);
+	const queue: number[] = [];
+	queue.push(start);
+	prev[start] = start;
+
+	for (let q = 0; q < queue.length; q += 1) {
+		const faceIndex = queue[q];
+		const face = mesh.faces[faceIndex];
+		for (let i = 0; i < face.adjacentFaces.length; i += 1) {
+			const neighbor = face.adjacentFaces[i];
+			if (!isLand[neighbor] || prev[neighbor] >= 0) {
+				continue;
+			}
+			prev[neighbor] = faceIndex;
+			if (neighbor === target) {
+				q = queue.length;
+				break;
+			}
+			queue.push(neighbor);
+		}
+	}
+
+	if (prev[target] < 0) {
+		return [start];
+	}
+
+	const path: number[] = [];
+	let current = target;
+	while (current !== start) {
+		path.push(current);
+		current = prev[current];
+		if (current < 0) {
+			return [start];
+		}
+	}
+	path.push(start);
+	path.reverse();
+	return path;
 }
 
 type MeshOverlay = {
@@ -1924,6 +2515,26 @@ function lerpColor(a: number, b: number, t: number): number {
 	const rg = Math.round(lerp(ag, bg, t));
 	const rb = Math.round(lerp(ab, bb, t));
 	return (rr << 16) | (rg << 8) | rb;
+}
+
+function landElevationToColor(elevation: number, maxElevation: number): number {
+	const t = clamp((elevation - 1) / Math.max(1, maxElevation - 1), 0, 1);
+	const stops = [
+		{ t: 0, color: 0x3f8a3f },
+		{ t: 0.35, color: 0x6e9b4b },
+		{ t: 0.6, color: 0x8c7b4f },
+		{ t: 0.82, color: 0x9b9488 },
+		{ t: 1, color: 0xcfc9c1 },
+	];
+	for (let i = 0; i < stops.length - 1; i += 1) {
+		const a = stops[i];
+		const b = stops[i + 1];
+		if (t >= a.t && t <= b.t) {
+			const localT = (t - a.t) / Math.max(1e-6, b.t - a.t);
+			return lerpColor(a.color, b.color, localT);
+		}
+	}
+	return stops[stops.length - 1].color;
 }
 
 function smoothstep(t: number): number {
