@@ -1,4 +1,4 @@
-import { drawVoronoiTerrain, setGraphOverlayVisibility, type TerrainControls } from './terrain';
+import { drawVoronoiTerrain, setGraphOverlayVisibility, updateProvinceBorders, type TerrainControls } from './terrain';
 import type { PlayerState } from '../types';
 
 type GameEntity = {
@@ -33,12 +33,15 @@ export class GameEngine {
     showCenterNodes: false,
     showInsertedPoints: false,
     provinceCount: 8,
+    provinceBorderWidth: 6.5,
+    showLandBorders: true,
+    showShoreBorders: true,
     seed: 1337,
     intermediateSeed: 1337,
     intermediateMaxIterations: 8,
     intermediateThreshold: 5,
     intermediateRelMagnitude: 0,
-    intermediateAbsMagnitude: 5,
+    intermediateAbsMagnitude: 2,
     waterLevel: -10,
     waterRoughness: 60,
     waterNoiseScale: 2,
@@ -97,6 +100,9 @@ export class GameEngine {
       showCenterNodes: Boolean(nextControls.showCenterNodes),
       showInsertedPoints: Boolean(nextControls.showInsertedPoints),
       provinceCount: this.clamp(Math.round(safeValue(nextControls.provinceCount, 8)), 1, 32),
+      provinceBorderWidth: this.clamp(safeValue(nextControls.provinceBorderWidth, 6.5), 1, 24),
+      showLandBorders: Boolean(nextControls.showLandBorders),
+      showShoreBorders: Boolean(nextControls.showShoreBorders),
       seed: this.clamp(Math.floor(safeValue(nextControls.seed, 1337)), 0, 0xffffffff),
       intermediateSeed: this.clamp(Math.floor(safeValue(nextControls.intermediateSeed, 1337)), 0, 0xffffffff),
       intermediateMaxIterations: this.clamp(Math.round(safeValue(nextControls.intermediateMaxIterations, 8)), 0, 12),
@@ -106,7 +112,7 @@ export class GameEngine {
         0,
         2
       ),
-      intermediateAbsMagnitude: this.clamp(Math.round(safeValue(nextControls.intermediateAbsMagnitude, 5)), 0, 10),
+      intermediateAbsMagnitude: this.clamp(Math.round(safeValue(nextControls.intermediateAbsMagnitude, 2)), 0, 10),
       waterLevel: this.clamp(Math.round(safeValue(nextControls.waterLevel, -10)), -40, 40),
       waterRoughness: this.clamp(Math.round(safeValue(nextControls.waterRoughness, 60)), 0, 100),
       waterNoiseScale: this.clamp(Math.round(safeValue(nextControls.waterNoiseScale, 2)), 2, 60),
@@ -138,7 +144,10 @@ export class GameEngine {
 
     if (needsRegeneration) {
       this.renderTerrain();
-    } else if (this.layers.terrain) {
+      return;
+    }
+    if (this.layers.terrain) {
+      updateProvinceBorders(this.layers.terrain, this.terrainControls);
       setGraphOverlayVisibility(this.layers.terrain, this.terrainControls);
     }
   }

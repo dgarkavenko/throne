@@ -6,6 +6,9 @@ type TerrainSettings = {
   showCenterNodes: boolean;
   showInsertedPoints: boolean;
   provinceCount: number;
+  provinceBorderWidth: number;
+  showLandBorders: boolean;
+  showShoreBorders: boolean;
   seed: number;
   intermediateSeed: number;
   intermediateMaxIterations: number;
@@ -64,6 +67,9 @@ export function createPageLayout(): PageLayout {
   const terrainGraphCentersInput = document.getElementById('terrain-graph-centers') as HTMLInputElement | null;
   const terrainGraphInsertedInput = document.getElementById('terrain-graph-inserted') as HTMLInputElement | null;
   const terrainProvinceCountInput = document.getElementById('terrain-province-count') as HTMLInputElement | null;
+  const terrainProvinceBorderWidthInput = document.getElementById('terrain-province-border-width') as HTMLInputElement | null;
+  const terrainProvinceLandBordersInput = document.getElementById('terrain-province-land-borders') as HTMLInputElement | null;
+  const terrainProvinceShoreBordersInput = document.getElementById('terrain-province-shore-borders') as HTMLInputElement | null;
   const terrainSpacingValue = document.getElementById('terrain-spacing-value');
   const terrainIntermediateIterationsValue = document.getElementById('terrain-intermediate-iterations-value');
   const terrainIntermediateDistanceValue = document.getElementById('terrain-intermediate-distance-value');
@@ -77,6 +83,7 @@ export function createPageLayout(): PageLayout {
   const terrainWaterWarpScaleValue = document.getElementById('terrain-water-warp-scale-value');
   const terrainWaterWarpStrengthValue = document.getElementById('terrain-water-warp-strength-value');
   const terrainProvinceCountValue = document.getElementById('terrain-province-count-value');
+  const terrainProvinceBorderWidthValue = document.getElementById('terrain-province-border-width-value');
 
   const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
   const parseIntWithFallback = (value: string | undefined, fallback: number): number => {
@@ -104,7 +111,7 @@ export function createPageLayout(): PageLayout {
       2
     );
     const intermediateAbsMagnitude = clamp(
-      parseIntWithFallback(terrainIntermediateAbsMagnitudeInput?.value, 5),
+      parseIntWithFallback(terrainIntermediateAbsMagnitudeInput?.value, 2),
       0,
       10
     );
@@ -116,6 +123,9 @@ export function createPageLayout(): PageLayout {
     const waterWarpScale = clamp(parseIntWithFallback(terrainWaterWarpScaleInput?.value, 2), 2, 40);
     const waterWarpStrength = clamp(parseFloatWithFallback(terrainWaterWarpStrengthInput?.value, 0.7), 0, 0.8);
     const provinceCount = clamp(parseIntWithFallback(terrainProvinceCountInput?.value, 8), 1, 32);
+    const provinceBorderWidth = clamp(parseFloatWithFallback(terrainProvinceBorderWidthInput?.value, 6.5), 1, 24);
+    const showLandBorders = Boolean(terrainProvinceLandBordersInput?.checked);
+    const showShoreBorders = Boolean(terrainProvinceShoreBordersInput?.checked);
     const showPolygonGraph = Boolean(terrainGraphPolygonsInput?.checked);
     const showDualGraph = Boolean(terrainGraphDualInput?.checked);
     const showCornerNodes = Boolean(terrainGraphCornersInput?.checked);
@@ -129,6 +139,9 @@ export function createPageLayout(): PageLayout {
       showCenterNodes,
       showInsertedPoints,
       provinceCount,
+      provinceBorderWidth,
+      showLandBorders,
+      showShoreBorders,
       seed,
       intermediateSeed,
       intermediateMaxIterations,
@@ -185,6 +198,9 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainProvinceCountValue) {
       terrainProvinceCountValue.textContent = settings.provinceCount.toString();
+    }
+    if (terrainProvinceBorderWidthValue) {
+      terrainProvinceBorderWidthValue.textContent = settings.provinceBorderWidth.toFixed(1);
     }
   };
 
@@ -244,6 +260,9 @@ export function createPageLayout(): PageLayout {
     terrainWaterWarpScaleInput?.addEventListener('input', notify);
     terrainWaterWarpStrengthInput?.addEventListener('input', notify);
     terrainProvinceCountInput?.addEventListener('input', notify);
+    terrainProvinceBorderWidthInput?.addEventListener('input', notify);
+    terrainProvinceLandBordersInput?.addEventListener('change', notify);
+    terrainProvinceShoreBordersInput?.addEventListener('change', notify);
     terrainGraphPolygonsInput?.addEventListener('change', notify);
       terrainGraphDualInput?.addEventListener('change', notify);
       terrainGraphCornersInput?.addEventListener('change', notify);

@@ -236,6 +236,24 @@ export const html = `<!doctype html>
               </label>
               <input id="terrain-province-count" type="range" min="1" max="32" step="1" value="8" />
             </div>
+            <div class="control">
+              <label for="terrain-province-border-width">
+                Border Width <span id="terrain-province-border-width-value">6.5</span>
+              </label>
+              <input id="terrain-province-border-width" type="range" min="1" max="24" step="0.5" value="6.5" />
+            </div>
+            <div class="control toggle">
+              <label for="terrain-province-land-borders">
+                <input id="terrain-province-land-borders" type="checkbox" checked />
+                Land Borders
+              </label>
+            </div>
+            <div class="control toggle">
+              <label for="terrain-province-shore-borders">
+                <input id="terrain-province-shore-borders" type="checkbox" checked />
+                Shore Borders
+              </label>
+            </div>
           </details>
           <details class="control-group">
             <summary>Intermediate</summary>
@@ -263,9 +281,9 @@ export const html = `<!doctype html>
             </div>
             <div class="control">
               <label for="terrain-intermediate-abs-magnitude">
-                Absolute Magnitude <span id="terrain-intermediate-abs-magnitude-value">0.1</span>
+                Absolute Magnitude <span id="terrain-intermediate-abs-magnitude-value">2</span>
               </label>
-              <input id="terrain-intermediate-abs-magnitude" type="range" min="0" max="10" step="0.1" value="0.1" />
+              <input id="terrain-intermediate-abs-magnitude" type="range" min="0" max="10" step="0.1" value="2" />
             </div>
           </details>
           <details class="control-group" open>
