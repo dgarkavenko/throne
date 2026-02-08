@@ -1028,18 +1028,62 @@ function renderMeshOverlay(mesh: MeshGraph, insertedPoints: Vec2[], overlay: Mes
 	insertedNodes.fill({ color: 0xffe56b, alpha: 0.9 });
 }
 
-type ProvinceAssignment = {
+type ProvinceFace = {
+	// Province index.
+	index: number;
+	// Indices into mesh.faces that belong to this province.
+	faces: number[];
+	// Indices into province.outerEdges that surround this province.
+	outerEdges: number[];
+	// Neighboring province indices (unique, excludes water).
+	adjacentProvinces: number[];
+};
+
+type ProvinceOuterEdge = {
+	// Index into province.outerEdges.
+	index: number;
+	// Index into mesh.edges that forms this boundary.
+	edge: number;
+	// Province ids on either side. Water/outside is -1.
+	provinces: [number, number];
+	// Face ids on either side. Outside is -1.
+	faces: [number, number];
+};
+
+type ProvinceGraph = {
+	// Province faces following the mesh graph convention.
+	faces: ProvinceFace[];
+	// Boundary edges between provinces or province/water.
+	outerEdges: ProvinceOuterEdge[];
+	// Per mesh face province lookup (-1 for water).
+	provinceByFace: number[];
+	// Seed faces used for province generation.
+	seedFaces: number[];
+	// Land face indices.
+	landFaces: number[];
+	// Land mask by mesh face.
+	isLand: boolean[];
+};
+
+type ProvinceSeedState = {
 	provinceByFace: number[];
 	seedFaces: number[];
 	landFaces: number[];
 	isLand: boolean[];
 };
 
-function buildProvinces(mesh: MeshGraph, controls: TerrainControls, random: () => number): ProvinceAssignment {
+function buildProvinces(mesh: MeshGraph, controls: TerrainControls, random: () => number): ProvinceGraph {
 	const faceCount = mesh.faces.length;
 	const provinceByFace = new Array<number>(faceCount).fill(-1);
 	if (faceCount === 0) {
-		return { provinceByFace, seedFaces: [], landFaces: [], isLand: [] };
+		return {
+			faces: [],
+			outerEdges: [],
+			provinceByFace,
+			seedFaces: [],
+			landFaces: [],
+			isLand: [],
+		};
 	}
 
 	const landFaces: number[] = [];
@@ -1052,7 +1096,14 @@ function buildProvinces(mesh: MeshGraph, controls: TerrainControls, random: () =
 	});
 
 	if (landFaces.length === 0) {
-		return { provinceByFace, seedFaces: [], landFaces, isLand };
+		return {
+			faces: [],
+			outerEdges: [],
+			provinceByFace,
+			seedFaces: [],
+			landFaces,
+			isLand,
+		};
 	}
 
 	const provinceCount = clamp(Math.round(controls.provinceCount || 1), 1, landFaces.length);
@@ -1097,7 +1148,14 @@ function buildProvinces(mesh: MeshGraph, controls: TerrainControls, random: () =
 		});
 	}
 
-	return { provinceByFace, seedFaces, landFaces, isLand };
+	const provinceGraph = buildProvinceGraph(mesh, provinceByFace, landFaces, isLand);
+	return {
+		...provinceGraph,
+		provinceByFace,
+		seedFaces,
+		landFaces,
+		isLand,
+	};
 }
 
 function getLandComponents(mesh: MeshGraph, isLand: boolean[]): number[][] {
@@ -1200,6 +1258,105 @@ function pickFarthestSeeds(
 	return seeds;
 }
 
+function buildProvinceGraph(
+	mesh: MeshGraph,
+	provinceByFace: number[],
+	landFaces: number[],
+	isLand: boolean[]
+): { faces: ProvinceFace[]; outerEdges: ProvinceOuterEdge[] } {
+	let provinceCount = 0;
+	for (let i = 0; i < landFaces.length; i += 1) {
+		const provinceId = provinceByFace[landFaces[i]];
+		if (provinceId >= provinceCount) {
+			provinceCount = provinceId + 1;
+		}
+	}
+
+	const faces: ProvinceFace[] = new Array(provinceCount);
+	for (let i = 0; i < provinceCount; i += 1) {
+		faces[i] = {
+			index: i,
+			faces: [],
+			outerEdges: [],
+			adjacentProvinces: [],
+		};
+	}
+
+	for (let i = 0; i < landFaces.length; i += 1) {
+		const faceIndex = landFaces[i];
+		const provinceId = provinceByFace[faceIndex];
+		if (provinceId >= 0) {
+			faces[provinceId].faces.push(faceIndex);
+		}
+	}
+
+	const outerEdges: ProvinceOuterEdge[] = [];
+	const addAdjacent = (a: number, b: number): void => {
+		if (a < 0 || b < 0) {
+			return;
+		}
+		if (!faces[a].adjacentProvinces.includes(b)) {
+			faces[a].adjacentProvinces.push(b);
+		}
+	};
+
+	const registerOuterEdge = (
+		edgeIndex: number,
+		provinceA: number,
+		provinceB: number,
+		faceA: number,
+		faceB: number
+	): void => {
+		const index = outerEdges.length;
+		outerEdges.push({
+			index,
+			edge: edgeIndex,
+			provinces: [provinceA, provinceB],
+			faces: [faceA, faceB],
+		});
+		if (provinceA >= 0) {
+			faces[provinceA].outerEdges.push(index);
+			addAdjacent(provinceA, provinceB);
+		}
+		if (provinceB >= 0) {
+			faces[provinceB].outerEdges.push(index);
+			addAdjacent(provinceB, provinceA);
+		}
+	};
+
+	for (let e = 0; e < mesh.edges.length; e += 1) {
+		const edge = mesh.edges[e];
+		const [faceA, faceB] = edge.faces;
+		if (faceA < 0 || faceB < 0) {
+			const landFace = faceA >= 0 && isLand[faceA] ? faceA : faceB >= 0 && isLand[faceB] ? faceB : -1;
+			if (landFace >= 0) {
+				registerOuterEdge(e, provinceByFace[landFace], -1, faceA, faceB);
+			}
+			continue;
+		}
+
+		const landA = isLand[faceA];
+		const landB = isLand[faceB];
+		if (landA && landB) {
+			const provinceA = provinceByFace[faceA];
+			const provinceB = provinceByFace[faceB];
+			if (provinceA >= 0 && provinceB >= 0 && provinceA !== provinceB) {
+				registerOuterEdge(e, provinceA, provinceB, faceA, faceB);
+			}
+			continue;
+		}
+		if (landA !== landB) {
+			const landFace = landA ? faceA : faceB;
+			const provinceId = provinceByFace[landFace];
+			if (provinceId >= 0) {
+				registerOuterEdge(e, provinceId, -1, faceA, faceB);
+			}
+		}
+	}
+
+	return { faces, outerEdges };
+}
+
 type ProvinceHeapEntry = {
 	score: number;
 	dist: number;
@@ -1272,7 +1429,7 @@ function growProvinceRegions(
 	seedFaces: number[],
 	provinceCount: number,
 	spacing: number
-): ProvinceAssignment {
+): ProvinceSeedState {
 	const faceCount = mesh.faces.length;
 	const provinceByFace = new Array<number>(faceCount).fill(-1);
 	const seedPoints = seedFaces.map((faceIndex) => mesh.faces[faceIndex].point);
@@ -1326,7 +1483,7 @@ function growProvinceRegions(
 function renderProvinceBorders(
 	mesh: MeshGraph,
 	cells: Vec2[][],
-	provinceAssignment: ProvinceAssignment,
+	provinceAssignment: ProvinceGraph,
 	config: TerrainConfig,
 	baseLayer: any
 ): void {
