@@ -26,12 +26,19 @@ type Vec2 = {
 	y: number;
 };
 
+/**
+ * Geometry layers:
+ * - Base geometry: MeshGraph (straight edges) + baseCells (Voronoi polygons).
+ * - Refined geometry: edgePolylines (noisy edges) + refinedCells (polygons stitched from polylines).
+ * Refined geometry is derived from base geometry and used for rendering and borders.
+ */
+
 type MeshFace = {
 	// Index into mesh.faces.
 	index: number;
 	// Site location for this face.
 	point: Vec2;
-	// Indices into mesh.vertices that bound this face polygon.
+	// Ordered loop of mesh.vertices that bound this face polygon (base geometry).
 	vertices: number[];
 	// Adjacent face indices that share an edge with this face.
 	adjacentFaces: number[];
@@ -63,7 +70,7 @@ type MeshEdge = {
 	faces: [number, number];
 	// Indices of endpoint vertices.
 	vertices: [number, number];
-	// Midpoint of the edge segment.
+	// Midpoint of the straight edge segment (base geometry).
 	midpoint: Vec2;
 };
 
@@ -71,6 +78,14 @@ type MeshGraph = {
 	faces: MeshFace[];
 	vertices: MeshVertex[];
 	edges: MeshEdge[];
+};
+
+type EdgePolyline = Vec2[];
+
+type RefinedGeometry = {
+	edgePolylines: EdgePolyline[];
+	refinedCells: Vec2[][];
+	insertedPoints: Vec2[];
 };
 
 type TerrainConfig = {
@@ -137,16 +152,16 @@ export function drawVoronoiTerrain(
 	const intermediateRandom = createRng(intermediateSeed);
 	const padding = 0;
 	const sites = generatePoissonSites(config, controls.spacing, padding, random);
-	const cells: Vec2[][] = new Array(sites.length);
+	const baseCells: Vec2[][] = new Array(sites.length);
 	sites.forEach((site, index) => {
-		cells[index] = buildVoronoiCell(config, site, sites);
+		baseCells[index] = buildVoronoiCell(config, site, sites);
 	});
 
-	const mesh = buildMeshGraph(sites, cells);
+	const mesh = buildMeshGraph(sites, baseCells);
 	assignIslandElevation(
 		config,
 		mesh,
-		cells,
+		baseCells,
 		random,
 		controls.waterLevel,
 		controls.waterRoughness,
@@ -158,66 +173,14 @@ export function drawVoronoiTerrain(
 	);
 	const landPalette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
 	const mountainPalette = [0x6f6a62, 0x8c8479, 0xa39b8e, 0xb8b0a2];
-	const insertedPoints: Vec2[] = [];
-
-	mesh.faces.forEach((face) => {
-		face.adjacentFaces.forEach((adjacentId) => {
-			if (adjacentId < face.index) {
-				return;
-			}
-
-			if (face.elevation <= 0 && mesh.faces[adjacentId].elevation <= 0) {
-				return;
-			}
-
-			const edgeId = findSharedEdgeIndex(mesh, face.index, adjacentId);
-
-			if (edgeId < 0) {
-				return;
-			}
-
-			const sharedEdge = mesh.edges[edgeId];
-			const e0 = mesh.vertices[sharedEdge.vertices[0]].point;
-			const e1 = mesh.vertices[sharedEdge.vertices[1]].point;
-
-			const c0 = face.point;
-			const c1 = mesh.faces[adjacentId].point;
-
-			const inter = generateIntermediate(
-				c0,
-				c1,
-				e0,
-				e1,
-				0,
-				intermediateRandom,
-				controls.intermediateMaxIterations,
-				controls.intermediateThreshold,
-				controls.intermediateRelMagnitude,
-				controls.intermediateAbsMagnitude
-	);
-
-			if (inter.length > 0) {
-				insertedPoints.push(...inter);
-
-				const cell0 = cells[face.index];
-				const insert0 = findEdgeInsertion(cell0, e0, e1);
-				if (insert0) {
-					insertAfter(cell0, insert0.index, insert0.reverse ? inter.slice().reverse() : inter);
-				}
-
-				const cell1 = cells[adjacentId];
-				const insert1 = findEdgeInsertion(cell1, e0, e1);
-				if (insert1) {
-					insertAfter(cell1, insert1.index, insert1.reverse ? inter.slice().reverse() : inter);
-				}
-			}
-		});
-	});
+	const refinedGeometry = buildRefinedGeometry(mesh, controls, intermediateRandom);
 
 	const provinceResult = buildProvinces(mesh, controls, random);
 
 	mesh.faces.forEach((face) => {
-		const cell = cells[face.index];
+		const refinedCell = refinedGeometry.refinedCells[face.index];
+		const baseCell = baseCells[face.index];
+		const cell = refinedCell && refinedCell.length >= 3 ? refinedCell : baseCell;
 		if (!cell || cell.length < 3) {
 			return;
 		}
@@ -277,8 +240,8 @@ export function drawVoronoiTerrain(
 		}
 	});
 
-	renderProvinceBorders(mesh, cells, provinceResult, config, baseLayer);
-	renderMeshOverlay(mesh, insertedPoints, meshOverlay);
+	renderProvinceBorders(mesh, refinedGeometry, baseCells, provinceResult, config, baseLayer);
+	renderMeshOverlay(mesh, refinedGeometry.insertedPoints, meshOverlay);
 	setGraphOverlayVisibility(terrainLayer, controls);
 }
 
@@ -340,70 +303,132 @@ function generateIntermediate(
 
 	return left.concat(insertPoint).concat(right);
 }
-function findSharedEdgeIndex(mesh: MeshGraph, face1: number, face2: number): number {
-	if (face1 < 0 || face2 < 0) {
-		return -1;
-	}
-	const face = mesh.faces[face1];
-	if (!face) {
-		return -1;
-	}
-	for (let i = 0; i < face.edges.length; i += 1) {
-		const edgeIndex = face.edges[i];
-		const edge = mesh.edges[edgeIndex];
-		if (!edge) {
+function buildRefinedGeometry(
+	mesh: MeshGraph,
+	controls: TerrainControls,
+	random: () => number
+): RefinedGeometry {
+	const { edgePolylines, insertedPoints } = buildEdgePolylines(mesh, controls, random);
+	const refinedCells = buildRefinedCells(mesh, edgePolylines);
+	return { edgePolylines, refinedCells, insertedPoints };
+}
+
+function buildEdgePolylines(
+	mesh: MeshGraph,
+	controls: TerrainControls,
+	random: () => number
+): { edgePolylines: EdgePolyline[]; insertedPoints: Vec2[] } {
+	const edgePolylines: EdgePolyline[] = new Array(mesh.edges.length);
+	const insertedPoints: Vec2[] = [];
+
+	for (let i = 0; i < mesh.edges.length; i += 1) {
+		const edge = mesh.edges[i];
+		const [faceA, faceB] = edge.faces;
+		const v0 = mesh.vertices[edge.vertices[0]].point;
+		const v1 = mesh.vertices[edge.vertices[1]].point;
+		const edgeIndex = edge.index;
+
+		if (faceA < 0 || faceB < 0) {
+			edgePolylines[edgeIndex] = [v0, v1];
 			continue;
 		}
-		const [a, b] = edge.faces;
-		if ((a === face1 && b === face2) || (a === face2 && b === face1)) {
-			return edgeIndex;
+
+		const face0 = mesh.faces[faceA];
+		const face1 = mesh.faces[faceB];
+		const bothWater = face0.elevation <= 0 && face1.elevation <= 0;
+		if (bothWater) {
+			edgePolylines[edgeIndex] = [v0, v1];
+			continue;
+		}
+
+		const inter = generateIntermediate(
+			face0.point,
+			face1.point,
+			v0,
+			v1,
+			0,
+			random,
+			controls.intermediateMaxIterations,
+			controls.intermediateThreshold,
+			controls.intermediateRelMagnitude,
+			controls.intermediateAbsMagnitude
+		);
+
+		if (inter.length > 0) {
+			insertedPoints.push(...inter);
+			edgePolylines[edgeIndex] = [v0, ...inter, v1];
+		} else {
+			edgePolylines[edgeIndex] = [v0, v1];
 		}
 	}
-	return -1;
+
+	return { edgePolylines, insertedPoints };
 }
 
-function findVertexIndex(cell: Vec2[], vertex: Vec2, epsilon = 1e-3): number {
-	const epsilonSq = epsilon * epsilon;
-	for (let i = 0; i < cell.length; i += 1) {
-		const point = cell[i];
-		const dx = point.x - vertex.x;
-		const dy = point.y - vertex.y;
-		if (dx * dx + dy * dy <= epsilonSq) {
-			return i;
-		}
+function buildRefinedCells(mesh: MeshGraph, edgePolylines: EdgePolyline[]): Vec2[][] {
+	const edgeLookup = new Map<string, number>();
+	for (let i = 0; i < mesh.edges.length; i += 1) {
+		const edge = mesh.edges[i];
+		edgeLookup.set(edgeKey(edge.vertices[0], edge.vertices[1]), edge.index);
 	}
-	return -1;
+
+	const refinedCells: Vec2[][] = new Array(mesh.faces.length);
+	for (let i = 0; i < mesh.faces.length; i += 1) {
+		const face = mesh.faces[i];
+		if (!face.vertices || face.vertices.length < 3) {
+			refinedCells[face.index] = [];
+			continue;
+		}
+		const path: Vec2[] = [];
+		const vertexCount = face.vertices.length;
+		for (let j = 0; j < vertexCount; j += 1) {
+			const a = face.vertices[j];
+			const b = face.vertices[(j + 1) % vertexCount];
+			const edgeIndex = edgeLookup.get(edgeKey(a, b));
+			if (edgeIndex === undefined) {
+				continue;
+			}
+			const edge = mesh.edges[edgeIndex];
+			const polyline = edgePolylines[edgeIndex] ?? [
+				mesh.vertices[edge.vertices[0]].point,
+				mesh.vertices[edge.vertices[1]].point,
+			];
+			const forward = edge.vertices[0] === a && edge.vertices[1] === b;
+			const segment = forward ? polyline : polyline.slice().reverse();
+			appendPath(path, segment);
+		}
+		if (path.length > 2 && pointsEqual(path[0], path[path.length - 1])) {
+			path.pop();
+		}
+		refinedCells[face.index] = path;
+	}
+
+	return refinedCells;
 }
 
-function insertAfter(cell: Vec2[], vertexIndex: number, points: Vec2[]): void {
-	if (points.length === 0) {
+function appendPath(path: Vec2[], segment: Vec2[]): void {
+	if (segment.length === 0) {
 		return;
 	}
-	cell.splice(vertexIndex + 1, 0, ...points);
+	if (path.length === 0) {
+		path.push(...segment);
+		return;
+	}
+	if (pointsEqual(path[path.length - 1], segment[0])) {
+		path.push(...segment.slice(1));
+		return;
+	}
+	path.push(...segment);
 }
 
-function findEdgeInsertion(
-	cell: Vec2[] | undefined,
-	a: Vec2,
-	b: Vec2
-): { index: number; reverse: boolean } | null {
-	if (!cell || cell.length < 2) {
-		return null;
-	}
-	const ia = findVertexIndex(cell, a);
-	const ib = findVertexIndex(cell, b);
-	if (ia < 0 || ib < 0) {
-		return null;
-	}
-	const nextOfA = (ia + 1) % cell.length;
-	if (nextOfA === ib) {
-		return { index: ia, reverse: false };
-	}
-	const nextOfB = (ib + 1) % cell.length;
-	if (nextOfB === ia) {
-		return { index: ib, reverse: true };
-	}
-	return null;
+function pointsEqual(a: Vec2, b: Vec2, epsilon = 1e-3): boolean {
+	const dx = a.x - b.x;
+	const dy = a.y - b.y;
+	return dx * dx + dy * dy <= epsilon * epsilon;
+}
+
+function edgeKey(a: number, b: number): string {
+	return a < b ? `${a}:${b}` : `${b}:${a}`;
 }
 
 function generatePoissonSites(
@@ -1482,7 +1507,8 @@ function growProvinceRegions(
 
 function renderProvinceBorders(
 	mesh: MeshGraph,
-	cells: Vec2[][],
+	refinedGeometry: RefinedGeometry,
+	baseCells: Vec2[][],
 	provinceAssignment: ProvinceGraph,
 	config: TerrainConfig,
 	baseLayer: any
@@ -1495,13 +1521,14 @@ function renderProvinceBorders(
 	const isLand = provinceAssignment.isLand;
 	const offsetDistance = lineWidth * 0.35;
 	const sharedStrokeWidth = lineWidth * 0.7;
-	const oceanWater = getOceanWaterFaces(mesh, cells, isLand, config);
+	const oceanWater = getOceanWaterFaces(mesh, baseCells, isLand, config);
+	const provinceColors = assignProvinceColors(provinceAssignment, PROVINCE_BORDER_PALETTE);
 
 	for (let i = 0; i < mesh.faces.length; i += 1) {
 		if (!isLand[i]) {
 			continue;
 		}
-		const cell = cells[i];
+		const cell = refinedGeometry.refinedCells[i];
 		if (!cell || cell.length < 3) {
 			continue;
 		}
@@ -1531,17 +1558,12 @@ function renderProvinceBorders(
 			continue;
 		}
 
-		const borderFace = isShoreBorder ? (isLandA ? faceA : faceB) : faceA;
-		const cell = cells[borderFace];
-		if (!cell || cell.length < 2) {
+		const path = refinedGeometry.edgePolylines[edge.index];
+		if (!path || path.length < 2) {
 			continue;
 		}
 		const e0 = mesh.vertices[edge.vertices[0]].point;
 		const e1 = mesh.vertices[edge.vertices[1]].point;
-		const path = extractEdgePath(cell, e0, e1);
-		if (path.length < 2) {
-			continue;
-		}
 		if (isProvinceBorder) {
 			const midpoint = vec2Midpoint(e0, e1);
 			let dirToA = vec2Normalize(vec2Sub(mesh.faces[faceA].point, midpoint));
@@ -1553,8 +1575,8 @@ function renderProvinceBorders(
 
 			const pathA = offsetPath(path, dirToA, offsetDistance);
 			const pathB = offsetPath(path, dirToB, offsetDistance);
-			const colorA = getProvinceColor(provinceA);
-			const colorB = getProvinceColor(provinceB);
+			const colorA = provinceColors[provinceA] ?? PROVINCE_BORDER_PALETTE[0];
+			const colorB = provinceColors[provinceB] ?? PROVINCE_BORDER_PALETTE[0];
 
 			drawPath(provinceLines, pathA);
 			provinceLines.stroke({ width: sharedStrokeWidth, color: colorA, alpha: lineAlpha });
@@ -1564,7 +1586,7 @@ function renderProvinceBorders(
 		}
 
 		const landProvince = isLandA ? provinceA : provinceB;
-		const borderColor = getProvinceColor(landProvince);
+		const borderColor = provinceColors[landProvince] ?? PROVINCE_BORDER_PALETTE[0];
 		drawPath(provinceLines, path);
 		provinceLines.stroke({ width: lineWidth, color: borderColor, alpha: lineAlpha });
 	}
@@ -1574,40 +1596,64 @@ function renderProvinceBorders(
 	baseLayer.addChild(landMask);
 }
 
-function getProvinceColor(id: number): number {
-	const hue = (id * 47 + 13) % 360;
-	return hslToHex(hue, 0.55, 0.45);
-}
+const PROVINCE_BORDER_PALETTE = [0xd6453d, 0xf28c28, 0xf2d03b, 0x8b5cf6];
 
-function hslToHex(h: number, s: number, l: number): number {
-	const c = (1 - Math.abs(2 * l - 1)) * s;
-	const hp = h / 60;
-	const x = c * (1 - Math.abs((hp % 2) - 1));
-	let r = 0;
-	let g = 0;
-	let b = 0;
-	if (hp >= 0 && hp < 1) {
-		r = c;
-		g = x;
-	} else if (hp < 2) {
-		r = x;
-		g = c;
-	} else if (hp < 3) {
-		g = c;
-		b = x;
-	} else if (hp < 4) {
-		g = x;
-		b = c;
-	} else if (hp < 5) {
-		r = x;
-		b = c;
-	} else {
-		r = c;
-		b = x;
+function assignProvinceColors(provinceGraph: ProvinceGraph, palette: number[]): number[] {
+	const count = provinceGraph.faces.length;
+	const colors = new Array<number>(count).fill(-1);
+	if (count === 0) {
+		return colors;
 	}
-	const m = l - c / 2;
-	const toByte = (v: number): number => Math.round((v + m) * 255);
-	return (toByte(r) << 16) | (toByte(g) << 8) | toByte(b);
+	const order = provinceGraph.faces
+		.map((face) => ({ index: face.index, degree: face.adjacentProvinces.length }))
+		.sort((a, b) => b.degree - a.degree || a.index - b.index)
+		.map((entry) => entry.index);
+
+	const canUseColor = (provinceId: number, colorIndex: number): boolean => {
+		const neighbors = provinceGraph.faces[provinceId]?.adjacentProvinces ?? [];
+		for (let i = 0; i < neighbors.length; i += 1) {
+			const neighbor = neighbors[i];
+			if (colors[neighbor] === colorIndex) {
+				return false;
+			}
+		}
+		return true;
+	};
+
+	const backtrack = (pos: number): boolean => {
+		if (pos >= order.length) {
+			return true;
+		}
+		const provinceId = order[pos];
+		for (let c = 0; c < palette.length; c += 1) {
+			if (!canUseColor(provinceId, c)) {
+				continue;
+			}
+			colors[provinceId] = c;
+			if (backtrack(pos + 1)) {
+				return true;
+			}
+			colors[provinceId] = -1;
+		}
+		return false;
+	};
+
+	if (!backtrack(0)) {
+		for (let i = 0; i < order.length; i += 1) {
+			const provinceId = order[i];
+			for (let c = 0; c < palette.length; c += 1) {
+				if (canUseColor(provinceId, c)) {
+					colors[provinceId] = c;
+					break;
+				}
+			}
+			if (colors[provinceId] < 0) {
+				colors[provinceId] = 0;
+			}
+		}
+	}
+
+	return colors.map((colorIndex) => palette[Math.max(0, colorIndex) % palette.length]);
 }
 
 function getOceanWaterFaces(
@@ -1670,40 +1716,6 @@ function drawPath(graphics: any, path: Vec2[]): void {
 function offsetPath(path: Vec2[], direction: Vec2, distance: number): Vec2[] {
 	const offset = vec2Mult(direction, distance);
 	return path.map((point) => vec2Add(point, offset));
-}
-
-function extractEdgePath(cell: Vec2[], a: Vec2, b: Vec2): Vec2[] {
-	if (cell.length < 2) {
-		return [];
-	}
-	const ia = findVertexIndex(cell, a);
-	const ib = findVertexIndex(cell, b);
-	if (ia < 0 || ib < 0 || ia === ib) {
-		return [a, b];
-	}
-	const forward: Vec2[] = [cell[ia]];
-	let idx = ia;
-	while (idx !== ib) {
-		idx = (idx + 1) % cell.length;
-		if (idx === ia) {
-			break;
-		}
-		forward.push(cell[idx]);
-	}
-	const backward: Vec2[] = [cell[ia]];
-	idx = ia;
-	while (idx !== ib) {
-		idx = (idx - 1 + cell.length) % cell.length;
-		if (idx === ia) {
-			break;
-		}
-		backward.push(cell[idx]);
-	}
-	const chosen = forward.length <= backward.length ? forward : backward;
-	if (chosen[chosen.length - 1] !== cell[ib]) {
-		chosen.push(cell[ib]);
-	}
-	return chosen;
 }
 
 function pushUnique(values: number[], value: number): void {
