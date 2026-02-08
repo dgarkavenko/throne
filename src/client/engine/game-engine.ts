@@ -40,6 +40,13 @@ export class GameEngine {
     intermediateAbsMagnitude: 5,
     waterLevel: 0,
     waterRoughness: 50,
+    waterNoiseScale: 18,
+    waterNoiseStrength: 0.45,
+    waterNoiseOctaves: 3,
+    waterWarpScale: 8,
+    waterWarpStrength: 0.35,
+    waterOffsetX: 0,
+    waterOffsetY: 0,
   };
   private hasTerrain = false;
 
@@ -102,6 +109,13 @@ export class GameEngine {
       intermediateAbsMagnitude: this.clamp(Math.round(safeValue(nextControls.intermediateAbsMagnitude, 5)), 0, 10),
       waterLevel: this.clamp(Math.round(safeValue(nextControls.waterLevel, 0)), -40, 40),
       waterRoughness: this.clamp(Math.round(safeValue(nextControls.waterRoughness, 50)), 0, 100),
+      waterNoiseScale: this.clamp(Math.round(safeValue(nextControls.waterNoiseScale, 18)), 2, 60),
+      waterNoiseStrength: this.clamp(Math.round(safeValue(nextControls.waterNoiseStrength, 0.45) * 100) / 100, 0, 1),
+      waterNoiseOctaves: this.clamp(Math.round(safeValue(nextControls.waterNoiseOctaves, 3)), 1, 6),
+      waterWarpScale: this.clamp(Math.round(safeValue(nextControls.waterWarpScale, 8)), 2, 40),
+      waterWarpStrength: this.clamp(Math.round(safeValue(nextControls.waterWarpStrength, 0.35) * 100) / 100, 0, 0.8),
+      waterOffsetX: this.clamp(Math.round(safeValue(nextControls.waterOffsetX, 0)), -40, 40),
+      waterOffsetY: this.clamp(Math.round(safeValue(nextControls.waterOffsetY, 0)), -40, 40),
     };
 
     const needsRegeneration =
@@ -114,7 +128,14 @@ export class GameEngine {
       this.terrainControls.intermediateRelMagnitude !== sanitized.intermediateRelMagnitude ||
       this.terrainControls.intermediateAbsMagnitude !== sanitized.intermediateAbsMagnitude ||
       this.terrainControls.waterLevel !== sanitized.waterLevel ||
-      this.terrainControls.waterRoughness !== sanitized.waterRoughness;
+      this.terrainControls.waterRoughness !== sanitized.waterRoughness ||
+      this.terrainControls.waterNoiseScale !== sanitized.waterNoiseScale ||
+      this.terrainControls.waterNoiseStrength !== sanitized.waterNoiseStrength ||
+      this.terrainControls.waterNoiseOctaves !== sanitized.waterNoiseOctaves ||
+      this.terrainControls.waterWarpScale !== sanitized.waterWarpScale ||
+      this.terrainControls.waterWarpStrength !== sanitized.waterWarpStrength ||
+      this.terrainControls.waterOffsetX !== sanitized.waterOffsetX ||
+      this.terrainControls.waterOffsetY !== sanitized.waterOffsetY;
 
     this.terrainControls = sanitized;
 

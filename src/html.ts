@@ -178,6 +178,40 @@ export const html = `<!doctype html>
               <label for="terrain-water-roughness">Water Roughness <span id="terrain-water-roughness-value">50</span></label>
               <input id="terrain-water-roughness" type="range" min="0" max="100" step="1" value="50" />
             </div>
+            <div class="control">
+              <label for="terrain-water-noise-scale">Noise Scale <span id="terrain-water-noise-scale-value">18</span></label>
+              <input id="terrain-water-noise-scale" type="range" min="2" max="60" step="1" value="18" />
+            </div>
+            <div class="control">
+              <label for="terrain-water-noise-strength">
+                Noise Strength <span id="terrain-water-noise-strength-value">0.45</span>
+              </label>
+              <input id="terrain-water-noise-strength" type="range" min="0" max="1" step="0.01" value="0.45" />
+            </div>
+            <div class="control">
+              <label for="terrain-water-noise-octaves">
+                Noise Octaves <span id="terrain-water-noise-octaves-value">3</span>
+              </label>
+              <input id="terrain-water-noise-octaves" type="range" min="1" max="6" step="1" value="3" />
+            </div>
+            <div class="control">
+              <label for="terrain-water-warp-scale">Warp Scale <span id="terrain-water-warp-scale-value">8</span></label>
+              <input id="terrain-water-warp-scale" type="range" min="2" max="40" step="1" value="8" />
+            </div>
+            <div class="control">
+              <label for="terrain-water-warp-strength">
+                Warp Strength <span id="terrain-water-warp-strength-value">0.35</span>
+              </label>
+              <input id="terrain-water-warp-strength" type="range" min="0" max="0.8" step="0.01" value="0.35" />
+            </div>
+            <div class="control">
+              <label for="terrain-water-offset-x">Offset X <span id="terrain-water-offset-x-value">0</span></label>
+              <input id="terrain-water-offset-x" type="range" min="-40" max="40" step="1" value="0" />
+            </div>
+            <div class="control">
+              <label for="terrain-water-offset-y">Offset Y <span id="terrain-water-offset-y-value">0</span></label>
+              <input id="terrain-water-offset-y" type="range" min="-40" max="40" step="1" value="0" />
+            </div>
           </div>
           <div class="control-group">
             <div class="control-group-title">Intermediate</div>

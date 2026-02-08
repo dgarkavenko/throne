@@ -13,19 +13,19 @@ export type TerrainControls = {
 	intermediateAbsMagnitude: number;
 	waterLevel: number;
 	waterRoughness: number;
+	waterNoiseScale: number;
+	waterNoiseStrength: number;
+	waterNoiseOctaves: number;
+	waterWarpScale: number;
+	waterWarpStrength: number;
+	waterOffsetX: number;
+	waterOffsetY: number;
 };
 
 type Vec2 = {
 	x: number;
 	y: number;
 };
-
-enum WaterKind {
-	Land = 'land',
-	Water = 'water',
-	Ocean = 'ocean',
-	Coast = 'coast',
-}
 
 type MeshFace = {
 	// Index into mesh.faces.
@@ -38,8 +38,8 @@ type MeshFace = {
 	adjacentFaces: number[];
 	// Indices into mesh.edges that border this face.
 	edges: number[];
-	// Water classification used for rendering.
-	waterKind: WaterKind;
+	// Elevation classification used for rendering.
+	elevation: number;
 };
 
 type MeshVertex = {
@@ -53,8 +53,8 @@ type MeshVertex = {
 	adjacentVertices: number[];
 	// Indices into mesh.edges that touch this vertex.
 	edges: number[];
-	// Water classification used for rendering.
-	waterKind: WaterKind;
+	// Elevation classification used for rendering.
+	elevation: number;
 };
 
 type MeshEdge = {
@@ -144,8 +144,23 @@ export function drawVoronoiTerrain(
 	});
 
 	const mesh = buildMeshGraph(sites, cells);
-	assignIslandWater(config, mesh, cells, random, controls.waterLevel, controls.waterRoughness);
+	assignIslandElevation(
+		config,
+		mesh,
+		cells,
+		random,
+		controls.waterLevel,
+		controls.waterRoughness,
+		controls.waterNoiseScale,
+		controls.waterNoiseStrength,
+		controls.waterNoiseOctaves,
+		controls.waterWarpScale,
+		controls.waterWarpStrength,
+		controls.waterOffsetX,
+		controls.waterOffsetY
+	);
 	const landPalette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
+	const mountainPalette = [0x6f6a62, 0x8c8479, 0xa39b8e, 0xb8b0a2];
 	const insertedPoints: Vec2[] = [];
 
 	mesh.faces.forEach((face) => {
@@ -154,8 +169,7 @@ export function drawVoronoiTerrain(
 				return;
 			}
 
-			if (face.waterKind == WaterKind.Ocean && mesh.faces[adjacentId].waterKind == WaterKind.Ocean)
-			{
+			if (face.elevation <= 0 && mesh.faces[adjacentId].elevation <= 0) {
 				return;
 			}
 
@@ -213,21 +227,27 @@ export function drawVoronoiTerrain(
 		let strokeColor = 0xcadfb8;
 		let strokeAlpha = 0.42;
 
-		if (face.waterKind === WaterKind.Ocean) {
-			fillColor = 0x153961;
-			fillAlpha = 0.88;
-			strokeColor = 0x7aa3ce;
-			strokeAlpha = 0.36;
-		} else if (face.waterKind === WaterKind.Water) {
+		if (face.elevation <= -2) {
+			fillColor = 0x0f2b4a;
+			fillAlpha = 0.9;
+			strokeColor = 0x6f95c4;
+			strokeAlpha = 0.34;
+		} else if (face.elevation <= 0) {
 			fillColor = 0x2d5f8d;
 			fillAlpha = 0.84;
 			strokeColor = 0x9dc2e6;
 			strokeAlpha = 0.35;
-		} else if (face.waterKind === WaterKind.Coast) {
+		} else if (face.elevation === 1) {
 			fillColor = 0x8c7b4f;
 			fillAlpha = 0.82;
 			strokeColor = 0xdac38e;
 			strokeAlpha = 0.38;
+		} else if (face.elevation >= 3) {
+			const mountainIndex = Math.min(mountainPalette.length - 1, face.elevation - 3);
+			fillColor = mountainPalette[mountainIndex];
+			fillAlpha = 0.86;
+			strokeColor = 0xd7d0c2;
+			strokeAlpha = 0.32;
 		}
 
 		const terrain = new window.PIXI.Graphics();
@@ -582,7 +602,7 @@ function buildMeshGraph(sites: Vec2[], cells: Vec2[][]): MeshGraph {
 		vertices: [],
 		adjacentFaces: [],
 		edges: [],
-		waterKind: WaterKind.Land,
+		elevation: 2,
 	}));
 	const vertices: MeshVertex[] = [];
 	const edges: MeshEdge[] = [];
@@ -606,7 +626,7 @@ function buildMeshGraph(sites: Vec2[], cells: Vec2[][]): MeshGraph {
 			faces: [],
 			adjacentVertices: [],
 			edges: [],
-			waterKind: WaterKind.Land,
+			elevation: 2,
 		});
 		cornerLookup.set(key, index);
 		return index;
@@ -676,39 +696,76 @@ function buildMeshGraph(sites: Vec2[], cells: Vec2[][]): MeshGraph {
 	return { faces, vertices, edges };
 }
 
-function assignIslandWater(
+function assignIslandElevation(
 	config: TerrainConfig,
 	mesh: MeshGraph,
 	cells: Vec2[][],
 	random: () => number,
 	waterLevel: number,
-	waterRoughness: number
+	waterRoughness: number,
+	waterNoiseScale: number,
+	waterNoiseStrength: number,
+	waterNoiseOctaves: number,
+	waterWarpScale: number,
+	waterWarpStrength: number,
+	waterOffsetX: number,
+	waterOffsetY: number
 ): void {
-	const isWater = (kind: WaterKind): boolean =>
-		kind === WaterKind.Water || kind === WaterKind.Ocean;
-	const isOcean = (kind: WaterKind): boolean => kind === WaterKind.Ocean;
 	const width = config.width;
 	const height = config.height;
 	const normalizedWaterLevel = clamp(waterLevel, -40, 40) / 40;
 	const normalizedRoughness = clamp(waterRoughness, 0, 100) / 100;
+	const clampedNoiseScale = clamp(waterNoiseScale, 2, 60);
+	const clampedNoiseStrength = clamp(waterNoiseStrength, 0, 1);
+	const clampedNoiseOctaves = Math.round(clamp(waterNoiseOctaves, 1, 6));
+	const clampedWarpScale = clamp(waterWarpScale, 2, 40);
+	const clampedWarpStrength = clamp(waterWarpStrength, 0, 0.8);
+	const offsetX = clamp(waterOffsetX, -40, 40) / 100;
+	const offsetY = clamp(waterOffsetY, -40, 40) / 100;
+	const islandSeed = Math.floor(random() * 0xffffffff);
 	const bumps = 3 + Math.floor(normalizedRoughness * 7) + Math.floor(random() * 3);
 	const startAngle = random() * Math.PI * 2;
 	const borderEpsilon = 1;
-	const baseRadius = 0.74 - normalizedWaterLevel * 0.18;
+	const baseRadius = 0.72 - normalizedWaterLevel * 0.2;
 	const primaryWaveAmplitude = 0.06 + normalizedRoughness * 0.14;
 	const secondaryWaveAmplitude = 0.03 + normalizedRoughness * 0.1;
+	const noiseAmplitude = (0.08 + normalizedRoughness * 0.18) * clampedNoiseStrength;
 
 	const islandShape = (point: Vec2): boolean => {
-		const nx = (point.x / width) * 2 - 1;
-		const ny = (point.y / height) * 2 - 1;
+		const baseNx = (point.x / width) * 2 - 1 + offsetX;
+		const baseNy = (point.y / height) * 2 - 1 + offsetY;
+		let nx = baseNx;
+		let ny = baseNy;
+		if (clampedWarpStrength > 0) {
+			const warpX =
+				fbmValueNoise(baseNx * clampedWarpScale, baseNy * clampedWarpScale, islandSeed + 17, 3) *
+					2 -
+				1;
+			const warpY =
+				fbmValueNoise(
+					(baseNx + 9.2) * clampedWarpScale,
+					(baseNy - 4.6) * clampedWarpScale,
+					islandSeed + 31,
+					3
+				) *
+					2 -
+				1;
+			nx += warpX * clampedWarpStrength;
+			ny += warpY * clampedWarpStrength;
+		}
 		const angle = Math.atan2(ny, nx);
-		const length = 0.5 * (Math.max(Math.abs(nx), Math.abs(ny)) + Math.hypot(nx, ny));
+		const length = Math.hypot(nx, ny);
+		const noise =
+			fbmValueNoise(nx * clampedNoiseScale, ny * clampedNoiseScale, islandSeed, clampedNoiseOctaves) *
+				2 -
+			1;
 		const radius = clamp(
 			baseRadius +
-			primaryWaveAmplitude * Math.sin(startAngle + bumps * angle + Math.cos((bumps + 2) * angle)) +
-			secondaryWaveAmplitude * Math.sin(startAngle * 0.7 + (bumps + 3) * angle),
-			0.16,
-			0.96
+				primaryWaveAmplitude * Math.sin(startAngle + bumps * angle + Math.cos((bumps + 2) * angle)) +
+				secondaryWaveAmplitude * Math.sin(startAngle * 0.7 + (bumps + 3) * angle) +
+				noiseAmplitude * noise,
+			0.12,
+			0.98
 		);
 		return length < radius;
 	};
@@ -727,64 +784,97 @@ function assignIslandWater(
 		);
 	};
 
+	const faceCount = mesh.faces.length;
+	const isLand = new Array<boolean>(faceCount).fill(false);
+	const hasLand = mesh.faces.some((face) => !touchesBorder(face.index) && islandShape(face.point));
+	const hasWater = mesh.faces.some((face) => touchesBorder(face.index) || !islandShape(face.point));
+
 	mesh.faces.forEach((face) => {
-		const water = touchesBorder(face.index) || !islandShape(face.point);
-		face.waterKind = water ? WaterKind.Water : WaterKind.Land;
+		const land = !touchesBorder(face.index) && islandShape(face.point);
+		isLand[face.index] = land;
 	});
 
-	const queue: number[] = [];
-	mesh.faces.forEach((face) => {
-		if (isWater(face.waterKind) && touchesBorder(face.index)) {
-			face.waterKind = WaterKind.Ocean;
-			queue.push(face.index);
+	const landElevation = new Array<number>(faceCount).fill(Number.NaN);
+	const waterElevation = new Array<number>(faceCount).fill(Number.NaN);
+	const landQueue: number[] = [];
+	const waterQueue: number[] = [];
+
+	if (hasWater && hasLand) {
+		mesh.faces.forEach((face) => {
+			if (isLand[face.index]) {
+				const isShore = face.adjacentFaces.some((neighborIndex) => !isLand[neighborIndex]);
+				if (isShore) {
+					landElevation[face.index] = 1;
+					landQueue.push(face.index);
+				}
+			} else {
+				const isShoreWater = face.adjacentFaces.some((neighborIndex) => isLand[neighborIndex]);
+				if (isShoreWater) {
+					waterElevation[face.index] = 0;
+					waterQueue.push(face.index);
+				}
+			}
+		});
+
+		for (let q = 0; q < landQueue.length; q += 1) {
+			const face = mesh.faces[landQueue[q]];
+			const currentElevation = landElevation[face.index];
+			for (let i = 0; i < face.adjacentFaces.length; i += 1) {
+				const neighborIndex = face.adjacentFaces[i];
+				if (!isLand[neighborIndex]) {
+					continue;
+				}
+				if (Number.isNaN(landElevation[neighborIndex])) {
+					landElevation[neighborIndex] = currentElevation + 1;
+					landQueue.push(neighborIndex);
+				}
+			}
 		}
-	});
 
-	for (let q = 0; q < queue.length; q += 1) {
-		const face = mesh.faces[queue[q]];
-		for (let i = 0; i < face.adjacentFaces.length; i += 1) {
-			const neighbor = mesh.faces[face.adjacentFaces[i]];
-			if (isWater(neighbor.waterKind) && !isOcean(neighbor.waterKind)) {
-				neighbor.waterKind = WaterKind.Ocean;
-				queue.push(neighbor.index);
+		for (let q = 0; q < waterQueue.length; q += 1) {
+			const face = mesh.faces[waterQueue[q]];
+			const currentElevation = waterElevation[face.index];
+			for (let i = 0; i < face.adjacentFaces.length; i += 1) {
+				const neighborIndex = face.adjacentFaces[i];
+				if (isLand[neighborIndex]) {
+					continue;
+				}
+				if (Number.isNaN(waterElevation[neighborIndex])) {
+					waterElevation[neighborIndex] = currentElevation - 1;
+					waterQueue.push(neighborIndex);
+				}
 			}
 		}
 	}
 
 	mesh.faces.forEach((face) => {
-		if (!isWater(face.waterKind)) {
-			const isCoast = face.adjacentFaces.some((neighborIndex) =>
-				isOcean(mesh.faces[neighborIndex].waterKind)
-			);
-			if (isCoast) {
-				face.waterKind = WaterKind.Coast;
-			}
+		if (!hasWater && hasLand) {
+			face.elevation = 2;
+			return;
+		}
+		if (!hasLand && hasWater) {
+			face.elevation = 0;
+			return;
+		}
+		if (isLand[face.index]) {
+			const elevation = landElevation[face.index];
+			face.elevation = Number.isNaN(elevation) ? 2 : elevation;
+		} else {
+			const elevation = waterElevation[face.index];
+			face.elevation = Number.isNaN(elevation) ? 0 : elevation;
 		}
 	});
 
 	mesh.vertices.forEach((vertex) => {
 		if (vertex.faces.length === 0) {
-			vertex.waterKind = WaterKind.Ocean;
+			vertex.elevation = 0;
 			return;
 		}
-		let waterCount = 0;
-		let oceanCount = 0;
+		let sum = 0;
 		for (let i = 0; i < vertex.faces.length; i += 1) {
-			const face = mesh.faces[vertex.faces[i]];
-			if (isWater(face.waterKind)) {
-				waterCount += 1;
-			}
-			if (isOcean(face.waterKind)) {
-				oceanCount += 1;
-			}
+			sum += mesh.faces[vertex.faces[i]].elevation;
 		}
-		if (waterCount === vertex.faces.length) {
-			vertex.waterKind = oceanCount === vertex.faces.length ? WaterKind.Ocean : WaterKind.Water;
-		} else if (waterCount === 0) {
-			vertex.waterKind = WaterKind.Land;
-		} else {
-			vertex.waterKind = WaterKind.Coast;
-		}
+		vertex.elevation = sum / vertex.faces.length;
 	});
 }
 
@@ -914,6 +1004,47 @@ function pushUnique(values: number[], value: number): void {
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.max(min, Math.min(max, value));
+}
+
+function smoothstep(t: number): number {
+	return t * t * (3 - 2 * t);
+}
+
+function hash2D(x: number, y: number, seed: number): number {
+	let n = x * 374761393 + y * 668265263 + seed * 2654435761;
+	n = (n ^ (n >>> 13)) * 1274126177;
+	n = (n ^ (n >>> 16)) >>> 0;
+	return n / 4294967296;
+}
+
+function valueNoise2D(x: number, y: number, seed: number): number {
+	const x0 = Math.floor(x);
+	const y0 = Math.floor(y);
+	const x1 = x0 + 1;
+	const y1 = y0 + 1;
+	const sx = smoothstep(x - x0);
+	const sy = smoothstep(y - y0);
+	const n00 = hash2D(x0, y0, seed);
+	const n10 = hash2D(x1, y0, seed);
+	const n01 = hash2D(x0, y1, seed);
+	const n11 = hash2D(x1, y1, seed);
+	const ix0 = lerp(n00, n10, sx);
+	const ix1 = lerp(n01, n11, sx);
+	return lerp(ix0, ix1, sy);
+}
+
+function fbmValueNoise(x: number, y: number, seed: number, octaves: number): number {
+	let amp = 1;
+	let freq = 1;
+	let sum = 0;
+	let norm = 0;
+	for (let i = 0; i < octaves; i += 1) {
+		sum += amp * valueNoise2D(x * freq, y * freq, seed + i * 1013);
+		norm += amp;
+		amp *= 0.5;
+		freq *= 2;
+	}
+	return norm > 0 ? sum / norm : 0;
 }
 
 function createRng(seed: number): () => number {

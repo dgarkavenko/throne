@@ -13,6 +13,13 @@ type TerrainSettings = {
   intermediateAbsMagnitude: number;
   waterLevel: number;
   waterRoughness: number;
+  waterNoiseScale: number;
+  waterNoiseStrength: number;
+  waterNoiseOctaves: number;
+  waterWarpScale: number;
+  waterWarpStrength: number;
+  waterOffsetX: number;
+  waterOffsetY: number;
 };
 
 type PageLayout = {
@@ -47,6 +54,13 @@ export function createPageLayout(): PageLayout {
   const terrainIntermediateAbsMagnitudeInput = document.getElementById('terrain-intermediate-abs-magnitude') as HTMLInputElement | null;
   const terrainWaterLevelInput = document.getElementById('terrain-water-level') as HTMLInputElement | null;
   const terrainWaterRoughnessInput = document.getElementById('terrain-water-roughness') as HTMLInputElement | null;
+  const terrainWaterNoiseScaleInput = document.getElementById('terrain-water-noise-scale') as HTMLInputElement | null;
+  const terrainWaterNoiseStrengthInput = document.getElementById('terrain-water-noise-strength') as HTMLInputElement | null;
+  const terrainWaterNoiseOctavesInput = document.getElementById('terrain-water-noise-octaves') as HTMLInputElement | null;
+  const terrainWaterWarpScaleInput = document.getElementById('terrain-water-warp-scale') as HTMLInputElement | null;
+  const terrainWaterWarpStrengthInput = document.getElementById('terrain-water-warp-strength') as HTMLInputElement | null;
+  const terrainWaterOffsetXInput = document.getElementById('terrain-water-offset-x') as HTMLInputElement | null;
+  const terrainWaterOffsetYInput = document.getElementById('terrain-water-offset-y') as HTMLInputElement | null;
   const terrainGraphPolygonsInput = document.getElementById('terrain-graph-polygons') as HTMLInputElement | null;
   const terrainGraphDualInput = document.getElementById('terrain-graph-dual') as HTMLInputElement | null;
   const terrainGraphCornersInput = document.getElementById('terrain-graph-corners') as HTMLInputElement | null;
@@ -59,6 +73,13 @@ export function createPageLayout(): PageLayout {
   const terrainIntermediateAbsMagnitudeValue = document.getElementById('terrain-intermediate-abs-magnitude-value');
   const terrainWaterLevelValue = document.getElementById('terrain-water-level-value');
   const terrainWaterRoughnessValue = document.getElementById('terrain-water-roughness-value');
+  const terrainWaterNoiseScaleValue = document.getElementById('terrain-water-noise-scale-value');
+  const terrainWaterNoiseStrengthValue = document.getElementById('terrain-water-noise-strength-value');
+  const terrainWaterNoiseOctavesValue = document.getElementById('terrain-water-noise-octaves-value');
+  const terrainWaterWarpScaleValue = document.getElementById('terrain-water-warp-scale-value');
+  const terrainWaterWarpStrengthValue = document.getElementById('terrain-water-warp-strength-value');
+  const terrainWaterOffsetXValue = document.getElementById('terrain-water-offset-x-value');
+  const terrainWaterOffsetYValue = document.getElementById('terrain-water-offset-y-value');
 
   const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
   const parseIntWithFallback = (value: string | undefined, fallback: number): number => {
@@ -92,6 +113,13 @@ export function createPageLayout(): PageLayout {
     );
     const waterLevel = clamp(parseIntWithFallback(terrainWaterLevelInput?.value, 0), -40, 40);
     const waterRoughness = clamp(parseIntWithFallback(terrainWaterRoughnessInput?.value, 50), 0, 100);
+    const waterNoiseScale = clamp(parseIntWithFallback(terrainWaterNoiseScaleInput?.value, 18), 2, 60);
+    const waterNoiseStrength = clamp(parseFloatWithFallback(terrainWaterNoiseStrengthInput?.value, 0.45), 0, 1);
+    const waterNoiseOctaves = clamp(parseIntWithFallback(terrainWaterNoiseOctavesInput?.value, 3), 1, 6);
+    const waterWarpScale = clamp(parseIntWithFallback(terrainWaterWarpScaleInput?.value, 8), 2, 40);
+    const waterWarpStrength = clamp(parseFloatWithFallback(terrainWaterWarpStrengthInput?.value, 0.35), 0, 0.8);
+    const waterOffsetX = clamp(parseIntWithFallback(terrainWaterOffsetXInput?.value, 0), -40, 40);
+    const waterOffsetY = clamp(parseIntWithFallback(terrainWaterOffsetYInput?.value, 0), -40, 40);
     const showPolygonGraph = Boolean(terrainGraphPolygonsInput?.checked);
     const showDualGraph = Boolean(terrainGraphDualInput?.checked);
     const showCornerNodes = Boolean(terrainGraphCornersInput?.checked);
@@ -112,6 +140,13 @@ export function createPageLayout(): PageLayout {
       intermediateAbsMagnitude,
       waterLevel,
       waterRoughness,
+      waterNoiseScale,
+      waterNoiseStrength,
+      waterNoiseOctaves,
+      waterWarpScale,
+      waterWarpStrength,
+      waterOffsetX,
+      waterOffsetY,
     };
   };
 
@@ -137,6 +172,27 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainWaterRoughnessValue) {
       terrainWaterRoughnessValue.textContent = settings.waterRoughness.toString();
+    }
+    if (terrainWaterNoiseScaleValue) {
+      terrainWaterNoiseScaleValue.textContent = settings.waterNoiseScale.toString();
+    }
+    if (terrainWaterNoiseStrengthValue) {
+      terrainWaterNoiseStrengthValue.textContent = settings.waterNoiseStrength.toFixed(2);
+    }
+    if (terrainWaterNoiseOctavesValue) {
+      terrainWaterNoiseOctavesValue.textContent = settings.waterNoiseOctaves.toString();
+    }
+    if (terrainWaterWarpScaleValue) {
+      terrainWaterWarpScaleValue.textContent = settings.waterWarpScale.toString();
+    }
+    if (terrainWaterWarpStrengthValue) {
+      terrainWaterWarpStrengthValue.textContent = settings.waterWarpStrength.toFixed(2);
+    }
+    if (terrainWaterOffsetXValue) {
+      terrainWaterOffsetXValue.textContent = settings.waterOffsetX.toString();
+    }
+    if (terrainWaterOffsetYValue) {
+      terrainWaterOffsetYValue.textContent = settings.waterOffsetY.toString();
     }
   };
 
@@ -190,6 +246,13 @@ export function createPageLayout(): PageLayout {
     terrainIntermediateAbsMagnitudeInput?.addEventListener('input', notify);
     terrainWaterLevelInput?.addEventListener('input', notify);
       terrainWaterRoughnessInput?.addEventListener('input', notify);
+      terrainWaterNoiseScaleInput?.addEventListener('input', notify);
+      terrainWaterNoiseStrengthInput?.addEventListener('input', notify);
+      terrainWaterNoiseOctavesInput?.addEventListener('input', notify);
+      terrainWaterWarpScaleInput?.addEventListener('input', notify);
+      terrainWaterWarpStrengthInput?.addEventListener('input', notify);
+      terrainWaterOffsetXInput?.addEventListener('input', notify);
+      terrainWaterOffsetYInput?.addEventListener('input', notify);
       terrainGraphPolygonsInput?.addEventListener('change', notify);
       terrainGraphDualInput?.addEventListener('change', notify);
       terrainGraphCornersInput?.addEventListener('change', notify);
