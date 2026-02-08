@@ -6,6 +6,11 @@ type TerrainSettings = {
   showCenterNodes: boolean;
   showInsertedPoints: boolean;
   seed: number;
+  intermediateSeed: number;
+  intermediateMaxIterations: number;
+  intermediateThreshold: number;
+  intermediateRelMagnitude: number;
+  intermediateAbsMagnitude: number;
   waterLevel: number;
   waterRoughness: number;
 };
@@ -35,6 +40,11 @@ export function createPageLayout(): PageLayout {
   const fpsEl = document.getElementById('fps');
   const terrainSpacingInput = document.getElementById('terrain-spacing') as HTMLInputElement | null;
   const terrainSeedInput = document.getElementById('terrain-seed') as HTMLInputElement | null;
+  const terrainIntermediateSeedInput = document.getElementById('terrain-intermediate-seed') as HTMLInputElement | null;
+  const terrainIntermediateIterationsInput = document.getElementById('terrain-intermediate-iterations') as HTMLInputElement | null;
+  const terrainIntermediateDistanceInput = document.getElementById('terrain-intermediate-distance') as HTMLInputElement | null;
+  const terrainIntermediateRelMagnitudeInput = document.getElementById('terrain-intermediate-rel-magnitude') as HTMLInputElement | null;
+  const terrainIntermediateAbsMagnitudeInput = document.getElementById('terrain-intermediate-abs-magnitude') as HTMLInputElement | null;
   const terrainWaterLevelInput = document.getElementById('terrain-water-level') as HTMLInputElement | null;
   const terrainWaterRoughnessInput = document.getElementById('terrain-water-roughness') as HTMLInputElement | null;
   const terrainGraphPolygonsInput = document.getElementById('terrain-graph-polygons') as HTMLInputElement | null;
@@ -43,6 +53,10 @@ export function createPageLayout(): PageLayout {
   const terrainGraphCentersInput = document.getElementById('terrain-graph-centers') as HTMLInputElement | null;
   const terrainGraphInsertedInput = document.getElementById('terrain-graph-inserted') as HTMLInputElement | null;
   const terrainSpacingValue = document.getElementById('terrain-spacing-value');
+  const terrainIntermediateIterationsValue = document.getElementById('terrain-intermediate-iterations-value');
+  const terrainIntermediateDistanceValue = document.getElementById('terrain-intermediate-distance-value');
+  const terrainIntermediateRelMagnitudeValue = document.getElementById('terrain-intermediate-rel-magnitude-value');
+  const terrainIntermediateAbsMagnitudeValue = document.getElementById('terrain-intermediate-abs-magnitude-value');
   const terrainWaterLevelValue = document.getElementById('terrain-water-level-value');
   const terrainWaterRoughnessValue = document.getElementById('terrain-water-roughness-value');
 
@@ -51,10 +65,31 @@ export function createPageLayout(): PageLayout {
     const parsed = Number.parseInt(value || '', 10);
     return Number.isFinite(parsed) ? parsed : fallback;
   };
+  const parseFloatWithFallback = (value: string | undefined, fallback: number): number => {
+    const parsed = Number.parseFloat(value || '');
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
 
   const readTerrainSettings = (): TerrainSettings => {
     const spacing = clamp(parseIntWithFallback(terrainSpacingInput?.value, 32), 16, 128);
     const seed = clamp(parseIntWithFallback(terrainSeedInput?.value, 1337), 0, 0xffffffff);
+    const intermediateSeed = clamp(parseIntWithFallback(terrainIntermediateSeedInput?.value, 1337), 0, 0xffffffff);
+    const intermediateMaxIterations = clamp(
+      parseIntWithFallback(terrainIntermediateIterationsInput?.value, 8),
+      0,
+      12
+    );
+    const intermediateThreshold = clamp(parseIntWithFallback(terrainIntermediateDistanceInput?.value, 5), 2, 20);
+    const intermediateRelMagnitude = clamp(
+      parseFloatWithFallback(terrainIntermediateRelMagnitudeInput?.value, 0),
+      0,
+      2
+    );
+    const intermediateAbsMagnitude = clamp(
+      parseIntWithFallback(terrainIntermediateAbsMagnitudeInput?.value, 5),
+      0,
+      10
+    );
     const waterLevel = clamp(parseIntWithFallback(terrainWaterLevelInput?.value, 0), -40, 40);
     const waterRoughness = clamp(parseIntWithFallback(terrainWaterRoughnessInput?.value, 50), 0, 100);
     const showPolygonGraph = Boolean(terrainGraphPolygonsInput?.checked);
@@ -70,6 +105,11 @@ export function createPageLayout(): PageLayout {
       showCenterNodes,
       showInsertedPoints,
       seed,
+      intermediateSeed,
+      intermediateMaxIterations,
+      intermediateThreshold,
+      intermediateRelMagnitude,
+      intermediateAbsMagnitude,
       waterLevel,
       waterRoughness,
     };
@@ -79,6 +119,18 @@ export function createPageLayout(): PageLayout {
     const settings = readTerrainSettings();
     if (terrainSpacingValue) {
       terrainSpacingValue.textContent = settings.spacing.toString();
+    }
+    if (terrainIntermediateIterationsValue) {
+      terrainIntermediateIterationsValue.textContent = settings.intermediateMaxIterations.toString();
+    }
+    if (terrainIntermediateDistanceValue) {
+      terrainIntermediateDistanceValue.textContent = settings.intermediateThreshold.toString();
+    }
+    if (terrainIntermediateRelMagnitudeValue) {
+      terrainIntermediateRelMagnitudeValue.textContent = settings.intermediateRelMagnitude.toFixed(1);
+    }
+    if (terrainIntermediateAbsMagnitudeValue) {
+      terrainIntermediateAbsMagnitudeValue.textContent = settings.intermediateAbsMagnitude.toString();
     }
     if (terrainWaterLevelValue) {
       terrainWaterLevelValue.textContent = settings.waterLevel.toString();
@@ -125,13 +177,18 @@ export function createPageLayout(): PageLayout {
       return readTerrainSettings();
     },
     onTerrainSettingsChange(onChange) {
-      const notify = () => {
-        syncTerrainLabels();
-        onChange(readTerrainSettings());
-      };
-      terrainSpacingInput?.addEventListener('input', notify);
-      terrainSeedInput?.addEventListener('change', notify);
-      terrainWaterLevelInput?.addEventListener('input', notify);
+    const notify = () => {
+      syncTerrainLabels();
+      onChange(readTerrainSettings());
+    };
+    terrainSpacingInput?.addEventListener('input', notify);
+    terrainSeedInput?.addEventListener('change', notify);
+    terrainIntermediateSeedInput?.addEventListener('change', notify);
+    terrainIntermediateIterationsInput?.addEventListener('input', notify);
+    terrainIntermediateDistanceInput?.addEventListener('input', notify);
+    terrainIntermediateRelMagnitudeInput?.addEventListener('input', notify);
+    terrainIntermediateAbsMagnitudeInput?.addEventListener('input', notify);
+    terrainWaterLevelInput?.addEventListener('input', notify);
       terrainWaterRoughnessInput?.addEventListener('input', notify);
       terrainGraphPolygonsInput?.addEventListener('change', notify);
       terrainGraphDualInput?.addEventListener('change', notify);

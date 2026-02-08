@@ -6,6 +6,11 @@ export type TerrainControls = {
 	showCenterNodes: boolean;
 	showInsertedPoints: boolean;
 	seed: number;
+	intermediateSeed: number;
+	intermediateMaxIterations: number;
+	intermediateThreshold: number;
+	intermediateRelMagnitude: number;
+	intermediateAbsMagnitude: number;
 	waterLevel: number;
 	waterRoughness: number;
 };
@@ -81,6 +86,35 @@ const lerpVec2 = (a: Vec2, b: Vec2, t: number): Vec2 => ({
 	y: lerp(a.y, b.y, t),
 });
 
+const vec2Sub = (a: Vec2, b: Vec2): Vec2 => ({
+	x: a.x - b.x,
+	y: a.y - b.y,
+});
+
+const vec2Add = (a: Vec2, b: Vec2): Vec2 => ({
+	x: a.x + b.x,
+	y: a.y + b.y,
+});
+
+const vec2Mult = (a: Vec2, f: number): Vec2 => ({
+	x: a.x * f,
+	y: a.y * f,
+});
+
+const vec2LenSq = (v: Vec2): number => v.x * v.x + v.y * v.y;
+
+const vec2Len = (v: Vec2): number => Math.hypot(v.x, v.y);
+
+const vec2Normalize = (v: Vec2): Vec2 => {
+	const length = vec2Len(v);
+	if (length <= 0) {
+		return { x: 0, y: 0 };
+	}
+	return { x: v.x / length, y: v.y / length };
+};
+
+const vec2Dot = (a: Vec2, b: Vec2): number => a.x * b.x + a.y * b.y;
+
 export function drawVoronoiTerrain(
 	config: TerrainConfig,
 	controls: TerrainControls,
@@ -100,6 +134,8 @@ export function drawVoronoiTerrain(
 
 	const seed = controls.seed >>> 0;
 	const random = createRng(seed);
+	const intermediateSeed = controls.intermediateSeed >>> 0;
+	const intermediateRandom = createRng(intermediateSeed);
 	const padding = 0;
 	const sites = generatePoissonSites(config, controls.spacing, padding, random);
 	const cells: Vec2[][] = new Array(sites.length);
@@ -133,15 +169,22 @@ export function drawVoronoiTerrain(
 			const e0 = mesh.vertices[sharedEdge.vertices[0]].point;
 			const e1 = mesh.vertices[sharedEdge.vertices[1]].point;
 
-			const dx = e1.x - e0.x;
-			const dy = e1.y - e0.y;
-			const dist = Math.hypot(dx, dy);
-
 			const c0 = face.point;
 			const c1 = mesh.faces[adjacentId].point;
 
-			const inter = generateIntermediate(c0, c1, e0, e1, 0);
-			//const inter = [];
+			const inter = generateIntermediate(
+				c0,
+				c1,
+				e0,
+				e1,
+				0,
+				intermediateRandom,
+				controls.intermediateMaxIterations,
+				controls.intermediateThreshold,
+				controls.intermediateRelMagnitude,
+				controls.intermediateAbsMagnitude
+	);
+
 			if (inter.length > 0) {
 				insertedPoints.push(...inter);
 
@@ -198,31 +241,64 @@ export function drawVoronoiTerrain(
 	setGraphOverlayVisibility(terrainLayer, controls);
 }
 
-function midpoint(p1: Vec2, p2: Vec2): Vec2 {
+function vec2Midpoint(p1: Vec2, p2: Vec2): Vec2 {
 	return {
 		x: (p1.x + p2.x) * 0.5,
 		y: (p1.y + p2.y) * 0.5,
 	};
 };
 
-function generateIntermediate(c0: Vec2, c1: Vec2, e0: Vec2, e1: Vec2, iteration: number): Vec2[]
-{
-	const dx = e1.x - e0.x;
-	const dy = e1.y - e0.y;
-	const dist = Math.hypot(dx, dy);
-	if (dist < 5 || iteration > 8)
-	{
-		return[];
+function generateIntermediate(
+	c0: Vec2,
+	c1: Vec2,
+	e0: Vec2,
+	e1: Vec2,
+	iteration: number,
+	random: () => number,
+	maxIterations: number,
+	threshold: number,
+	relMagnitude: number,
+	absMagnitude: number
+): Vec2[] {
+	const ln = vec2Len(vec2Sub(e0, e1));
+	if (ln < threshold || iteration > maxIterations) {
+		return [];
 	}
-	
-	let mid = lerpVec2(c0, c1, Math.random() * .3 + 0.35);
-	iteration += 1;
-	let left = generateIntermediate(midpoint(e0, c0), midpoint(e0, c1), e0, mid, iteration);
-	let right = generateIntermediate(midpoint(e1, c0), midpoint(e1, c1), mid, e1, iteration);
 
-	return left.concat(mid).concat(right);
+	const mag = absMagnitude + ln * relMagnitude;
+
+	const dir = vec2Normalize(vec2Sub(c1, c0));
+	const mid = vec2Midpoint(e0, e1);
+	const insertPoint = vec2Add(mid, vec2Mult(dir, (random() - .5) * 2 * mag)); 
+
+	const nextIteration = iteration + 1;
+	const left = generateIntermediate(
+		vec2Midpoint(e0, c0),
+		vec2Midpoint(e0, c1),
+		e0,
+		insertPoint,
+		nextIteration,
+		random,
+		maxIterations,
+		threshold,
+		relMagnitude,
+		absMagnitude
+	);
+	const right = generateIntermediate(
+		vec2Midpoint(e1, c0),
+		vec2Midpoint(e1, c1),
+		insertPoint,
+		e1,
+		nextIteration,
+		random,
+		maxIterations,
+		threshold,
+		relMagnitude,
+		absMagnitude
+	);
+
+	return left.concat(insertPoint).concat(right);
 }
-
 function findSharedEdgeIndex(mesh: MeshGraph, face1: number, face2: number): number {
 	if (face1 < 0 || face2 < 0) {
 		return -1;

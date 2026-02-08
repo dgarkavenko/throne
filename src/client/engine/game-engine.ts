@@ -33,6 +33,11 @@ export class GameEngine {
     showCenterNodes: false,
     showInsertedPoints: false,
     seed: 1337,
+    intermediateSeed: 1337,
+    intermediateMaxIterations: 8,
+    intermediateThreshold: 5,
+    intermediateRelMagnitude: 0,
+    intermediateAbsMagnitude: 5,
     waterLevel: 0,
     waterRoughness: 50,
   };
@@ -86,6 +91,15 @@ export class GameEngine {
       showCenterNodes: Boolean(nextControls.showCenterNodes),
       showInsertedPoints: Boolean(nextControls.showInsertedPoints),
       seed: this.clamp(Math.floor(safeValue(nextControls.seed, 1337)), 0, 0xffffffff),
+      intermediateSeed: this.clamp(Math.floor(safeValue(nextControls.intermediateSeed, 1337)), 0, 0xffffffff),
+      intermediateMaxIterations: this.clamp(Math.round(safeValue(nextControls.intermediateMaxIterations, 8)), 0, 12),
+      intermediateThreshold: this.clamp(Math.round(safeValue(nextControls.intermediateThreshold, 5)), 2, 20),
+      intermediateRelMagnitude: this.clamp(
+        Math.round(safeValue(nextControls.intermediateRelMagnitude, 1) * 10) / 10,
+        0,
+        2
+      ),
+      intermediateAbsMagnitude: this.clamp(Math.round(safeValue(nextControls.intermediateAbsMagnitude, 5)), 0, 10),
       waterLevel: this.clamp(Math.round(safeValue(nextControls.waterLevel, 0)), -40, 40),
       waterRoughness: this.clamp(Math.round(safeValue(nextControls.waterRoughness, 50)), 0, 100),
     };
@@ -94,6 +108,11 @@ export class GameEngine {
       !this.hasTerrain ||
       this.terrainControls.spacing !== sanitized.spacing ||
       this.terrainControls.seed !== sanitized.seed ||
+      this.terrainControls.intermediateSeed !== sanitized.intermediateSeed ||
+      this.terrainControls.intermediateMaxIterations !== sanitized.intermediateMaxIterations ||
+      this.terrainControls.intermediateThreshold !== sanitized.intermediateThreshold ||
+      this.terrainControls.intermediateRelMagnitude !== sanitized.intermediateRelMagnitude ||
+      this.terrainControls.intermediateAbsMagnitude !== sanitized.intermediateAbsMagnitude ||
       this.terrainControls.waterLevel !== sanitized.waterLevel ||
       this.terrainControls.waterRoughness !== sanitized.waterRoughness;
 

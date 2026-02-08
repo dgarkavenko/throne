@@ -52,15 +52,30 @@ main {
   opacity: 0.75;
 }
 .controls {
-  width: 260px;
+  width: 280px;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.8rem;
   align-items: stretch;
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   opacity: 0.9;
+}
+.control-group {
+  min-width: 0;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem 0.7rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid #253149;
+  background: rgba(10, 14, 22, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+.control-group-title {
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  opacity: 0.7;
 }
 .control {
   min-width: 0;
@@ -115,8 +130,8 @@ main {
     flex-wrap: wrap;
     justify-content: center;
   }
-  .control {
-    min-width: 180px;
+  .control-group {
+    min-width: 200px;
   }
   #field {
     width: min(100vw, 1560px);
@@ -142,51 +157,91 @@ export const html = `<!doctype html>
       <div class="fps" id="fps">FPS: --</div>
       <div class="layout">
         <div class="controls">
-          <div class="control">
-            <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">32</span></label>
-            <input id="terrain-spacing" type="range" min="16" max="128" step="1" value="32" />
+          <div class="control-group">
+            <div class="control-group-title">Sampling</div>
+            <div class="control">
+              <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">32</span></label>
+              <input id="terrain-spacing" type="range" min="16" max="128" step="1" value="32" />
+            </div>
+            <div class="control">
+              <label for="terrain-seed">Seed</label>
+              <input id="terrain-seed" type="number" min="0" max="4294967295" step="1" value="1337" />
+            </div>
           </div>
-          <div class="control">
-            <label for="terrain-seed">Seed</label>
-            <input id="terrain-seed" type="number" min="0" max="4294967295" step="1" value="1337" />
+          <div class="control-group">
+            <div class="control-group-title">Water</div>
+            <div class="control">
+              <label for="terrain-water-level">Water Level <span id="terrain-water-level-value">0</span></label>
+              <input id="terrain-water-level" type="range" min="-40" max="40" step="1" value="0" />
+            </div>
+            <div class="control">
+              <label for="terrain-water-roughness">Water Roughness <span id="terrain-water-roughness-value">50</span></label>
+              <input id="terrain-water-roughness" type="range" min="0" max="100" step="1" value="50" />
+            </div>
           </div>
-          <div class="control">
-            <label for="terrain-water-level">Water Level <span id="terrain-water-level-value">0</span></label>
-            <input id="terrain-water-level" type="range" min="-40" max="40" step="1" value="0" />
+          <div class="control-group">
+            <div class="control-group-title">Intermediate</div>
+            <div class="control">
+              <label for="terrain-intermediate-seed">Intermediate Seed</label>
+              <input id="terrain-intermediate-seed" type="number" min="0" max="4294967295" step="1" value="1337" />
+            </div>
+            <div class="control">
+              <label for="terrain-intermediate-iterations">
+                Intermediate Iterations <span id="terrain-intermediate-iterations-value">8</span>
+              </label>
+              <input id="terrain-intermediate-iterations" type="range" min="0" max="12" step="1" value="8" />
+            </div>
+            <div class="control">
+              <label for="terrain-intermediate-distance">
+                Threshold Distance <span id="terrain-intermediate-distance-value">5</span>
+              </label>
+              <input id="terrain-intermediate-distance" type="range" min="2" max="20" step="1" value="5" />
+            </div>
+            <div class="control">
+              <label for="terrain-intermediate-rel-magnitude">
+                Relative Magnitude <span id="terrain-intermediate-rel-magnitude-value">0.0</span>
+              </label>
+              <input id="terrain-intermediate-rel-magnitude" type="range" min="0" max="2" step="0.1" value="0" />
+            </div>
+            <div class="control">
+              <label for="terrain-intermediate-abs-magnitude">
+                Absolute Magnitude <span id="terrain-intermediate-abs-magnitude-value">5</span>
+              </label>
+              <input id="terrain-intermediate-abs-magnitude" type="range" min="0" max="10" step="1" value="5" />
+            </div>
           </div>
-          <div class="control">
-            <label for="terrain-water-roughness">Water Roughness <span id="terrain-water-roughness-value">50</span></label>
-            <input id="terrain-water-roughness" type="range" min="0" max="100" step="1" value="50" />
-          </div>
-          <div class="control toggle">
-            <label for="terrain-graph-polygons">
-              <input id="terrain-graph-polygons" type="checkbox" />
-              Mesh Polygons
-            </label>
-          </div>
-          <div class="control toggle">
-            <label for="terrain-graph-dual">
-              <input id="terrain-graph-dual" type="checkbox" />
-              Mesh Dual
-            </label>
-          </div>
-          <div class="control toggle">
-            <label for="terrain-graph-corners">
-              <input id="terrain-graph-corners" type="checkbox" />
-              Mesh Vertices
-            </label>
-          </div>
-          <div class="control toggle">
-            <label for="terrain-graph-centers">
-              <input id="terrain-graph-centers" type="checkbox" />
-              Mesh Faces
-            </label>
-          </div>
-          <div class="control toggle">
-            <label for="terrain-graph-inserted">
-              <input id="terrain-graph-inserted" type="checkbox" />
-              Inserted Points
-            </label>
+          <div class="control-group">
+            <div class="control-group-title">Overlay</div>
+            <div class="control toggle">
+              <label for="terrain-graph-polygons">
+                <input id="terrain-graph-polygons" type="checkbox" />
+                Mesh Polygons
+              </label>
+            </div>
+            <div class="control toggle">
+              <label for="terrain-graph-dual">
+                <input id="terrain-graph-dual" type="checkbox" />
+                Mesh Dual
+              </label>
+            </div>
+            <div class="control toggle">
+              <label for="terrain-graph-corners">
+                <input id="terrain-graph-corners" type="checkbox" />
+                Mesh Vertices
+              </label>
+            </div>
+            <div class="control toggle">
+              <label for="terrain-graph-centers">
+                <input id="terrain-graph-centers" type="checkbox" />
+                Mesh Faces
+              </label>
+            </div>
+            <div class="control toggle">
+              <label for="terrain-graph-inserted">
+                <input id="terrain-graph-inserted" type="checkbox" />
+                Inserted Points
+              </label>
+            </div>
           </div>
         </div>
         <div id="field"></div>
