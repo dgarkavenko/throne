@@ -386,8 +386,16 @@ export class GameEngine {
     const riverSeed = (this.terrainControls.seed ^ 0x9e3779b9) >>> 0;
     const riverRandom = createRng(riverSeed);
     const base = terrainBasegen(config, this.terrainControls, random);
-    const provinceGraph = basegenPolitical(base.mesh, this.terrainControls, random);
-    const refined = terrainRefine(base.mesh, provinceGraph, this.terrainControls, intermediateRandom, riverRandom);
+    const provinceGraph = basegenPolitical(base.mesh, this.terrainControls, random, base.isLand);
+    const refined = terrainRefine(
+      base.mesh,
+      provinceGraph,
+      this.terrainControls,
+      intermediateRandom,
+      riverRandom,
+      base.isLand,
+      base.oceanWater
+    );
 
     this.terrainState = { base, provinceGraph, refined };
     renderTerrainLayer(config, this.terrainControls, this.layers.terrain, base, provinceGraph, refined);

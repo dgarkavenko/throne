@@ -143,6 +143,8 @@ const MAX_LAND_ELEVATION = 32;
 export type TerrainBasegenResult = {
 	mesh: MeshGraph;
 	baseCells: Vec2[][];
+	isLand: boolean[];
+	oceanWater: boolean[];
 };
 
 export type TerrainRefineResult = {
@@ -163,7 +165,7 @@ export function terrainBasegen(
 	});
 
 	const mesh = buildMeshGraph(sites, baseCells);
-	assignIslandElevation(
+	const { isLand, oceanWater } = assignIslandElevation(
 		config,
 		mesh,
 		baseCells,
@@ -188,7 +190,7 @@ export function terrainBasegen(
 		controls.ridgeWidth
 	);
 
-	return { mesh, baseCells };
+	return { mesh, baseCells, isLand, oceanWater };
 }
 
 export function terrainRefine(
@@ -196,10 +198,12 @@ export function terrainRefine(
 	provinceGraph: ProvinceGraph,
 	controls: TerrainControls,
 	intermediateRandom: () => number,
-	riverRandom: () => number
+	riverRandom: () => number,
+	isLand: boolean[],
+	oceanWater: boolean[]
 ): TerrainRefineResult {
 	const refinedGeometry = buildRefinedGeometry(mesh, provinceGraph, controls, intermediateRandom);
-	const rivers = buildRivers(mesh, refinedGeometry, controls, riverRandom);
+	const rivers = buildRivers(mesh, refinedGeometry, controls, riverRandom, isLand, oceanWater);
 	return { refinedGeometry, rivers };
 }
 
@@ -241,9 +245,10 @@ export function renderTerrain(
 		let fillColor = 0x3f8a3f;
 		let fillAlpha = 0.86;
 
-		if (face.elevation <= 0) {
+		const isLandFace = provinceGraph.isLand[face.index];
+		if (!isLandFace) {
 			const maxDepth = 6;
-			const depthT = clamp((-face.elevation) / maxDepth, 0, 1);
+			const depthT = clamp((1 - face.elevation) / maxDepth, 0, 1);
 			const shallow = 0x2f5f89;
 			const deep = 0x0f2438;
 			fillColor = lerpColor(shallow, deep, depthT);
@@ -259,8 +264,9 @@ export function renderTerrain(
 		baseLayer.addChild(terrain);
 
 		const isShoreWater =
-			face.elevation <= 0 &&
-			face.adjacentFaces.some((neighborIndex) => mesh.faces[neighborIndex].elevation >= 1);
+			!isLandFace &&
+			base.oceanWater[face.index] &&
+			face.adjacentFaces.some((neighborIndex) => provinceGraph.isLand[neighborIndex]);
 		if (isShoreWater) {
 			const strokes = new window.PIXI.Graphics();
 			const strokeMask = new window.PIXI.Graphics();
@@ -325,8 +331,16 @@ export function drawVoronoiTerrain(
 	const riverSeed = (controls.seed ^ 0x9e3779b9) >>> 0;
 	const riverRandom = createRng(riverSeed);
 	const base = terrainBasegen(config, controls, random);
-	const provinceResult = basegenPolitical(base.mesh, controls, random);
-	const refined = terrainRefine(base.mesh, provinceResult, controls, intermediateRandom, riverRandom);
+	const provinceResult = basegenPolitical(base.mesh, controls, random, base.isLand);
+	const refined = terrainRefine(
+		base.mesh,
+		provinceResult,
+		controls,
+		intermediateRandom,
+		riverRandom,
+		base.isLand,
+		base.oceanWater
+	);
 	renderTerrain(config, controls, terrainLayer, base, provinceResult, refined);
 }
 
@@ -421,13 +435,18 @@ function buildEdgePolylines(
 
 		const face0 = mesh.faces[faceA];
 		const face1 = mesh.faces[faceB];
-		const sameLevelWater = face0.elevation <= 0 && face0.elevation == face1.elevation;
+		const sameLevelWater =
+			!provinceGraph.isLand[faceA] &&
+			!provinceGraph.isLand[faceB] &&
+			face0.elevation === face1.elevation;
 		if (sameLevelWater) {
 			edgePolylines[edgeIndex] = [v0, v1];
 			continue;
 		}
 		const provinceA = provinceGraph.provinceByFace[faceA];
 		const provinceB = provinceGraph.provinceByFace[faceB];
+		const isLandA = provinceGraph.isLand[faceA];
+		const isLandB = provinceGraph.isLand[faceB];
 		const isProvinceBorder =
 			provinceGraph.isLand[faceA] &&
 			provinceGraph.isLand[faceB] &&
@@ -435,7 +454,7 @@ function buildEdgePolylines(
 			provinceB >= 0 &&
 			provinceA !== provinceB;
 		const sameElevation = face0.elevation === face1.elevation;
-		if (sameElevation && !isProvinceBorder) {
+		if (sameElevation && !isProvinceBorder && isLandA === isLandB) {
 			edgePolylines[edgeIndex] = [v0, v1];
 			continue;
 		}
@@ -531,7 +550,9 @@ function buildRivers(
 	mesh: MeshGraph,
 	refinedGeometry: RefinedGeometry,
 	controls: TerrainControls,
-	random: () => number
+	random: () => number,
+	isLand: boolean[],
+	oceanWater: boolean[]
 ): RiverPath[] {
 	const riverDensity = clamp(controls.riverDensity ?? 0, 0, 2);
 	const riverBranchChance = clamp(controls.riverBranchChance ?? 0.25, 0, 1);
@@ -547,8 +568,8 @@ function buildRivers(
 		let hasLand = false;
 		let hasWater = false;
 		for (let i = 0; i < vertex.faces.length; i += 1) {
-			const face = mesh.faces[vertex.faces[i]];
-			if (face.elevation >= 1) {
+			const faceIndex = vertex.faces[i];
+			if (isLand[faceIndex]) {
 				hasLand = true;
 			} else {
 				hasWater = true;
@@ -571,7 +592,7 @@ function buildRivers(
 	const isShorelineFace = new Array<boolean>(mesh.faces.length).fill(false);
 	for (let i = 0; i < mesh.faces.length; i += 1) {
 		const face = mesh.faces[i];
-		if (face.elevation >= 1 && isFaceShoreline(mesh, face.index)) {
+		if (isLand[face.index] && isFaceShoreline(mesh, isLand, face.index)) {
 			isShorelineFace[face.index] = true;
 		}
 	}
@@ -601,13 +622,80 @@ function buildRivers(
 		return [];
 	}
 
-	const baseCount = Math.max(1, Math.round(shorelineFaces.length / 10));
+	const inlandWaterSize = new Array<number>(mesh.faces.length).fill(0);
+	const visitedWater = new Array<boolean>(mesh.faces.length).fill(false);
+	for (let i = 0; i < mesh.faces.length; i += 1) {
+		if (isLand[i] || oceanWater[i] || visitedWater[i]) {
+			continue;
+		}
+		const stack = [i];
+		const component: number[] = [];
+		visitedWater[i] = true;
+		while (stack.length > 0) {
+			const faceIndex = stack.pop() as number;
+			component.push(faceIndex);
+			const face = mesh.faces[faceIndex];
+			for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+				const neighbor = face.adjacentFaces[j];
+				if (isLand[neighbor] || oceanWater[neighbor] || visitedWater[neighbor]) {
+					continue;
+				}
+				visitedWater[neighbor] = true;
+				stack.push(neighbor);
+			}
+		}
+		const size = component.length;
+		for (let j = 0; j < component.length; j += 1) {
+			inlandWaterSize[component[j]] = size;
+		}
+	}
+
+	const minInlandWaterFaces = 5;
+	let eligibleStartFaces = shorelineFaces.filter((faceIndex) => {
+		const face = mesh.faces[faceIndex];
+		let hasOcean = false;
+		let maxInland = 0;
+		for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+			const neighbor = face.adjacentFaces[j];
+			if (isLand[neighbor]) {
+				continue;
+			}
+			if (oceanWater[neighbor]) {
+				hasOcean = true;
+				break;
+			}
+			maxInland = Math.max(maxInland, inlandWaterSize[neighbor]);
+		}
+		if (hasOcean) {
+			return true;
+		}
+		return maxInland >= minInlandWaterFaces;
+	});
+	if (eligibleStartFaces.length === 0) {
+		eligibleStartFaces = shorelineFaces.slice();
+	}
+
+	const coastLand = new Array<boolean>(mesh.faces.length).fill(false);
+	for (let i = 0; i < mesh.faces.length; i += 1) {
+		if (!isLand[i]) {
+			continue;
+		}
+		const face = mesh.faces[i];
+		const touchesOcean = face.adjacentFaces.some(
+			(neighborIndex) => !isLand[neighborIndex] && oceanWater[neighborIndex]
+		);
+		if (touchesOcean) {
+			coastLand[i] = true;
+		}
+	}
+
+	const baseCount = Math.max(1, Math.round(eligibleStartFaces.length / 5));
 	const desiredCount = Math.round(baseCount * riverDensity);
 	if (desiredCount <= 0) {
 		return [];
 	}
 
-	const startFaces = pickRandomShorelineFaces(shorelineFaces, desiredCount, random);
+	const startFaces = pickRandomShorelineFaces(eligibleStartFaces, desiredCount, random);
 	if (startFaces.length === 0) {
 		return [];
 	}
@@ -615,17 +703,28 @@ function buildRivers(
 	const riverPolylineCache = new Map<number, Vec2[]>();
 	const maxSteps = clamp(Math.round(mesh.vertices.length * 0.15), 40, 260);
 	const candidates: RiverTrace[] = [];
-
-	for (let i = 0; i < startFaces.length; i += 1) {
-		const startFace = startFaces[i];
+	const attemptedFaces = new Set<number>();
+	const tryStartFace = (startFace: number): void => {
+		if (attemptedFaces.has(startFace) || candidates.length >= desiredCount) {
+			return;
+		}
+		attemptedFaces.add(startFace);
 		const startVertices = shorelineVerticesByFace[startFace];
 		if (!startVertices || startVertices.length === 0) {
-			continue;
+			return;
 		}
-		const startVertex = startVertices[Math.floor(random() * startVertices.length)];
-		if (!hasValidRiverStart(mesh, startVertex, startFace)) {
-			continue;
+		const validStartVertices: number[] = [];
+		for (let v = 0; v < startVertices.length; v += 1) {
+			const candidateVertex = startVertices[v];
+			if (hasValidRiverStart(mesh, isLand, coastLand, candidateVertex, startFace)) {
+				validStartVertices.push(candidateVertex);
+			}
 		}
+		if (validStartVertices.length === 0) {
+			return;
+		}
+		const startVertex =
+			validStartVertices[Math.floor(random() * validStartVertices.length)];
 		const trace = traceRiverPath(
 			mesh,
 			refinedGeometry,
@@ -633,6 +732,11 @@ function buildRivers(
 			riverSeed,
 			riverPolylineCache,
 			riverClimbChance,
+			false,
+			isLand,
+			coastLand,
+			coastLand[startFace],
+			coastLand[startFace] ? false : true,
 			random,
 			startVertex,
 			startFace,
@@ -642,6 +746,27 @@ function buildRivers(
 		);
 		if (trace && trace.points.length >= 2) {
 			candidates.push(trace);
+		}
+	};
+
+	for (let i = 0; i < startFaces.length; i += 1) {
+		tryStartFace(startFaces[i]);
+	}
+
+	if (candidates.length < desiredCount && eligibleStartFaces.length > attemptedFaces.size) {
+		const remainingFaces = eligibleStartFaces.filter((faceIndex) => !attemptedFaces.has(faceIndex));
+		for (let s = remainingFaces.length - 1; s > 0; s -= 1) {
+			const swapIndex = Math.floor(random() * (s + 1));
+			[remainingFaces[s], remainingFaces[swapIndex]] = [
+				remainingFaces[swapIndex],
+				remainingFaces[s],
+			];
+		}
+		for (let i = 0; i < remainingFaces.length; i += 1) {
+			if (candidates.length >= desiredCount) {
+				break;
+			}
+			tryStartFace(remainingFaces[i]);
 		}
 	}
 
@@ -663,9 +788,9 @@ function buildRivers(
 
 	const mainCount = Math.max(1, Math.round(ranked.length * 0.5));
 	const usedEdges = new Set<number>();
-	const usedFaces = new Set<number>();
 	const branchFaces = new Set<number>();
 	const mainTraces: RiverTrace[] = [];
+	const branchMinRatio = 0.35;
 
 	for (let i = 0; i < ranked.length && mainTraces.length < mainCount; i += 1) {
 		const trace = ranked[i];
@@ -683,9 +808,6 @@ function buildRivers(
 		for (let e = 0; e < trace.edges.length; e += 1) {
 			usedEdges.add(trace.edges[e]);
 		}
-		for (let f = 0; f < trace.faces.length; f += 1) {
-			usedFaces.add(trace.faces[f]);
-		}
 	}
 
 	if (mainTraces.length === 0) {
@@ -699,29 +821,72 @@ function buildRivers(
 
 	for (let i = 0; i < mainTraces.length; i += 1) {
 		const main = mainTraces[i];
+		const vertexDistances = computeTraceVertexDistances(
+			main,
+			mesh,
+			refinedGeometry,
+			controls,
+			riverSeed,
+			riverPolylineCache
+		);
+		const peakDistance = computeTracePeakDistance(main, vertexDistances, mesh);
 		const vertexCount = main.vertices.length;
 		for (let j = 1; j < vertexCount - 1; j += 1) {
 			if (random() >= riverBranchChance) {
 				continue;
 			}
 			const startVertex = main.vertices[j];
-			const startFace = main.faces[j];
-			const branchTrace = traceRiverPath(
-				mesh,
-				refinedGeometry,
-				controls,
-				riverSeed,
-				riverPolylineCache,
-				riverClimbChance,
-				random,
-				startVertex,
-				startFace,
-				maxSteps,
-				usedEdges,
-				branchFaces
+			const candidateFaces = mesh.vertices[startVertex].faces.filter(
+				(faceIndex) => isLand[faceIndex]
 			);
-			if (!branchTrace || branchTrace.points.length < 2) {
+			if (candidateFaces.length === 0) {
 				continue;
+			}
+			for (let s = candidateFaces.length - 1; s > 0; s -= 1) {
+				const swapIndex = Math.floor(random() * (s + 1));
+				[candidateFaces[s], candidateFaces[swapIndex]] = [
+					candidateFaces[swapIndex],
+					candidateFaces[s],
+				];
+			}
+
+			let branchTrace: RiverTrace | null = null;
+			for (let s = 0; s < candidateFaces.length; s += 1) {
+				const startFace = candidateFaces[s];
+				const attempt = traceRiverPath(
+					mesh,
+					refinedGeometry,
+					controls,
+					riverSeed,
+					riverPolylineCache,
+					riverClimbChance,
+					true,
+					isLand,
+					coastLand,
+					coastLand[startFace],
+					coastLand[startFace] ? false : true,
+					random,
+					startVertex,
+					startFace,
+					maxSteps,
+					usedEdges,
+					branchFaces
+				);
+				if (attempt && attempt.points.length >= 2) {
+					branchTrace = attempt;
+					break;
+				}
+			}
+			if (!branchTrace) {
+				continue;
+			}
+			const branchDistance = vertexDistances[j] ?? 0;
+			const distToPeak = Math.abs(peakDistance - branchDistance);
+			if (distToPeak > 0) {
+				const minLength = distToPeak * branchMinRatio;
+				if (branchTrace.length < minLength) {
+					continue;
+				}
 			}
 			let overlaps = false;
 			for (let e = 0; e < branchTrace.edges.length; e += 1) {
@@ -746,25 +911,37 @@ function buildRivers(
 	return paths;
 }
 
-function isFaceShoreline(mesh: MeshGraph, faceIndex: number): boolean {
+function isFaceShoreline(mesh: MeshGraph, isLand: boolean[], faceIndex: number): boolean {
 	const face = mesh.faces[faceIndex];
 	for (let i = 0; i < face.adjacentFaces.length; i += 1) {
 		const neighbor = face.adjacentFaces[i];
-		if (mesh.faces[neighbor].elevation <= 0) {
+		if (!isLand[neighbor]) {
 			return true;
 		}
 	}
 	return false;
 }
 
-function hasValidRiverStart(mesh: MeshGraph, vertexIndex: number, startFace: number): boolean {
+function hasValidRiverStart(
+	mesh: MeshGraph,
+	isLand: boolean[],
+	coastLand: boolean[],
+	vertexIndex: number,
+	startFace: number
+): boolean {
 	const currentElevation = mesh.faces[startFace].elevation;
-	if (currentElevation < 1) {
+	if (!isLand[startFace]) {
 		return false;
 	}
 	const visitedFaces = new Set<number>([startFace]);
+	const leftCoast = !coastLand[startFace];
+	const enforceCoastBlock = coastLand[startFace];
 	const candidates = collectRiverCandidates(
 		mesh,
+		isLand,
+		coastLand,
+		enforceCoastBlock,
+		leftCoast,
 		new Set<number>(),
 		visitedFaces,
 		vertexIndex,
@@ -810,6 +987,59 @@ function pickRandomShorelineFaces(
 	return picks;
 }
 
+function computeTraceVertexDistances(
+	trace: RiverTrace,
+	mesh: MeshGraph,
+	refinedGeometry: RefinedGeometry,
+	controls: TerrainControls,
+	riverSeed: number,
+	riverPolylineCache: Map<number, Vec2[]>
+): number[] {
+	const distances: number[] = [0];
+	let traveled = 0;
+	for (let i = 0; i < trace.edges.length; i += 1) {
+		const fromVertex = trace.vertices[i];
+		const toVertex = trace.vertices[i + 1];
+		const segment = collectRiverEdgePolyline(
+			mesh,
+			refinedGeometry,
+			controls,
+			riverSeed,
+			riverPolylineCache,
+			trace.edges[i],
+			fromVertex,
+			toVertex
+		);
+		const segLength =
+			segment.length >= 2 ? computePathLength(segment) : vec2Len(vec2Sub(
+				mesh.vertices[toVertex].point,
+				mesh.vertices[fromVertex].point
+			));
+		traveled += Math.max(0, segLength);
+		distances.push(traveled);
+	}
+	return distances;
+}
+
+function computeTracePeakDistance(
+	trace: RiverTrace,
+	vertexDistances: number[],
+	mesh: MeshGraph
+): number {
+	let peakElevation = -Infinity;
+	let peakDistance = 0;
+	for (let i = 0; i < trace.faces.length; i += 1) {
+		const faceIndex = trace.faces[i];
+		const elevation = mesh.faces[faceIndex].elevation;
+		const distance = vertexDistances[i] ?? 0;
+		if (elevation > peakElevation || (elevation === peakElevation && distance > peakDistance)) {
+			peakElevation = elevation;
+			peakDistance = distance;
+		}
+	}
+	return peakDistance;
+}
+
 function traceRiverPath(
 	mesh: MeshGraph,
 	refinedGeometry: RefinedGeometry,
@@ -817,6 +1047,11 @@ function traceRiverPath(
 	riverSeed: number,
 	riverPolylineCache: Map<number, Vec2[]>,
 	riverClimbChance: number,
+	allowInitialDrop: boolean,
+	isLand: boolean[],
+	coastLand: boolean[],
+	enforceCoastBlock: boolean,
+	leftCoast: boolean,
 	random: () => number,
 	startVertex: number,
 	startFace: number,
@@ -827,7 +1062,7 @@ function traceRiverPath(
 	let currentVertex = startVertex;
 	let currentFace = startFace;
 	let currentElevation = mesh.faces[currentFace].elevation;
-	if (currentElevation < 1) {
+	if (!isLand[startFace]) {
 		return null;
 	}
 	const points: Vec2[] = [];
@@ -841,13 +1076,18 @@ function traceRiverPath(
 	let steps = 0;
 
 	while (steps < maxSteps) {
+		const minElevation = allowInitialDrop && steps === 0 ? 1 : currentElevation;
 		const candidates = collectRiverCandidates(
 			mesh,
+			isLand,
+			coastLand,
+			enforceCoastBlock,
+			leftCoast,
 			blockedEdges,
 			visitedFaces,
 			currentVertex,
 			currentFace,
-			currentElevation
+			minElevation
 		);
 		if (candidates.length === 0) {
 			break;
@@ -858,6 +1098,10 @@ function traceRiverPath(
 		const equalCandidates = candidates.filter(
 			(candidate) => candidate.nextElevation === currentElevation
 		);
+		const lowerCandidates =
+			allowInitialDrop && steps === 0
+				? candidates.filter((candidate) => candidate.nextElevation < currentElevation)
+				: [];
 		let usableCandidates: RiverCandidate[] = [];
 		if (higherCandidates.length > 0) {
 			usableCandidates = higherCandidates;
@@ -867,6 +1111,8 @@ function traceRiverPath(
 			if (canContinueFlat) {
 				usableCandidates = equalCandidates;
 			}
+		} else if (lowerCandidates.length > 0) {
+			usableCandidates = lowerCandidates;
 		}
 		if (usableCandidates.length === 0) {
 			break;
@@ -920,6 +1166,9 @@ function traceRiverPath(
 		flatSteps = nextElevation === currentElevation ? flatSteps + 1 : 0;
 		currentVertex = selected.nextVertex;
 		currentFace = selected.nextFace;
+		if (!leftCoast && !coastLand[currentFace]) {
+			leftCoast = true;
+		}
 		currentElevation = nextElevation;
 		maxElevation = Math.max(maxElevation, nextElevation);
 		steps += 1;
@@ -942,11 +1191,15 @@ function traceRiverPath(
 
 function collectRiverCandidates(
 	mesh: MeshGraph,
+	isLand: boolean[],
+	coastLand: boolean[],
+	enforceCoastBlock: boolean,
+	leftCoast: boolean,
 	blockedEdges: Set<number>,
 	visitedFaces: Set<number>,
 	currentVertex: number,
 	currentFace: number,
-	currentElevation: number
+	minElevation: number
 ): RiverCandidate[] {
 	const candidates: RiverCandidate[] = [];
 	const vertex = mesh.vertices[currentVertex];
@@ -967,11 +1220,14 @@ function collectRiverCandidates(
 		if (visitedFaces.has(nextFace)) {
 			continue;
 		}
-		if (mesh.faces[nextFace].elevation < 1) {
+		if (!isLand[nextFace]) {
+			continue;
+		}
+		if (enforceCoastBlock && leftCoast && coastLand[nextFace]) {
 			continue;
 		}
 		const nextElevation = mesh.faces[nextFace].elevation;
-		if (nextElevation < currentElevation) {
+		if (nextElevation < minElevation) {
 			continue;
 		}
 		const nextVertex = edge.vertices[0] === currentVertex ? edge.vertices[1] : edge.vertices[0];
@@ -1104,29 +1360,194 @@ function renderRivers(riverLayer: any, rivers: RiverPath[], controls: TerrainCon
 	const riverColor = 0x2b6db3;
 	const riverAlpha = 0.85;
 	const strokeCaps = { cap: 'round', join: 'round' } as const;
-
-	for (let i = 0; i < rivers.length; i += 1) {
-		const river = rivers[i];
+	const profiles = rivers.map((river) => {
 		const totalLength = computePathLength(river.points);
-		if (totalLength <= 0) {
-			continue;
-		}
 		const lengthT = clamp(totalLength / (controls.spacing * 12), 0, 1);
 		const mouthWidth = lerp(2.2, 7.0, smoothstep(lengthT));
 		const headWidth = Math.max(0.6, mouthWidth * 0.28);
+		return { totalLength, mouthWidth, headWidth };
+	});
+
+	const segmentLists = rivers.map((river) => buildPathSegments(river.points));
+	const boosts: RiverWidthBoost[][] = rivers.map(() => []);
+
+	for (let i = 0; i < rivers.length; i += 1) {
+		const profileA = profiles[i];
+		if (profileA.totalLength <= 0) {
+			continue;
+		}
+		for (let j = i + 1; j < rivers.length; j += 1) {
+			const profileB = profiles[j];
+			if (profileB.totalLength <= 0) {
+				continue;
+			}
+			const intersections = findPathIntersections(
+				segmentLists[i],
+				segmentLists[j]
+			);
+			if (intersections.length === 0) {
+				continue;
+			}
+			for (let k = 0; k < intersections.length; k += 1) {
+				const { distA, distB } = intersections[k];
+				const widthA = riverWidthAtDistance(profileA, distA);
+				const widthB = riverWidthAtDistance(profileB, distB);
+				if (widthA <= 1e-3 || widthB <= 1e-3) {
+					continue;
+				}
+				if (widthA < widthB) {
+					boosts[i].push({ distance: distA, scale: widthB / widthA });
+				} else if (widthB < widthA) {
+					boosts[j].push({ distance: distB, scale: widthA / widthB });
+				}
+			}
+		}
+	}
+
+	const boostFalloff = Math.max(12, controls.spacing * 2.5);
+
+	for (let i = 0; i < rivers.length; i += 1) {
+		const river = rivers[i];
+		const profile = profiles[i];
+		if (profile.totalLength <= 0) {
+			continue;
+		}
 		const depthScale = Math.pow(0.6, river.depth);
 		drawRiverPathVariableWidth(
 			graphics,
 			river.points,
-			mouthWidth * depthScale,
-			headWidth * depthScale,
+			profile.mouthWidth * depthScale,
+			profile.headWidth * depthScale,
 			riverColor,
 			riverAlpha,
-			strokeCaps
+			strokeCaps,
+			(distance) => computeBoostScale(boosts[i], distance, boostFalloff)
 		);
 	}
 
 	riverLayer.addChild(graphics);
+}
+
+type RiverWidthProfile = {
+	totalLength: number;
+	mouthWidth: number;
+	headWidth: number;
+};
+
+type RiverSegment = {
+	a: Vec2;
+	b: Vec2;
+	length: number;
+	startDist: number;
+};
+
+type RiverIntersection = {
+	distA: number;
+	distB: number;
+};
+
+type RiverWidthBoost = {
+	distance: number;
+	scale: number;
+};
+
+function riverWidthAtDistance(profile: RiverWidthProfile, distance: number): number {
+	if (profile.totalLength <= 0) {
+		return 0;
+	}
+	const t = clamp(distance / profile.totalLength, 0, 1);
+	return lerp(profile.mouthWidth, profile.headWidth, smoothstep(t));
+}
+
+function computeBoostScale(boosts: RiverWidthBoost[], distance: number, falloff: number): number {
+	if (!boosts || boosts.length === 0) {
+		return 1;
+	}
+	let scale = 1;
+	for (let i = 0; i < boosts.length; i += 1) {
+		const boost = boosts[i];
+		if (boost.scale <= 1) {
+			continue;
+		}
+		const delta = Math.abs(distance - boost.distance);
+		if (delta >= falloff) {
+			continue;
+		}
+		const t = 1 - delta / falloff;
+		const eased = smoothstep(clamp(t, 0, 1));
+		const localScale = 1 + (boost.scale - 1) * eased;
+		if (localScale > scale) {
+			scale = localScale;
+		}
+	}
+	return scale;
+}
+
+function buildPathSegments(points: Vec2[]): RiverSegment[] {
+	const segments: RiverSegment[] = [];
+	let traveled = 0;
+	for (let i = 1; i < points.length; i += 1) {
+		const a = points[i - 1];
+		const b = points[i];
+		const length = vec2Len(vec2Sub(b, a));
+		if (length <= 0) {
+			continue;
+		}
+		segments.push({ a, b, length, startDist: traveled });
+		traveled += length;
+	}
+	return segments;
+}
+
+function findPathIntersections(
+	segmentsA: RiverSegment[],
+	segmentsB: RiverSegment[]
+): RiverIntersection[] {
+	const intersections: RiverIntersection[] = [];
+	for (let i = 0; i < segmentsA.length; i += 1) {
+		const segA = segmentsA[i];
+		for (let j = 0; j < segmentsB.length; j += 1) {
+			const segB = segmentsB[j];
+			const hit = segmentIntersection(segA.a, segA.b, segB.a, segB.b);
+			if (!hit) {
+				continue;
+			}
+			intersections.push({
+				distA: segA.startDist + hit.t * segA.length,
+				distB: segB.startDist + hit.u * segB.length,
+			});
+		}
+	}
+	return intersections;
+}
+
+function segmentIntersection(
+	a: Vec2,
+	b: Vec2,
+	c: Vec2,
+	d: Vec2
+): { t: number; u: number } | null {
+	const r = vec2Sub(b, a);
+	const s = vec2Sub(d, c);
+	const denom = r.x * s.y - r.y * s.x;
+	const epsilon = 1e-6;
+	if (Math.abs(denom) < epsilon) {
+		if (pointsEqual(a, c) || pointsEqual(a, d)) {
+			return { t: 0, u: pointsEqual(a, c) ? 0 : 1 };
+		}
+		if (pointsEqual(b, c) || pointsEqual(b, d)) {
+			return { t: 1, u: pointsEqual(b, c) ? 0 : 1 };
+		}
+		return null;
+	}
+	const cma = vec2Sub(c, a);
+	const t = (cma.x * s.y - cma.y * s.x) / denom;
+	const u = (cma.x * r.y - cma.y * r.x) / denom;
+	if (t < -epsilon || t > 1 + epsilon || u < -epsilon || u > 1 + epsilon) {
+		return null;
+	}
+	const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+	return { t: clamp01(t), u: clamp01(u) };
 }
 
 function drawRiverPathVariableWidth(
@@ -1136,7 +1557,8 @@ function drawRiverPathVariableWidth(
 	headWidth: number,
 	color: number,
 	alpha: number,
-	strokeCaps: { cap: 'round'; join: 'round' }
+	strokeCaps: { cap: 'round'; join: 'round' },
+	scaleAtDistance?: (distance: number) => number
 ): void {
 	if (points.length < 2) {
 		return;
@@ -1154,7 +1576,10 @@ function drawRiverPathVariableWidth(
 			continue;
 		}
 		const t = (traveled + segmentLength * 0.5) / totalLength;
-		const width = lerp(mouthWidth, headWidth, smoothstep(clamp(t, 0, 1)));
+		let width = lerp(mouthWidth, headWidth, smoothstep(clamp(t, 0, 1)));
+		if (scaleAtDistance) {
+			width *= scaleAtDistance(traveled + segmentLength * 0.5);
+		}
 		graphics.moveTo(a.x, a.y);
 		graphics.lineTo(b.x, b.y);
 		graphics.stroke({ width, color, alpha, ...strokeCaps });
@@ -1536,7 +1961,7 @@ function assignIslandElevation(
 	oceanPeakClamp: number,
 	ridgeOceanClamp: number,
 	ridgeWidth: number
-): void {
+): { isLand: boolean[]; oceanWater: boolean[] } {
 	// Land elevation is based on coastline distance plus ridge boosts, then optionally smoothed
 	// in lowlands and capped by ocean distance.
 	const width = config.width;
@@ -1774,16 +2199,29 @@ function assignIslandElevation(
 		}
 	}
 
+	const oceanWater = getOceanWaterFaces(mesh, cells, isLand, config);
 	const waterElevation = new Array<number>(faceCount).fill(Number.NaN);
 	const waterQueue: number[] = [];
+
+	if (hasWater) {
+		for (let i = 0; i < mesh.faces.length; i += 1) {
+			if (isLand[i]) {
+				continue;
+			}
+			if (!oceanWater[i]) {
+				waterElevation[i] = 0;
+			}
+		}
+	}
+
 	if (hasWater && hasLand) {
 		mesh.faces.forEach((face) => {
-			if (isLand[face.index]) {
+			if (isLand[face.index] || !oceanWater[face.index]) {
 				return;
 			}
 			const isShoreWater = face.adjacentFaces.some((neighborIndex) => isLand[neighborIndex]);
 			if (isShoreWater) {
-				waterElevation[face.index] = 0;
+				waterElevation[face.index] = 1;
 				waterQueue.push(face.index);
 			}
 		});
@@ -1793,7 +2231,7 @@ function assignIslandElevation(
 			const currentElevation = waterElevation[face.index];
 			for (let i = 0; i < face.adjacentFaces.length; i += 1) {
 				const neighborIndex = face.adjacentFaces[i];
-				if (isLand[neighborIndex]) {
+				if (isLand[neighborIndex] || !oceanWater[neighborIndex]) {
 					continue;
 				}
 				if (Number.isNaN(waterElevation[neighborIndex])) {
@@ -1891,6 +2329,8 @@ mesh.faces.forEach((face) => {
 		}
 		vertex.elevation = sum / vertex.faces.length;
 	});
+
+	return { isLand, oceanWater };
 }
 
 function pickRidgeSeedsFromLocalMaxima(
@@ -2369,8 +2809,13 @@ type ProvinceSeedState = {
 	isLand: boolean[];
 };
 
-function buildProvinces(mesh: MeshGraph, controls: TerrainControls, random: () => number): ProvinceGraph {
-	return basegenPolitical(mesh, controls, random);
+function buildProvinces(
+	mesh: MeshGraph,
+	controls: TerrainControls,
+	random: () => number,
+	isLand: boolean[]
+): ProvinceGraph {
+	return basegenPolitical(mesh, controls, random, isLand);
 }
 
 function getLandComponents(mesh: MeshGraph, isLand: boolean[]): number[][] {

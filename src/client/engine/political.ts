@@ -76,7 +76,8 @@ type ProvinceHeapEntry = {
 export function basegenPolitical(
 	mesh: MeshGraph,
 	controls: PoliticalControls,
-	random: () => number
+	random: () => number,
+	isLandOverride?: boolean[]
 ): ProvinceGraph {
 	const faceCount = mesh.faces.length;
 	const provinceByFace = new Array<number>(faceCount).fill(-1);
@@ -92,13 +93,24 @@ export function basegenPolitical(
 	}
 
 	const landFaces: number[] = [];
-	const isLand = new Array<boolean>(faceCount).fill(false);
-	mesh.faces.forEach((face) => {
-		if (face.elevation >= 1) {
-			isLand[face.index] = true;
-			landFaces.push(face.index);
+	const isLand =
+		isLandOverride && isLandOverride.length === faceCount
+			? isLandOverride.slice()
+			: new Array<boolean>(faceCount).fill(false);
+	if (!isLandOverride || isLandOverride.length !== faceCount) {
+		mesh.faces.forEach((face) => {
+			if (face.elevation >= 1) {
+				isLand[face.index] = true;
+				landFaces.push(face.index);
+			}
+		});
+	} else {
+		for (let i = 0; i < isLand.length; i += 1) {
+			if (isLand[i]) {
+				landFaces.push(i);
+			}
 		}
-	});
+	}
 
 	if (landFaces.length === 0) {
 		return {
