@@ -60,6 +60,8 @@ export class GameEngine {
     waterNoiseOctaves: 1,
     waterWarpScale: 2,
     waterWarpStrength: 0.7,
+    riverDensity: 1,
+    riverBranchChance: 0.25,
   };
   private hasTerrain = false;
 
@@ -146,6 +148,8 @@ export class GameEngine {
       waterNoiseOctaves: this.clamp(Math.round(safeValue(nextControls.waterNoiseOctaves, 1)), 1, 6),
       waterWarpScale: this.clamp(Math.round(safeValue(nextControls.waterWarpScale, 2)), 2, 40),
       waterWarpStrength: this.clamp(Math.round(safeValue(nextControls.waterWarpStrength, 0.7) * 100) / 100, 0, 0.8),
+      riverDensity: this.clamp(Math.round(safeValue(nextControls.riverDensity, 1) * 10) / 10, 0, 2),
+      riverBranchChance: this.clamp(Math.round(safeValue(nextControls.riverBranchChance, 0.25) * 100) / 100, 0, 1),
     };
 
     const needsRegeneration =
@@ -175,7 +179,9 @@ export class GameEngine {
       this.terrainControls.waterNoiseStrength !== sanitized.waterNoiseStrength ||
       this.terrainControls.waterNoiseOctaves !== sanitized.waterNoiseOctaves ||
       this.terrainControls.waterWarpScale !== sanitized.waterWarpScale ||
-      this.terrainControls.waterWarpStrength !== sanitized.waterWarpStrength;
+      this.terrainControls.waterWarpStrength !== sanitized.waterWarpStrength ||
+      this.terrainControls.riverDensity !== sanitized.riverDensity ||
+      this.terrainControls.riverBranchChance !== sanitized.riverBranchChance;
 
     this.terrainControls = sanitized;
 

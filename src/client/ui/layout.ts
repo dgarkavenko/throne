@@ -33,6 +33,8 @@ type TerrainSettings = {
   waterNoiseOctaves: number;
   waterWarpScale: number;
   waterWarpStrength: number;
+  riverDensity: number;
+  riverBranchChance: number;
 };
 
 type PageLayout = {
@@ -74,6 +76,8 @@ export function createPageLayout(): PageLayout {
   const terrainWaterNoiseOctavesInput = document.getElementById('terrain-water-noise-octaves') as HTMLInputElement | null;
   const terrainWaterWarpScaleInput = document.getElementById('terrain-water-warp-scale') as HTMLInputElement | null;
   const terrainWaterWarpStrengthInput = document.getElementById('terrain-water-warp-strength') as HTMLInputElement | null;
+  const terrainRiverDensityInput = document.getElementById('terrain-river-density') as HTMLInputElement | null;
+  const terrainRiverBranchChanceInput = document.getElementById('terrain-river-branch-chance') as HTMLInputElement | null;
   const terrainGraphPolygonsInput = document.getElementById('terrain-graph-polygons') as HTMLInputElement | null;
   const terrainGraphDualInput = document.getElementById('terrain-graph-dual') as HTMLInputElement | null;
   const terrainGraphCornersInput = document.getElementById('terrain-graph-corners') as HTMLInputElement | null;
@@ -109,6 +113,8 @@ export function createPageLayout(): PageLayout {
   const terrainWaterNoiseOctavesValue = document.getElementById('terrain-water-noise-octaves-value');
   const terrainWaterWarpScaleValue = document.getElementById('terrain-water-warp-scale-value');
   const terrainWaterWarpStrengthValue = document.getElementById('terrain-water-warp-strength-value');
+  const terrainRiverDensityValue = document.getElementById('terrain-river-density-value');
+  const terrainRiverBranchChanceValue = document.getElementById('terrain-river-branch-chance-value');
   const terrainProvinceCountValue = document.getElementById('terrain-province-count-value');
   const terrainProvinceBorderWidthValue = document.getElementById('terrain-province-border-width-value');
   const terrainLandReliefValue = document.getElementById('terrain-land-relief-value');
@@ -207,6 +213,12 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainWaterWarpStrengthInput) {
       terrainWaterWarpStrengthInput.value = terrainWaterWarpStrengthInput.defaultValue;
+    }
+    if (terrainRiverDensityInput) {
+      terrainRiverDensityInput.value = terrainRiverDensityInput.defaultValue;
+    }
+    if (terrainRiverBranchChanceInput) {
+      terrainRiverBranchChanceInput.value = terrainRiverBranchChanceInput.defaultValue;
     }
     if (terrainProvinceCountInput) {
       terrainProvinceCountInput.value = terrainProvinceCountInput.defaultValue;
@@ -313,6 +325,12 @@ export function createPageLayout(): PageLayout {
     if (typeof settings.waterWarpStrength === 'number' && terrainWaterWarpStrengthInput) {
       terrainWaterWarpStrengthInput.value = settings.waterWarpStrength.toString();
     }
+    if (typeof settings.riverDensity === 'number' && terrainRiverDensityInput) {
+      terrainRiverDensityInput.value = settings.riverDensity.toString();
+    }
+    if (typeof settings.riverBranchChance === 'number' && terrainRiverBranchChanceInput) {
+      terrainRiverBranchChanceInput.value = settings.riverBranchChance.toString();
+    }
     if (typeof settings.provinceCount === 'number' && terrainProvinceCountInput) {
       terrainProvinceCountInput.value = settings.provinceCount.toString();
     }
@@ -402,6 +420,8 @@ export function createPageLayout(): PageLayout {
     const waterNoiseOctaves = clamp(parseIntWithFallback(terrainWaterNoiseOctavesInput?.value, 1), 1, 6);
     const waterWarpScale = clamp(parseIntWithFallback(terrainWaterWarpScaleInput?.value, 2), 2, 40);
     const waterWarpStrength = clamp(parseFloatWithFallback(terrainWaterWarpStrengthInput?.value, 0.7), 0, 0.8);
+    const riverDensity = clamp(parseFloatWithFallback(terrainRiverDensityInput?.value, 1), 0, 2);
+    const riverBranchChance = clamp(parseFloatWithFallback(terrainRiverBranchChanceInput?.value, 0.25), 0, 1);
     const provinceCount = clamp(parseIntWithFallback(terrainProvinceCountInput?.value, 8), 1, 32);
     const provinceBorderWidth = clamp(parseFloatWithFallback(terrainProvinceBorderWidthInput?.value, 6.5), 1, 24);
     const showLandBorders = Boolean(terrainProvinceLandBordersInput?.checked);
@@ -461,6 +481,8 @@ export function createPageLayout(): PageLayout {
       waterNoiseOctaves,
       waterWarpScale,
       waterWarpStrength,
+      riverDensity,
+      riverBranchChance,
     };
   };
 
@@ -506,6 +528,12 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainWaterWarpStrengthValue) {
       terrainWaterWarpStrengthValue.textContent = settings.waterWarpStrength.toFixed(2);
+    }
+    if (terrainRiverDensityValue) {
+      terrainRiverDensityValue.textContent = settings.riverDensity.toFixed(1);
+    }
+    if (terrainRiverBranchChanceValue) {
+      terrainRiverBranchChanceValue.textContent = settings.riverBranchChance.toFixed(2);
     }
     if (terrainProvinceCountValue) {
       terrainProvinceCountValue.textContent = settings.provinceCount.toString();
@@ -612,6 +640,8 @@ export function createPageLayout(): PageLayout {
     terrainWaterNoiseOctavesInput?.addEventListener('input', notify);
     terrainWaterWarpScaleInput?.addEventListener('input', notify);
     terrainWaterWarpStrengthInput?.addEventListener('input', notify);
+    terrainRiverDensityInput?.addEventListener('input', notify);
+    terrainRiverBranchChanceInput?.addEventListener('input', notify);
     terrainProvinceCountInput?.addEventListener('input', notify);
     terrainProvinceBorderWidthInput?.addEventListener('input', notify);
     terrainProvinceLandBordersInput?.addEventListener('change', notify);

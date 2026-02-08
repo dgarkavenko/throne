@@ -250,6 +250,21 @@ export const html = `<!doctype html>
             </div>
           </details>
           <details class="control-group">
+            <summary>Rivers</summary>
+            <div class="control">
+              <label for="terrain-river-density">
+                River Density <span id="terrain-river-density-value">1.0</span>
+              </label>
+              <input id="terrain-river-density" type="range" min="0" max="2" step="0.1" value="1" />
+            </div>
+            <div class="control">
+              <label for="terrain-river-branch-chance">
+                Branch Chance <span id="terrain-river-branch-chance-value">0.25</span>
+              </label>
+              <input id="terrain-river-branch-chance" type="range" min="0" max="1" step="0.05" value="0.25" />
+            </div>
+          </details>
+          <details class="control-group">
             <summary>Land</summary>
             <div class="control">
                 <label for="terrain-land-relief">
