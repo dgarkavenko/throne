@@ -18,8 +18,6 @@ export type TerrainControls = {
 	waterNoiseOctaves: number;
 	waterWarpScale: number;
 	waterWarpStrength: number;
-	waterOffsetX: number;
-	waterOffsetY: number;
 };
 
 type Vec2 = {
@@ -155,9 +153,7 @@ export function drawVoronoiTerrain(
 		controls.waterNoiseStrength,
 		controls.waterNoiseOctaves,
 		controls.waterWarpScale,
-		controls.waterWarpStrength,
-		controls.waterOffsetX,
-		controls.waterOffsetY
+		controls.waterWarpStrength
 	);
 	const landPalette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
 	const mountainPalette = [0x6f6a62, 0x8c8479, 0xa39b8e, 0xb8b0a2];
@@ -224,37 +220,58 @@ export function drawVoronoiTerrain(
 		}
 		let fillColor = landPalette[Math.floor(random() * landPalette.length)];
 		let fillAlpha = 0.78;
-		let strokeColor = 0xcadfb8;
-		let strokeAlpha = 0.42;
 
 		if (face.elevation <= -2) {
-			fillColor = 0x0f2b4a;
-			fillAlpha = 0.9;
-			strokeColor = 0x6f95c4;
-			strokeAlpha = 0.34;
+			fillColor = 0x2a5c8a;
+			fillAlpha = 1;
 		} else if (face.elevation <= 0) {
-			fillColor = 0x2d5f8d;
-			fillAlpha = 0.84;
-			strokeColor = 0x9dc2e6;
-			strokeAlpha = 0.35;
+			fillColor = 0x3d6f9d;
+			fillAlpha = 1;
 		} else if (face.elevation === 1) {
 			fillColor = 0x8c7b4f;
 			fillAlpha = 0.82;
-			strokeColor = 0xdac38e;
-			strokeAlpha = 0.38;
 		} else if (face.elevation >= 3) {
 			const mountainIndex = Math.min(mountainPalette.length - 1, face.elevation - 3);
 			fillColor = mountainPalette[mountainIndex];
 			fillAlpha = 0.86;
-			strokeColor = 0xd7d0c2;
-			strokeAlpha = 0.32;
 		}
 
 		const terrain = new window.PIXI.Graphics();
 		terrain.poly(flattenPolygon(cell), true);
 		terrain.fill({ color: fillColor, alpha: fillAlpha });
-		terrain.stroke({ width: 1.2, color: strokeColor, alpha: strokeAlpha });
 		baseLayer.addChild(terrain);
+
+		const isShoreWater =
+			face.elevation <= 0 &&
+			face.adjacentFaces.some((neighborIndex) => mesh.faces[neighborIndex].elevation >= 1);
+		if (isShoreWater) {
+			const strokes = new window.PIXI.Graphics();
+			const strokeMask = new window.PIXI.Graphics();
+			strokeMask.poly(flattenPolygon(cell), true);
+			strokeMask.fill({ color: 0xffffff, alpha: 0.001 });
+			strokeMask.visible = true;
+			const bounds = getPolygonBounds(cell);
+			const lineGap = 6;
+			const lineColor = 0x0b0e12;
+			const lineWidth = 2;
+			const span = bounds.maxX - bounds.minX;
+			const minLen = span * 0.5;
+			const maxLen = span * 0.8;
+			for (let y = bounds.minY; y <= bounds.maxY; y += lineGap) {
+				const lengthT = hash2D(face.index, Math.floor(y), seed + 71);
+				const length = minLen + (maxLen - minLen) * lengthT;
+				const startT = hash2D(Math.floor(y), face.index, seed + 13);
+				const startX = bounds.minX + (span - length) * startT;
+				const endX = startX + length;
+				const alpha = 0.1 + hash2D(Math.floor(y), face.index + 5, seed + 101) * 0.14;
+				strokes.moveTo(startX, y);
+				strokes.lineTo(endX, y);
+				strokes.stroke({ width: lineWidth, color: lineColor, alpha });
+			}
+			strokes.mask = strokeMask;
+			baseLayer.addChild(strokeMask);
+			baseLayer.addChild(strokes);
+		}
 	});
 
 	renderMeshOverlay(mesh, insertedPoints, meshOverlay);
@@ -595,6 +612,21 @@ function flattenPolygon(polygon: Vec2[]): number[] {
 	return flat;
 }
 
+function getPolygonBounds(polygon: Vec2[]): { minX: number; maxX: number; minY: number; maxY: number } {
+	let minX = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	for (let i = 0; i < polygon.length; i += 1) {
+		const point = polygon[i];
+		minX = Math.min(minX, point.x);
+		maxX = Math.max(maxX, point.x);
+		minY = Math.min(minY, point.y);
+		maxY = Math.max(maxY, point.y);
+	}
+	return { minX, maxX, minY, maxY };
+}
+
 function buildMeshGraph(sites: Vec2[], cells: Vec2[][]): MeshGraph {
 	const faces: MeshFace[] = sites.map((site, index) => ({
 		index,
@@ -707,9 +739,7 @@ function assignIslandElevation(
 	waterNoiseStrength: number,
 	waterNoiseOctaves: number,
 	waterWarpScale: number,
-	waterWarpStrength: number,
-	waterOffsetX: number,
-	waterOffsetY: number
+	waterWarpStrength: number
 ): void {
 	const width = config.width;
 	const height = config.height;
@@ -720,8 +750,6 @@ function assignIslandElevation(
 	const clampedNoiseOctaves = Math.round(clamp(waterNoiseOctaves, 1, 6));
 	const clampedWarpScale = clamp(waterWarpScale, 2, 40);
 	const clampedWarpStrength = clamp(waterWarpStrength, 0, 0.8);
-	const offsetX = clamp(waterOffsetX, -40, 40) / 100;
-	const offsetY = clamp(waterOffsetY, -40, 40) / 100;
 	const islandSeed = Math.floor(random() * 0xffffffff);
 	const bumps = 3 + Math.floor(normalizedRoughness * 7) + Math.floor(random() * 3);
 	const startAngle = random() * Math.PI * 2;
@@ -732,8 +760,8 @@ function assignIslandElevation(
 	const noiseAmplitude = (0.08 + normalizedRoughness * 0.18) * clampedNoiseStrength;
 
 	const islandShape = (point: Vec2): boolean => {
-		const baseNx = (point.x / width) * 2 - 1 + offsetX;
-		const baseNy = (point.y / height) * 2 - 1 + offsetY;
+		const baseNx = (point.x / width) * 2 - 1;
+		const baseNy = (point.y / height) * 2 - 1;
 		let nx = baseNx;
 		let ny = baseNy;
 		if (clampedWarpStrength > 0) {
