@@ -138,6 +138,26 @@ main {
   width: 1rem;
   height: 1rem;
 }
+.control-button {
+  width: 100%;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid #3f4e6a;
+  border-radius: 10px;
+  background: #0d1422;
+  color: #f5f5f5;
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.control-button:hover {
+  background: #132033;
+  border-color: #4a5e80;
+}
+.control-button:active {
+  transform: translateY(1px);
+}
 @media (max-width: 480px) {
   body {
     align-items: flex-start;
@@ -180,6 +200,7 @@ export const html = `<!doctype html>
       <div class="fps" id="fps">FPS: --</div>
       <div class="layout">
         <div class="controls">
+          <button class="control-button" id="terrain-reset" type="button">Reset Settings</button>
           <details class="control-group">
             <summary>Sampling</summary>
             <div class="control">

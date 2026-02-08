@@ -45,6 +45,8 @@ type PageLayout = {
   onTerrainSettingsChange: (onChange: (settings: TerrainSettings) => void) => void;
 };
 
+const TERRAIN_SETTINGS_STORAGE_KEY = 'throne.terrainSettings.v1';
+
 function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -77,6 +79,7 @@ export function createPageLayout(): PageLayout {
   const terrainGraphCornersInput = document.getElementById('terrain-graph-corners') as HTMLInputElement | null;
   const terrainGraphCentersInput = document.getElementById('terrain-graph-centers') as HTMLInputElement | null;
   const terrainGraphInsertedInput = document.getElementById('terrain-graph-inserted') as HTMLInputElement | null;
+  const terrainResetButton = document.getElementById('terrain-reset') as HTMLButtonElement | null;
   const terrainProvinceCountInput = document.getElementById('terrain-province-count') as HTMLInputElement | null;
   const terrainProvinceBorderWidthInput = document.getElementById('terrain-province-border-width') as HTMLInputElement | null;
   const terrainProvinceLandBordersInput = document.getElementById('terrain-province-land-borders') as HTMLInputElement | null;
@@ -130,6 +133,246 @@ export function createPageLayout(): PageLayout {
   const parseFloatWithFallback = (value: string | undefined, fallback: number): number => {
     const parsed = Number.parseFloat(value || '');
     return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const loadStoredTerrainSettings = (): Partial<TerrainSettings> | null => {
+    if (!window.localStorage) {
+      return null;
+    }
+    try {
+      const raw = window.localStorage.getItem(TERRAIN_SETTINGS_STORAGE_KEY);
+      if (!raw) {
+        return null;
+      }
+      const parsed = JSON.parse(raw) as Partial<TerrainSettings> | null;
+      if (!parsed || typeof parsed !== 'object') {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  };
+
+  const storeTerrainSettings = (settings: TerrainSettings): void => {
+    if (!window.localStorage) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(TERRAIN_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Ignore storage failures (e.g., quota exceeded).
+    }
+  };
+
+  const applyDefaultSettings = (): void => {
+    if (terrainSpacingInput) {
+      terrainSpacingInput.value = terrainSpacingInput.defaultValue;
+    }
+    if (terrainSeedInput) {
+      terrainSeedInput.value = terrainSeedInput.defaultValue;
+    }
+    if (terrainIntermediateSeedInput) {
+      terrainIntermediateSeedInput.value = terrainIntermediateSeedInput.defaultValue;
+    }
+    if (terrainIntermediateIterationsInput) {
+      terrainIntermediateIterationsInput.value = terrainIntermediateIterationsInput.defaultValue;
+    }
+    if (terrainIntermediateDistanceInput) {
+      terrainIntermediateDistanceInput.value = terrainIntermediateDistanceInput.defaultValue;
+    }
+    if (terrainIntermediateRelMagnitudeInput) {
+      terrainIntermediateRelMagnitudeInput.value = terrainIntermediateRelMagnitudeInput.defaultValue;
+    }
+    if (terrainIntermediateAbsMagnitudeInput) {
+      terrainIntermediateAbsMagnitudeInput.value = terrainIntermediateAbsMagnitudeInput.defaultValue;
+    }
+    if (terrainWaterLevelInput) {
+      terrainWaterLevelInput.value = terrainWaterLevelInput.defaultValue;
+    }
+    if (terrainWaterRoughnessInput) {
+      terrainWaterRoughnessInput.value = terrainWaterRoughnessInput.defaultValue;
+    }
+    if (terrainWaterNoiseScaleInput) {
+      terrainWaterNoiseScaleInput.value = terrainWaterNoiseScaleInput.defaultValue;
+    }
+    if (terrainWaterNoiseStrengthInput) {
+      terrainWaterNoiseStrengthInput.value = terrainWaterNoiseStrengthInput.defaultValue;
+    }
+    if (terrainWaterNoiseOctavesInput) {
+      terrainWaterNoiseOctavesInput.value = terrainWaterNoiseOctavesInput.defaultValue;
+    }
+    if (terrainWaterWarpScaleInput) {
+      terrainWaterWarpScaleInput.value = terrainWaterWarpScaleInput.defaultValue;
+    }
+    if (terrainWaterWarpStrengthInput) {
+      terrainWaterWarpStrengthInput.value = terrainWaterWarpStrengthInput.defaultValue;
+    }
+    if (terrainProvinceCountInput) {
+      terrainProvinceCountInput.value = terrainProvinceCountInput.defaultValue;
+    }
+    if (terrainProvinceBorderWidthInput) {
+      terrainProvinceBorderWidthInput.value = terrainProvinceBorderWidthInput.defaultValue;
+    }
+    if (terrainProvinceLandBordersInput) {
+      terrainProvinceLandBordersInput.checked = terrainProvinceLandBordersInput.defaultChecked;
+    }
+    if (terrainProvinceShoreBordersInput) {
+      terrainProvinceShoreBordersInput.checked = terrainProvinceShoreBordersInput.defaultChecked;
+    }
+    if (terrainLandReliefInput) {
+      terrainLandReliefInput.value = terrainLandReliefInput.defaultValue;
+    }
+    if (terrainRidgeStrengthInput) {
+      terrainRidgeStrengthInput.value = terrainRidgeStrengthInput.defaultValue;
+    }
+    if (terrainRidgeCountInput) {
+      terrainRidgeCountInput.value = terrainRidgeCountInput.defaultValue;
+    }
+    if (terrainPlateauStrengthInput) {
+      terrainPlateauStrengthInput.value = terrainPlateauStrengthInput.defaultValue;
+    }
+    if (terrainRidgeDistributionInput) {
+      terrainRidgeDistributionInput.value = terrainRidgeDistributionInput.defaultValue;
+    }
+    if (terrainRidgeSeparationInput) {
+      terrainRidgeSeparationInput.value = terrainRidgeSeparationInput.defaultValue;
+    }
+    if (terrainRidgeContinuityInput) {
+      terrainRidgeContinuityInput.value = terrainRidgeContinuityInput.defaultValue;
+    }
+    if (terrainRidgeContinuityThresholdInput) {
+      terrainRidgeContinuityThresholdInput.value = terrainRidgeContinuityThresholdInput.defaultValue;
+    }
+    if (terrainOceanPeakClampInput) {
+      terrainOceanPeakClampInput.value = terrainOceanPeakClampInput.defaultValue;
+    }
+    if (terrainRidgeOceanClampInput) {
+      terrainRidgeOceanClampInput.value = terrainRidgeOceanClampInput.defaultValue;
+    }
+    if (terrainRidgeWidthInput) {
+      terrainRidgeWidthInput.value = terrainRidgeWidthInput.defaultValue;
+    }
+    if (terrainGraphPolygonsInput) {
+      terrainGraphPolygonsInput.checked = terrainGraphPolygonsInput.defaultChecked;
+    }
+    if (terrainGraphDualInput) {
+      terrainGraphDualInput.checked = terrainGraphDualInput.defaultChecked;
+    }
+    if (terrainGraphCornersInput) {
+      terrainGraphCornersInput.checked = terrainGraphCornersInput.defaultChecked;
+    }
+    if (terrainGraphCentersInput) {
+      terrainGraphCentersInput.checked = terrainGraphCentersInput.defaultChecked;
+    }
+    if (terrainGraphInsertedInput) {
+      terrainGraphInsertedInput.checked = terrainGraphInsertedInput.defaultChecked;
+    }
+  };
+
+  const applyStoredSettings = (settings: Partial<TerrainSettings>): void => {
+    if (typeof settings.spacing === 'number' && terrainSpacingInput) {
+      terrainSpacingInput.value = settings.spacing.toString();
+    }
+    if (typeof settings.seed === 'number' && terrainSeedInput) {
+      terrainSeedInput.value = settings.seed.toString();
+    }
+    if (typeof settings.intermediateSeed === 'number' && terrainIntermediateSeedInput) {
+      terrainIntermediateSeedInput.value = settings.intermediateSeed.toString();
+    }
+    if (typeof settings.intermediateMaxIterations === 'number' && terrainIntermediateIterationsInput) {
+      terrainIntermediateIterationsInput.value = settings.intermediateMaxIterations.toString();
+    }
+    if (typeof settings.intermediateThreshold === 'number' && terrainIntermediateDistanceInput) {
+      terrainIntermediateDistanceInput.value = settings.intermediateThreshold.toString();
+    }
+    if (typeof settings.intermediateRelMagnitude === 'number' && terrainIntermediateRelMagnitudeInput) {
+      terrainIntermediateRelMagnitudeInput.value = settings.intermediateRelMagnitude.toString();
+    }
+    if (typeof settings.intermediateAbsMagnitude === 'number' && terrainIntermediateAbsMagnitudeInput) {
+      terrainIntermediateAbsMagnitudeInput.value = settings.intermediateAbsMagnitude.toString();
+    }
+    if (typeof settings.waterLevel === 'number' && terrainWaterLevelInput) {
+      terrainWaterLevelInput.value = settings.waterLevel.toString();
+    }
+    if (typeof settings.waterRoughness === 'number' && terrainWaterRoughnessInput) {
+      terrainWaterRoughnessInput.value = settings.waterRoughness.toString();
+    }
+    if (typeof settings.waterNoiseScale === 'number' && terrainWaterNoiseScaleInput) {
+      terrainWaterNoiseScaleInput.value = settings.waterNoiseScale.toString();
+    }
+    if (typeof settings.waterNoiseStrength === 'number' && terrainWaterNoiseStrengthInput) {
+      terrainWaterNoiseStrengthInput.value = settings.waterNoiseStrength.toString();
+    }
+    if (typeof settings.waterNoiseOctaves === 'number' && terrainWaterNoiseOctavesInput) {
+      terrainWaterNoiseOctavesInput.value = settings.waterNoiseOctaves.toString();
+    }
+    if (typeof settings.waterWarpScale === 'number' && terrainWaterWarpScaleInput) {
+      terrainWaterWarpScaleInput.value = settings.waterWarpScale.toString();
+    }
+    if (typeof settings.waterWarpStrength === 'number' && terrainWaterWarpStrengthInput) {
+      terrainWaterWarpStrengthInput.value = settings.waterWarpStrength.toString();
+    }
+    if (typeof settings.provinceCount === 'number' && terrainProvinceCountInput) {
+      terrainProvinceCountInput.value = settings.provinceCount.toString();
+    }
+    if (typeof settings.provinceBorderWidth === 'number' && terrainProvinceBorderWidthInput) {
+      terrainProvinceBorderWidthInput.value = settings.provinceBorderWidth.toString();
+    }
+    if (typeof settings.showLandBorders === 'boolean' && terrainProvinceLandBordersInput) {
+      terrainProvinceLandBordersInput.checked = settings.showLandBorders;
+    }
+    if (typeof settings.showShoreBorders === 'boolean' && terrainProvinceShoreBordersInput) {
+      terrainProvinceShoreBordersInput.checked = settings.showShoreBorders;
+    }
+    if (typeof settings.landRelief === 'number' && terrainLandReliefInput) {
+      terrainLandReliefInput.value = settings.landRelief.toString();
+    }
+    if (typeof settings.ridgeStrength === 'number' && terrainRidgeStrengthInput) {
+      terrainRidgeStrengthInput.value = settings.ridgeStrength.toString();
+    }
+    if (typeof settings.ridgeCount === 'number' && terrainRidgeCountInput) {
+      terrainRidgeCountInput.value = settings.ridgeCount.toString();
+    }
+    if (typeof settings.plateauStrength === 'number' && terrainPlateauStrengthInput) {
+      terrainPlateauStrengthInput.value = settings.plateauStrength.toString();
+    }
+    if (typeof settings.ridgeDistribution === 'number' && terrainRidgeDistributionInput) {
+      terrainRidgeDistributionInput.value = settings.ridgeDistribution.toString();
+    }
+    if (typeof settings.ridgeSeparation === 'number' && terrainRidgeSeparationInput) {
+      terrainRidgeSeparationInput.value = settings.ridgeSeparation.toString();
+    }
+    if (typeof settings.ridgeContinuity === 'number' && terrainRidgeContinuityInput) {
+      terrainRidgeContinuityInput.value = settings.ridgeContinuity.toString();
+    }
+    if (typeof settings.ridgeContinuityThreshold === 'number' && terrainRidgeContinuityThresholdInput) {
+      terrainRidgeContinuityThresholdInput.value = settings.ridgeContinuityThreshold.toString();
+    }
+    if (typeof settings.oceanPeakClamp === 'number' && terrainOceanPeakClampInput) {
+      terrainOceanPeakClampInput.value = settings.oceanPeakClamp.toString();
+    }
+    if (typeof settings.ridgeOceanClamp === 'number' && terrainRidgeOceanClampInput) {
+      terrainRidgeOceanClampInput.value = settings.ridgeOceanClamp.toString();
+    }
+    if (typeof settings.ridgeWidth === 'number' && terrainRidgeWidthInput) {
+      terrainRidgeWidthInput.value = settings.ridgeWidth.toString();
+    }
+    if (typeof settings.showPolygonGraph === 'boolean' && terrainGraphPolygonsInput) {
+      terrainGraphPolygonsInput.checked = settings.showPolygonGraph;
+    }
+    if (typeof settings.showDualGraph === 'boolean' && terrainGraphDualInput) {
+      terrainGraphDualInput.checked = settings.showDualGraph;
+    }
+    if (typeof settings.showCornerNodes === 'boolean' && terrainGraphCornersInput) {
+      terrainGraphCornersInput.checked = settings.showCornerNodes;
+    }
+    if (typeof settings.showCenterNodes === 'boolean' && terrainGraphCentersInput) {
+      terrainGraphCentersInput.checked = settings.showCenterNodes;
+    }
+    if (typeof settings.showInsertedPoints === 'boolean' && terrainGraphInsertedInput) {
+      terrainGraphInsertedInput.checked = settings.showInsertedPoints;
+    }
   };
 
   const readTerrainSettings = (): TerrainSettings => {
@@ -220,6 +463,11 @@ export function createPageLayout(): PageLayout {
       waterWarpStrength,
     };
   };
+
+  const storedSettings = loadStoredTerrainSettings();
+  if (storedSettings) {
+    applyStoredSettings(storedSettings);
+  }
 
   const syncTerrainLabels = (): void => {
     const settings = readTerrainSettings();
@@ -339,7 +587,16 @@ export function createPageLayout(): PageLayout {
     onTerrainSettingsChange(onChange) {
     const notify = () => {
       syncTerrainLabels();
-      onChange(readTerrainSettings());
+      const settings = readTerrainSettings();
+      storeTerrainSettings(settings);
+      onChange(settings);
+    };
+    const reset = () => {
+      applyDefaultSettings();
+      syncTerrainLabels();
+      const settings = readTerrainSettings();
+      storeTerrainSettings(settings);
+      onChange(settings);
     };
     terrainSpacingInput?.addEventListener('input', notify);
     terrainSeedInput?.addEventListener('change', notify);
@@ -374,7 +631,8 @@ export function createPageLayout(): PageLayout {
       terrainGraphDualInput?.addEventListener('change', notify);
       terrainGraphCornersInput?.addEventListener('change', notify);
       terrainGraphCentersInput?.addEventListener('change', notify);
-      terrainGraphInsertedInput?.addEventListener('change', notify);
+    terrainGraphInsertedInput?.addEventListener('change', notify);
+    terrainResetButton?.addEventListener('click', reset);
     },
   };
 }

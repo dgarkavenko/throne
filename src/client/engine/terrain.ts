@@ -43,7 +43,7 @@ export type TerrainControls = {
 // ridgeDistribution: spreads ridge influence further from seeds (0..1).
 // ridgeSeparation: favors peaks far from existing peaks (0..1).
 // ridgeContinuity: how far ridges connect toward nearest peaks (0..1).
-// ridgeContinuityThreshold: limits ridge connections to nearby peaks (0..1; 0 = no limit).
+// ridgeContinuityThreshold: limits ridge connections to nearby peaks (0..1; 0 = max distance, 1 = min distance).
 // oceanPeakClamp: caps max elevation by ocean distance (0..1; 1 => cap at 2x sea distance).
 // ridgeWidth: widens ridge connections into neighboring tiles (0..1).
 // ridgeOceanClamp: caps ridge boost by ocean distance (0..1; 1 => ridge boost <= 2x sea distance).
@@ -1087,6 +1087,7 @@ function assignIslandElevation(
 				ridgeStrengthClamped,
 				ridgeContinuityClamped,
 				ridgeWidthClamped,
+				ridgeDistributionClamped,
 				ridgeContinuityThresholdClamped,
 				maxElevation,
 				maxLandDistance,
@@ -1387,6 +1388,7 @@ function connectRidgeSeeds(
 	ridgeStrength: number,
 	ridgeContinuity: number,
 	ridgeWidth: number,
+	ridgeDistribution: number,
 	ridgeContinuityThreshold: number,
 	maxElevation: number,
 	maxLandDistance: number,
@@ -1409,10 +1411,11 @@ function connectRidgeSeeds(
 	const minAllowed = Math.max(2, Math.round(maxDistanceBase * 0.1));
 	const maxAllowed =
 		threshold <= 0
-			? Number.POSITIVE_INFINITY
+			? Math.max(2, landFaceCount)
 			: Math.max(2, Math.round(lerp(maxDistanceBase, minAllowed, threshold)));
 
-	const widthSteps = Math.max(0, Math.round(lerp(0, 6, ridgeWidth)));
+	const widthScale = 1 + 0.5 * clamp(ridgeDistribution, 0, 1);
+	const widthSteps = Math.max(0, Math.round(lerp(0, 6, ridgeWidth) * widthScale));
 
 	for (let i = 1; i < seeds.length; i += 1) {
 		const seed = seeds[i];
