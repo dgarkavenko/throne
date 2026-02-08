@@ -32,6 +32,7 @@ export class GameEngine {
     showCornerNodes: false,
     showCenterNodes: false,
     showInsertedPoints: false,
+    provinceCount: 8,
     seed: 1337,
     intermediateSeed: 1337,
     intermediateMaxIterations: 8,
@@ -95,6 +96,7 @@ export class GameEngine {
       showCornerNodes: Boolean(nextControls.showCornerNodes),
       showCenterNodes: Boolean(nextControls.showCenterNodes),
       showInsertedPoints: Boolean(nextControls.showInsertedPoints),
+      provinceCount: this.clamp(Math.round(safeValue(nextControls.provinceCount, 8)), 1, 32),
       seed: this.clamp(Math.floor(safeValue(nextControls.seed, 1337)), 0, 0xffffffff),
       intermediateSeed: this.clamp(Math.floor(safeValue(nextControls.intermediateSeed, 1337)), 0, 0xffffffff),
       intermediateMaxIterations: this.clamp(Math.round(safeValue(nextControls.intermediateMaxIterations, 8)), 0, 12),
@@ -123,6 +125,7 @@ export class GameEngine {
       this.terrainControls.intermediateThreshold !== sanitized.intermediateThreshold ||
       this.terrainControls.intermediateRelMagnitude !== sanitized.intermediateRelMagnitude ||
       this.terrainControls.intermediateAbsMagnitude !== sanitized.intermediateAbsMagnitude ||
+      this.terrainControls.provinceCount !== sanitized.provinceCount ||
       this.terrainControls.waterLevel !== sanitized.waterLevel ||
       this.terrainControls.waterRoughness !== sanitized.waterRoughness ||
       this.terrainControls.waterNoiseScale !== sanitized.waterNoiseScale ||

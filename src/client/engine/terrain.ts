@@ -5,6 +5,7 @@ export type TerrainControls = {
 	showCornerNodes: boolean;
 	showCenterNodes: boolean;
 	showInsertedPoints: boolean;
+	provinceCount: number;
 	seed: number;
 	intermediateSeed: number;
 	intermediateMaxIterations: number;
@@ -213,6 +214,8 @@ export function drawVoronoiTerrain(
 		});
 	});
 
+	const provinceResult = buildProvinces(mesh, controls, random);
+
 	mesh.faces.forEach((face) => {
 		const cell = cells[face.index];
 		if (!cell || cell.length < 3) {
@@ -274,6 +277,7 @@ export function drawVoronoiTerrain(
 		}
 	});
 
+	renderProvinceBorders(mesh, cells, provinceResult, config, baseLayer);
 	renderMeshOverlay(mesh, insertedPoints, meshOverlay);
 	setGraphOverlayVisibility(terrainLayer, controls);
 }
@@ -1022,6 +1026,527 @@ function renderMeshOverlay(mesh: MeshGraph, insertedPoints: Vec2[], overlay: Mes
 		insertedNodes.circle(point.x, point.y, 2.2);
 	}
 	insertedNodes.fill({ color: 0xffe56b, alpha: 0.9 });
+}
+
+type ProvinceAssignment = {
+	provinceByFace: number[];
+	seedFaces: number[];
+	landFaces: number[];
+	isLand: boolean[];
+};
+
+function buildProvinces(mesh: MeshGraph, controls: TerrainControls, random: () => number): ProvinceAssignment {
+	const faceCount = mesh.faces.length;
+	const provinceByFace = new Array<number>(faceCount).fill(-1);
+	if (faceCount === 0) {
+		return { provinceByFace, seedFaces: [], landFaces: [], isLand: [] };
+	}
+
+	const landFaces: number[] = [];
+	const isLand = new Array<boolean>(faceCount).fill(false);
+	mesh.faces.forEach((face) => {
+		if (face.elevation >= 1) {
+			isLand[face.index] = true;
+			landFaces.push(face.index);
+		}
+	});
+
+	if (landFaces.length === 0) {
+		return { provinceByFace, seedFaces: [], landFaces, isLand };
+	}
+
+	const provinceCount = clamp(Math.round(controls.provinceCount || 1), 1, landFaces.length);
+	const components = getLandComponents(mesh, isLand);
+	const componentAllocations = allocateProvinceSeeds(components, provinceCount);
+	const seedFaces: number[] = [];
+
+	for (let i = 0; i < components.length; i += 1) {
+		const component = components[i];
+		const seedCount = componentAllocations[i];
+		if (seedCount <= 0) {
+			continue;
+		}
+		const seeds = pickFarthestSeeds(component, mesh, seedCount, random);
+		seedFaces.push(...seeds);
+	}
+
+	const assignment = growProvinceRegions(mesh, isLand, landFaces, seedFaces, provinceCount, controls.spacing);
+	for (let i = 0; i < assignment.provinceByFace.length; i += 1) {
+		provinceByFace[i] = assignment.provinceByFace[i];
+	}
+
+	const hasUnassigned = landFaces.some((faceIndex) => provinceByFace[faceIndex] < 0);
+	if (hasUnassigned && seedFaces.length > 0) {
+		landFaces.forEach((faceIndex) => {
+			if (provinceByFace[faceIndex] >= 0) {
+				return;
+			}
+			let bestSeed = 0;
+			let bestDist = Number.POSITIVE_INFINITY;
+			const point = mesh.faces[faceIndex].point;
+			for (let i = 0; i < seedFaces.length; i += 1) {
+				const seedFace = seedFaces[i];
+				const seedPoint = mesh.faces[seedFace].point;
+				const dist = vec2Len(vec2Sub(point, seedPoint));
+				if (dist < bestDist) {
+					bestDist = dist;
+					bestSeed = i;
+				}
+			}
+			provinceByFace[faceIndex] = bestSeed;
+		});
+	}
+
+	return { provinceByFace, seedFaces, landFaces, isLand };
+}
+
+function getLandComponents(mesh: MeshGraph, isLand: boolean[]): number[][] {
+	const visited = new Array<boolean>(mesh.faces.length).fill(false);
+	const components: number[][] = [];
+	for (let i = 0; i < mesh.faces.length; i += 1) {
+		if (!isLand[i] || visited[i]) {
+			continue;
+		}
+		const stack = [i];
+		const component: number[] = [];
+		visited[i] = true;
+		while (stack.length > 0) {
+			const faceIndex = stack.pop() as number;
+			component.push(faceIndex);
+			const face = mesh.faces[faceIndex];
+			for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+				const neighbor = face.adjacentFaces[j];
+				if (!isLand[neighbor] || visited[neighbor]) {
+					continue;
+				}
+				visited[neighbor] = true;
+				stack.push(neighbor);
+			}
+		}
+		components.push(component);
+	}
+	return components;
+}
+
+function allocateProvinceSeeds(components: number[][], totalSeeds: number): number[] {
+	const allocations = new Array<number>(components.length).fill(0);
+	if (components.length === 0 || totalSeeds <= 0) {
+		return allocations;
+	}
+	if (totalSeeds >= components.length) {
+		components.forEach((_, index) => {
+			allocations[index] = 1;
+		});
+		let remaining = totalSeeds - components.length;
+		if (remaining > 0) {
+			const totalLand = components.reduce((sum, component) => sum + component.length, 0);
+			const remainders = components.map((component, index) => {
+				const exact = (component.length / totalLand) * remaining;
+				const extra = Math.floor(exact);
+				allocations[index] += extra;
+				return { index, remainder: exact - extra };
+			});
+			remaining = totalSeeds - allocations.reduce((sum, value) => sum + value, 0);
+			remainders.sort((a, b) => b.remainder - a.remainder);
+			for (let i = 0; i < remaining; i += 1) {
+				allocations[remainders[i % remainders.length].index] += 1;
+			}
+		}
+		return allocations;
+	}
+
+	const sorted = components
+		.map((component, index) => ({ index, size: component.length }))
+		.sort((a, b) => b.size - a.size);
+	for (let i = 0; i < totalSeeds; i += 1) {
+		allocations[sorted[i].index] = 1;
+	}
+	return allocations;
+}
+
+function pickFarthestSeeds(
+	componentFaces: number[],
+	mesh: MeshGraph,
+	seedCount: number,
+	random: () => number
+): number[] {
+	if (seedCount <= 0 || componentFaces.length === 0) {
+		return [];
+	}
+	const seeds: number[] = [];
+	const first = componentFaces[Math.floor(random() * componentFaces.length)];
+	seeds.push(first);
+	while (seeds.length < seedCount && seeds.length < componentFaces.length) {
+		let bestFace = componentFaces[0];
+		let bestDist = -1;
+		for (let i = 0; i < componentFaces.length; i += 1) {
+			const faceIndex = componentFaces[i];
+			let minDist = Number.POSITIVE_INFINITY;
+			const point = mesh.faces[faceIndex].point;
+			for (let s = 0; s < seeds.length; s += 1) {
+				const seedPoint = mesh.faces[seeds[s]].point;
+				const dist = vec2Len(vec2Sub(point, seedPoint));
+				if (dist < minDist) {
+					minDist = dist;
+				}
+			}
+			if (minDist > bestDist) {
+				bestDist = minDist;
+				bestFace = faceIndex;
+			}
+		}
+		seeds.push(bestFace);
+	}
+	return seeds;
+}
+
+type ProvinceHeapEntry = {
+	score: number;
+	dist: number;
+	provinceId: number;
+	faceId: number;
+};
+
+class ProvinceMinHeap {
+	private items: ProvinceHeapEntry[] = [];
+
+	push(entry: ProvinceHeapEntry): void {
+		this.items.push(entry);
+		this.bubbleUp(this.items.length - 1);
+	}
+
+	pop(): ProvinceHeapEntry | undefined {
+		if (this.items.length === 0) {
+			return undefined;
+		}
+		const top = this.items[0];
+		const last = this.items.pop();
+		if (this.items.length > 0 && last) {
+			this.items[0] = last;
+			this.bubbleDown(0);
+		}
+		return top;
+	}
+
+	get size(): number {
+		return this.items.length;
+	}
+
+	private bubbleUp(index: number): void {
+		let idx = index;
+		while (idx > 0) {
+			const parent = Math.floor((idx - 1) / 2);
+			if (this.items[parent].score <= this.items[idx].score) {
+				break;
+			}
+			[this.items[parent], this.items[idx]] = [this.items[idx], this.items[parent]];
+			idx = parent;
+		}
+	}
+
+	private bubbleDown(index: number): void {
+		let idx = index;
+		while (true) {
+			const left = idx * 2 + 1;
+			const right = left + 1;
+			let smallest = idx;
+			if (left < this.items.length && this.items[left].score < this.items[smallest].score) {
+				smallest = left;
+			}
+			if (right < this.items.length && this.items[right].score < this.items[smallest].score) {
+				smallest = right;
+			}
+			if (smallest === idx) {
+				break;
+			}
+			[this.items[smallest], this.items[idx]] = [this.items[idx], this.items[smallest]];
+			idx = smallest;
+		}
+	}
+}
+
+function growProvinceRegions(
+	mesh: MeshGraph,
+	isLand: boolean[],
+	landFaces: number[],
+	seedFaces: number[],
+	provinceCount: number,
+	spacing: number
+): ProvinceAssignment {
+	const faceCount = mesh.faces.length;
+	const provinceByFace = new Array<number>(faceCount).fill(-1);
+	const seedPoints = seedFaces.map((faceIndex) => mesh.faces[faceIndex].point);
+	const actualProvinceCount = Math.min(provinceCount, seedFaces.length);
+	const provinceSizes = new Array<number>(actualProvinceCount).fill(0);
+	const targetSize = Math.max(1, Math.floor(landFaces.length / Math.max(1, actualProvinceCount)));
+	const balanceWeight = Math.max(8, spacing * 1.1);
+
+	const heap = new ProvinceMinHeap();
+	for (let i = 0; i < actualProvinceCount; i += 1) {
+		const seedFace = seedFaces[i];
+		provinceByFace[seedFace] = i;
+		provinceSizes[i] = 1;
+		const face = mesh.faces[seedFace];
+		for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+			const neighbor = face.adjacentFaces[j];
+			if (!isLand[neighbor] || provinceByFace[neighbor] >= 0) {
+				continue;
+			}
+			const dist = vec2Len(vec2Sub(mesh.faces[neighbor].point, seedPoints[i]));
+			const score = dist + balanceWeight * (provinceSizes[i] / targetSize);
+			heap.push({ score, dist, provinceId: i, faceId: neighbor });
+		}
+	}
+
+	while (heap.size > 0) {
+		const entry = heap.pop();
+		if (!entry) {
+			break;
+		}
+		if (provinceByFace[entry.faceId] >= 0 || !isLand[entry.faceId]) {
+			continue;
+		}
+		provinceByFace[entry.faceId] = entry.provinceId;
+		provinceSizes[entry.provinceId] += 1;
+		const face = mesh.faces[entry.faceId];
+		for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+			const neighbor = face.adjacentFaces[j];
+			if (!isLand[neighbor] || provinceByFace[neighbor] >= 0) {
+				continue;
+			}
+			const dist = vec2Len(vec2Sub(mesh.faces[neighbor].point, seedPoints[entry.provinceId]));
+			const score = dist + balanceWeight * (provinceSizes[entry.provinceId] / targetSize);
+			heap.push({ score, dist, provinceId: entry.provinceId, faceId: neighbor });
+		}
+	}
+
+	return { provinceByFace, seedFaces, landFaces, isLand };
+}
+
+function renderProvinceBorders(
+	mesh: MeshGraph,
+	cells: Vec2[][],
+	provinceAssignment: ProvinceAssignment,
+	config: TerrainConfig,
+	baseLayer: any
+): void {
+	const provinceLines = new window.PIXI.Graphics();
+	const landMask = new window.PIXI.Graphics();
+	const lineWidth = 6.5;
+	const lineAlpha = 0.75;
+	const provinceByFace = provinceAssignment.provinceByFace;
+	const isLand = provinceAssignment.isLand;
+	const offsetDistance = lineWidth * 0.35;
+	const sharedStrokeWidth = lineWidth * 0.7;
+	const oceanWater = getOceanWaterFaces(mesh, cells, isLand, config);
+
+	for (let i = 0; i < mesh.faces.length; i += 1) {
+		if (!isLand[i]) {
+			continue;
+		}
+		const cell = cells[i];
+		if (!cell || cell.length < 3) {
+			continue;
+		}
+		landMask.poly(flattenPolygon(cell), true);
+	}
+	landMask.fill({ color: 0xffffff, alpha: 0.001 });
+
+	for (let e = 0; e < mesh.edges.length; e += 1) {
+		const edge = mesh.edges[e];
+		const [faceA, faceB] = edge.faces;
+		if (faceA < 0 || faceB < 0) {
+			continue;
+		}
+		if (faceA >= faceB) {
+			continue;
+		}
+		const provinceA = provinceByFace[faceA];
+		const provinceB = provinceByFace[faceB];
+		const isLandA = Boolean(isLand[faceA]);
+		const isLandB = Boolean(isLand[faceB]);
+
+		const isProvinceBorder =
+			provinceA >= 0 && provinceB >= 0 && provinceA !== provinceB && isLandA && isLandB;
+		const isShoreBorder =
+			(isLandA && !isLandB && oceanWater[faceB]) || (!isLandA && isLandB && oceanWater[faceA]);
+		if (!isProvinceBorder && !isShoreBorder) {
+			continue;
+		}
+
+		const borderFace = isShoreBorder ? (isLandA ? faceA : faceB) : faceA;
+		const cell = cells[borderFace];
+		if (!cell || cell.length < 2) {
+			continue;
+		}
+		const e0 = mesh.vertices[edge.vertices[0]].point;
+		const e1 = mesh.vertices[edge.vertices[1]].point;
+		const path = extractEdgePath(cell, e0, e1);
+		if (path.length < 2) {
+			continue;
+		}
+		if (isProvinceBorder) {
+			const midpoint = vec2Midpoint(e0, e1);
+			let dirToA = vec2Normalize(vec2Sub(mesh.faces[faceA].point, midpoint));
+			if (vec2LenSq(dirToA) < 1e-6) {
+				const edgeDir = vec2Normalize(vec2Sub(e1, e0));
+				dirToA = { x: -edgeDir.y, y: edgeDir.x };
+			}
+			const dirToB = vec2Mult(dirToA, -1);
+
+			const pathA = offsetPath(path, dirToA, offsetDistance);
+			const pathB = offsetPath(path, dirToB, offsetDistance);
+			const colorA = getProvinceColor(provinceA);
+			const colorB = getProvinceColor(provinceB);
+
+			drawPath(provinceLines, pathA);
+			provinceLines.stroke({ width: sharedStrokeWidth, color: colorA, alpha: lineAlpha });
+			drawPath(provinceLines, pathB);
+			provinceLines.stroke({ width: sharedStrokeWidth, color: colorB, alpha: lineAlpha });
+			continue;
+		}
+
+		const landProvince = isLandA ? provinceA : provinceB;
+		const borderColor = getProvinceColor(landProvince);
+		drawPath(provinceLines, path);
+		provinceLines.stroke({ width: lineWidth, color: borderColor, alpha: lineAlpha });
+	}
+
+	baseLayer.addChild(provinceLines);
+	provinceLines.mask = landMask;
+	baseLayer.addChild(landMask);
+}
+
+function getProvinceColor(id: number): number {
+	const hue = (id * 47 + 13) % 360;
+	return hslToHex(hue, 0.55, 0.45);
+}
+
+function hslToHex(h: number, s: number, l: number): number {
+	const c = (1 - Math.abs(2 * l - 1)) * s;
+	const hp = h / 60;
+	const x = c * (1 - Math.abs((hp % 2) - 1));
+	let r = 0;
+	let g = 0;
+	let b = 0;
+	if (hp >= 0 && hp < 1) {
+		r = c;
+		g = x;
+	} else if (hp < 2) {
+		r = x;
+		g = c;
+	} else if (hp < 3) {
+		g = c;
+		b = x;
+	} else if (hp < 4) {
+		g = x;
+		b = c;
+	} else if (hp < 5) {
+		r = x;
+		b = c;
+	} else {
+		r = c;
+		b = x;
+	}
+	const m = l - c / 2;
+	const toByte = (v: number): number => Math.round((v + m) * 255);
+	return (toByte(r) << 16) | (toByte(g) << 8) | toByte(b);
+}
+
+function getOceanWaterFaces(
+	mesh: MeshGraph,
+	cells: Vec2[][],
+	isLand: boolean[],
+	config: TerrainConfig
+): boolean[] {
+	const oceanWater = new Array<boolean>(mesh.faces.length).fill(false);
+	const queue: number[] = [];
+	const epsilon = 1;
+
+	for (let i = 0; i < mesh.faces.length; i += 1) {
+		if (isLand[i]) {
+			continue;
+		}
+		const cell = cells[i];
+		if (!cell || cell.length === 0) {
+			continue;
+		}
+		const touchesBorder = cell.some(
+			(point) =>
+				point.x <= epsilon ||
+				point.x >= config.width - epsilon ||
+				point.y <= epsilon ||
+				point.y >= config.height - epsilon
+		);
+		if (touchesBorder) {
+			oceanWater[i] = true;
+			queue.push(i);
+		}
+	}
+
+	for (let q = 0; q < queue.length; q += 1) {
+		const faceIndex = queue[q];
+		const face = mesh.faces[faceIndex];
+		for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+			const neighbor = face.adjacentFaces[j];
+			if (isLand[neighbor] || oceanWater[neighbor]) {
+				continue;
+			}
+			oceanWater[neighbor] = true;
+			queue.push(neighbor);
+		}
+	}
+
+	return oceanWater;
+}
+
+function drawPath(graphics: any, path: Vec2[]): void {
+	if (path.length < 2) {
+		return;
+	}
+	graphics.moveTo(path[0].x, path[0].y);
+	for (let i = 1; i < path.length; i += 1) {
+		graphics.lineTo(path[i].x, path[i].y);
+	}
+}
+
+function offsetPath(path: Vec2[], direction: Vec2, distance: number): Vec2[] {
+	const offset = vec2Mult(direction, distance);
+	return path.map((point) => vec2Add(point, offset));
+}
+
+function extractEdgePath(cell: Vec2[], a: Vec2, b: Vec2): Vec2[] {
+	if (cell.length < 2) {
+		return [];
+	}
+	const ia = findVertexIndex(cell, a);
+	const ib = findVertexIndex(cell, b);
+	if (ia < 0 || ib < 0 || ia === ib) {
+		return [a, b];
+	}
+	const forward: Vec2[] = [cell[ia]];
+	let idx = ia;
+	while (idx !== ib) {
+		idx = (idx + 1) % cell.length;
+		if (idx === ia) {
+			break;
+		}
+		forward.push(cell[idx]);
+	}
+	const backward: Vec2[] = [cell[ia]];
+	idx = ia;
+	while (idx !== ib) {
+		idx = (idx - 1 + cell.length) % cell.length;
+		if (idx === ia) {
+			break;
+		}
+		backward.push(cell[idx]);
+	}
+	const chosen = forward.length <= backward.length ? forward : backward;
+	if (chosen[chosen.length - 1] !== cell[ib]) {
+		chosen.push(cell[ib]);
+	}
+	return chosen;
 }
 
 function pushUnique(values: number[], value: number): void {

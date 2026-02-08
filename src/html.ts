@@ -72,6 +72,29 @@ main {
   background: rgba(10, 14, 22, 0.7);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
+.control-group > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  opacity: 0.8;
+}
+.control-group > summary::-webkit-details-marker {
+  display: none;
+}
+.control-group > summary::after {
+  content: '+';
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+.control-group[open] > summary::after {
+  content: '–';
+}
 .control-group-title {
   font-size: 0.62rem;
   letter-spacing: 0.2em;
@@ -157,8 +180,8 @@ export const html = `<!doctype html>
       <div class="fps" id="fps">FPS: --</div>
       <div class="layout">
         <div class="controls">
-          <div class="control-group">
-            <div class="control-group-title">Sampling</div>
+          <details class="control-group">
+            <summary>Sampling</summary>
             <div class="control">
               <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">32</span></label>
               <input id="terrain-spacing" type="range" min="16" max="128" step="1" value="32" />
@@ -167,9 +190,9 @@ export const html = `<!doctype html>
               <label for="terrain-seed">Seed</label>
               <input id="terrain-seed" type="number" min="0" max="4294967295" step="1" value="1337" />
             </div>
-          </div>
-          <div class="control-group">
-            <div class="control-group-title">Water</div>
+          </details>
+          <details class="control-group">
+            <summary>Water</summary>
             <div class="control">
               <label for="terrain-water-level">Water Level <span id="terrain-water-level-value">-10</span></label>
               <input id="terrain-water-level" type="range" min="-40" max="40" step="1" value="-10" />
@@ -204,18 +227,27 @@ export const html = `<!doctype html>
               </label>
               <input id="terrain-water-warp-strength" type="range" min="0" max="0.8" step="0.01" value="0.7" />
             </div>
-          </div>
-          <div class="control-group">
-            <div class="control-group-title">Intermediate</div>
+          </details>
+          <details class="control-group">
+            <summary>Provinces</summary>
+            <div class="control">
+              <label for="terrain-province-count">
+                Province Count <span id="terrain-province-count-value">8</span>
+              </label>
+              <input id="terrain-province-count" type="range" min="1" max="32" step="1" value="8" />
+            </div>
+          </details>
+          <details class="control-group">
+            <summary>Intermediate</summary>
             <div class="control">
               <label for="terrain-intermediate-seed">Intermediate Seed</label>
               <input id="terrain-intermediate-seed" type="number" min="0" max="4294967295" step="1" value="1337" />
             </div>
             <div class="control">
               <label for="terrain-intermediate-iterations">
-                Intermediate Iterations <span id="terrain-intermediate-iterations-value">8</span>
+                Intermediate Iterations <span id="terrain-intermediate-iterations-value">6</span>
               </label>
-              <input id="terrain-intermediate-iterations" type="range" min="0" max="12" step="1" value="8" />
+              <input id="terrain-intermediate-iterations" type="range" min="0" max="12" step="1" value="6" />
             </div>
             <div class="control">
               <label for="terrain-intermediate-distance">
@@ -225,19 +257,19 @@ export const html = `<!doctype html>
             </div>
             <div class="control">
               <label for="terrain-intermediate-rel-magnitude">
-                Relative Magnitude <span id="terrain-intermediate-rel-magnitude-value">0.0</span>
+                Relative Magnitude <span id="terrain-intermediate-rel-magnitude-value">0.1</span>
               </label>
-              <input id="terrain-intermediate-rel-magnitude" type="range" min="0" max="2" step="0.1" value="0" />
+              <input id="terrain-intermediate-rel-magnitude" type="range" min="0" max="2" step="0.1" value="0.1" />
             </div>
             <div class="control">
               <label for="terrain-intermediate-abs-magnitude">
-                Absolute Magnitude <span id="terrain-intermediate-abs-magnitude-value">5</span>
+                Absolute Magnitude <span id="terrain-intermediate-abs-magnitude-value">0.1</span>
               </label>
-              <input id="terrain-intermediate-abs-magnitude" type="range" min="0" max="10" step="1" value="5" />
+              <input id="terrain-intermediate-abs-magnitude" type="range" min="0" max="10" step="0.1" value="0.1" />
             </div>
-          </div>
-          <div class="control-group">
-            <div class="control-group-title">Overlay</div>
+          </details>
+          <details class="control-group" open>
+            <summary>Overlay</summary>
             <div class="control toggle">
               <label for="terrain-graph-polygons">
                 <input id="terrain-graph-polygons" type="checkbox" />
@@ -268,7 +300,7 @@ export const html = `<!doctype html>
                 Inserted Points
               </label>
             </div>
-          </div>
+          </details>
         </div>
         <div id="field"></div>
       </div>

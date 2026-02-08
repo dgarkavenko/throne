@@ -5,6 +5,7 @@ type TerrainSettings = {
   showCornerNodes: boolean;
   showCenterNodes: boolean;
   showInsertedPoints: boolean;
+  provinceCount: number;
   seed: number;
   intermediateSeed: number;
   intermediateMaxIterations: number;
@@ -62,6 +63,7 @@ export function createPageLayout(): PageLayout {
   const terrainGraphCornersInput = document.getElementById('terrain-graph-corners') as HTMLInputElement | null;
   const terrainGraphCentersInput = document.getElementById('terrain-graph-centers') as HTMLInputElement | null;
   const terrainGraphInsertedInput = document.getElementById('terrain-graph-inserted') as HTMLInputElement | null;
+  const terrainProvinceCountInput = document.getElementById('terrain-province-count') as HTMLInputElement | null;
   const terrainSpacingValue = document.getElementById('terrain-spacing-value');
   const terrainIntermediateIterationsValue = document.getElementById('terrain-intermediate-iterations-value');
   const terrainIntermediateDistanceValue = document.getElementById('terrain-intermediate-distance-value');
@@ -74,6 +76,7 @@ export function createPageLayout(): PageLayout {
   const terrainWaterNoiseOctavesValue = document.getElementById('terrain-water-noise-octaves-value');
   const terrainWaterWarpScaleValue = document.getElementById('terrain-water-warp-scale-value');
   const terrainWaterWarpStrengthValue = document.getElementById('terrain-water-warp-strength-value');
+  const terrainProvinceCountValue = document.getElementById('terrain-province-count-value');
 
   const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
   const parseIntWithFallback = (value: string | undefined, fallback: number): number => {
@@ -112,6 +115,7 @@ export function createPageLayout(): PageLayout {
     const waterNoiseOctaves = clamp(parseIntWithFallback(terrainWaterNoiseOctavesInput?.value, 1), 1, 6);
     const waterWarpScale = clamp(parseIntWithFallback(terrainWaterWarpScaleInput?.value, 2), 2, 40);
     const waterWarpStrength = clamp(parseFloatWithFallback(terrainWaterWarpStrengthInput?.value, 0.7), 0, 0.8);
+    const provinceCount = clamp(parseIntWithFallback(terrainProvinceCountInput?.value, 8), 1, 32);
     const showPolygonGraph = Boolean(terrainGraphPolygonsInput?.checked);
     const showDualGraph = Boolean(terrainGraphDualInput?.checked);
     const showCornerNodes = Boolean(terrainGraphCornersInput?.checked);
@@ -124,6 +128,7 @@ export function createPageLayout(): PageLayout {
       showCornerNodes,
       showCenterNodes,
       showInsertedPoints,
+      provinceCount,
       seed,
       intermediateSeed,
       intermediateMaxIterations,
@@ -177,6 +182,9 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainWaterWarpStrengthValue) {
       terrainWaterWarpStrengthValue.textContent = settings.waterWarpStrength.toFixed(2);
+    }
+    if (terrainProvinceCountValue) {
+      terrainProvinceCountValue.textContent = settings.provinceCount.toString();
     }
   };
 
@@ -232,10 +240,11 @@ export function createPageLayout(): PageLayout {
       terrainWaterRoughnessInput?.addEventListener('input', notify);
       terrainWaterNoiseScaleInput?.addEventListener('input', notify);
       terrainWaterNoiseStrengthInput?.addEventListener('input', notify);
-      terrainWaterNoiseOctavesInput?.addEventListener('input', notify);
-      terrainWaterWarpScaleInput?.addEventListener('input', notify);
-      terrainWaterWarpStrengthInput?.addEventListener('input', notify);
-      terrainGraphPolygonsInput?.addEventListener('change', notify);
+    terrainWaterNoiseOctavesInput?.addEventListener('input', notify);
+    terrainWaterWarpScaleInput?.addEventListener('input', notify);
+    terrainWaterWarpStrengthInput?.addEventListener('input', notify);
+    terrainProvinceCountInput?.addEventListener('input', notify);
+    terrainGraphPolygonsInput?.addEventListener('change', notify);
       terrainGraphDualInput?.addEventListener('change', notify);
       terrainGraphCornersInput?.addEventListener('change', notify);
       terrainGraphCentersInput?.addEventListener('change', notify);
