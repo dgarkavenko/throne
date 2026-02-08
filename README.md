@@ -10,7 +10,7 @@ Minimal real-time chat + terrain playground running on Cloudflare Workers with D
 - Physics: Matter.js (CDN)
 - Build tools: TypeScript compiler + Wrangler
 
-**How It’s Built**
+**How It's Built**
 - `src/index.ts` routes:
   - `/` serves the HTML string from `src/html.ts`.
   - `/client.js` and `/client/*` serve static assets from `public/`.
@@ -23,7 +23,14 @@ Minimal real-time chat + terrain playground running on Cloudflare Workers with D
   - Connects to the room WebSocket.
   - Creates UI bindings and updates status/fps/session.
   - Initializes the Pixi/Matter game engine and terrain.
-- `src/client/engine/terrain.ts` contains the Voronoi terrain generation and rendering.
+- `src/client/engine/game-engine.ts` orchestrates terrain generation:
+  - Terrain basegen (elevation, rivers, mesh creation).
+  - Political basegen (province generation) via shared module.
+  - Refinement (edge noise, river shaping) and render pipeline.
+  - Graph overlay rendering (polygon/dual/corner/center/inserted).
+- `src/client/engine/terrain.ts` owns terrain basegen, refinement, and rendering helpers.
+- `src/client/engine/political.ts` contains province generation (political basegen).
+- `src/client/engine/throne-math.ts` contains shared math utilities (vec ops, lerp, smoothstep, clamp).
 - The client build outputs ESM to `public/`:
   - `public/client.js` imports `public/client/*` modules.
   - The HTML loads `/client.js` as a module.
@@ -46,6 +53,7 @@ Minimal real-time chat + terrain playground running on Cloudflare Workers with D
   - Water level
   - Water roughness
   - Optional mesh visualization
+- Political province generation (controlled by province count and border options).
 - Session timer and FPS display.
 - Room selection via query param:
   - `/?room=lobby` (default is `lobby`).

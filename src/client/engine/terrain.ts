@@ -1,3 +1,18 @@
+import { basegenPolitical } from './political';
+import {
+	clamp,
+	lerp,
+	smoothstep,
+	vec2Add,
+	vec2Len,
+	vec2LenSq,
+	vec2Midpoint,
+	vec2Mult,
+	vec2Normalize,
+	vec2Sub,
+	type Vec2,
+} from './throne-math';
+
 export type TerrainControls = {
 	spacing: number;
 	showPolygonGraph: boolean;
@@ -49,11 +64,6 @@ export type TerrainControls = {
 // oceanPeakClamp: caps max elevation by ocean distance (0..1; 1 => cap at 2x sea distance).
 // ridgeWidth: widens ridge connections into neighboring tiles (0..1).
 // ridgeOceanClamp: caps ridge boost by ocean distance (0..1; 1 => ridge boost <= 2x sea distance).
-
-type Vec2 = {
-	x: number;
-	y: number;
-};
 
 /**
  * Geometry layers:
@@ -129,67 +139,21 @@ type TerrainConfig = {
 
 const MAX_LAND_ELEVATION = 32;
 
-const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
-
-const lerpVec2 = (a: Vec2, b: Vec2, t: number): Vec2 => ({
-	x: lerp(a.x, b.x, t),
-	y: lerp(a.y, b.y, t),
-});
-
-const vec2Sub = (a: Vec2, b: Vec2): Vec2 => ({
-	x: a.x - b.x,
-	y: a.y - b.y,
-});
-
-const vec2Add = (a: Vec2, b: Vec2): Vec2 => ({
-	x: a.x + b.x,
-	y: a.y + b.y,
-});
-
-const vec2Mult = (a: Vec2, f: number): Vec2 => ({
-	x: a.x * f,
-	y: a.y * f,
-});
-
-const vec2LenSq = (v: Vec2): number => v.x * v.x + v.y * v.y;
-
-const vec2Len = (v: Vec2): number => Math.hypot(v.x, v.y);
-
-const vec2Normalize = (v: Vec2): Vec2 => {
-	const length = vec2Len(v);
-	if (length <= 0) {
-		return { x: 0, y: 0 };
-	}
-	return { x: v.x / length, y: v.y / length };
+export type TerrainBasegenResult = {
+	mesh: MeshGraph;
+	baseCells: Vec2[][];
 };
 
-const vec2Dot = (a: Vec2, b: Vec2): number => a.x * b.x + a.y * b.y;
+export type TerrainRefineResult = {
+	refinedGeometry: RefinedGeometry;
+	rivers: RiverPath[];
+};
 
-export function drawVoronoiTerrain(
+export function terrainBasegen(
 	config: TerrainConfig,
 	controls: TerrainControls,
-	terrainLayer: any
-): void {
-	if (!terrainLayer || !window.PIXI) {
-		return;
-	}
-	const baseLayer = ensureBaseLayer(terrainLayer);
-	const riverLayer = ensureRiverLayer(terrainLayer);
-	const provinceLayer = ensureProvinceLayer(terrainLayer);
-	const meshOverlay = ensureMeshOverlay(terrainLayer);
-	baseLayer.removeChildren();
-	riverLayer.removeChildren();
-	provinceLayer.removeChildren();
-
-	const waterTint = new window.PIXI.Graphics();
-	waterTint.rect(0, 0, config.width, config.height);
-	waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
-	baseLayer.addChild(waterTint);
-
-	const seed = controls.seed >>> 0;
-	const random = createRng(seed);
-	const intermediateSeed = controls.intermediateSeed >>> 0;
-	const intermediateRandom = createRng(intermediateSeed);
+	random: () => number
+): TerrainBasegenResult {
 	const padding = 0;
 	const sites = generatePoissonSites(config, controls.spacing, padding, random);
 	const baseCells: Vec2[][] = new Array(sites.length);
@@ -222,9 +186,49 @@ export function drawVoronoiTerrain(
 		controls.ridgeOceanClamp,
 		controls.ridgeWidth
 	);
+
+	return { mesh, baseCells };
+}
+
+export function terrainRefine(
+	mesh: MeshGraph,
+	provinceGraph: ProvinceGraph,
+	controls: TerrainControls,
+	intermediateRandom: () => number,
+	riverRandom: () => number
+): TerrainRefineResult {
+	const refinedGeometry = buildRefinedGeometry(mesh, provinceGraph, controls, intermediateRandom);
+	const rivers = buildRivers(mesh, refinedGeometry, controls, riverRandom);
+	return { refinedGeometry, rivers };
+}
+
+export function renderTerrain(
+	config: TerrainConfig,
+	controls: TerrainControls,
+	terrainLayer: any,
+	base: TerrainBasegenResult,
+	provinceGraph: ProvinceGraph,
+	refined: TerrainRefineResult
+): void {
+	if (!terrainLayer || !window.PIXI) {
+		return;
+	}
+	const baseLayer = ensureBaseLayer(terrainLayer);
+	const riverLayer = ensureRiverLayer(terrainLayer);
+	const provinceLayer = ensureProvinceLayer(terrainLayer);
+	baseLayer.removeChildren();
+	riverLayer.removeChildren();
+	provinceLayer.removeChildren();
+
+	const waterTint = new window.PIXI.Graphics();
+	waterTint.rect(0, 0, config.width, config.height);
+	waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
+	baseLayer.addChild(waterTint);
+
+	const seed = controls.seed >>> 0;
+	const { mesh, baseCells } = base;
+	const { refinedGeometry, rivers } = refined;
 	const maxLandElevation = MAX_LAND_ELEVATION;
-	const provinceResult = buildProvinces(mesh, controls, random);
-	const refinedGeometry = buildRefinedGeometry(mesh, provinceResult, controls, intermediateRandom);
 
 	mesh.faces.forEach((face) => {
 		const refinedCell = refinedGeometry.refinedCells[face.index];
@@ -286,16 +290,12 @@ export function drawVoronoiTerrain(
 		}
 	});
 
-	const riverSeed = (controls.seed ^ 0x9e3779b9) >>> 0;
-	const riverRandom = createRng(riverSeed);
-	const rivers = buildRivers(mesh, refinedGeometry, controls, riverRandom);
 	renderRivers(riverLayer, rivers, controls);
-
 	renderProvinceBorders(
 		mesh,
 		refinedGeometry,
 		baseCells,
-		provinceResult,
+		provinceGraph,
 		config,
 		controls,
 		provinceLayer
@@ -304,19 +304,30 @@ export function drawVoronoiTerrain(
 		mesh,
 		refinedGeometry,
 		baseCells,
-		provinceGraph: provinceResult,
+		provinceGraph,
 		config,
 	} satisfies ProvinceRenderCache;
-	renderMeshOverlay(mesh, refinedGeometry.insertedPoints, meshOverlay);
-	setGraphOverlayVisibility(terrainLayer, controls);
 }
 
-function vec2Midpoint(p1: Vec2, p2: Vec2): Vec2 {
-	return {
-		x: (p1.x + p2.x) * 0.5,
-		y: (p1.y + p2.y) * 0.5,
-	};
-};
+export function drawVoronoiTerrain(
+	config: TerrainConfig,
+	controls: TerrainControls,
+	terrainLayer: any
+): void {
+	if (!terrainLayer || !window.PIXI) {
+		return;
+	}
+	const seed = controls.seed >>> 0;
+	const random = createRng(seed);
+	const intermediateSeed = controls.intermediateSeed >>> 0;
+	const intermediateRandom = createRng(intermediateSeed);
+	const riverSeed = (controls.seed ^ 0x9e3779b9) >>> 0;
+	const riverRandom = createRng(riverSeed);
+	const base = terrainBasegen(config, controls, random);
+	const provinceResult = basegenPolitical(base.mesh, controls, random);
+	const refined = terrainRefine(base.mesh, provinceResult, controls, intermediateRandom, riverRandom);
+	renderTerrain(config, controls, terrainLayer, base, provinceResult, refined);
+}
 
 function generateIntermediate(
 	c0: Vec2,
@@ -2176,15 +2187,6 @@ function findShortestLandPath(
 	return path;
 }
 
-type MeshOverlay = {
-	container: any;
-	polygonGraph: any;
-	dualGraph: any;
-	cornerNodes: any;
-	centerNodes: any;
-	insertedNodes: any;
-};
-
 type ProvinceRenderCache = {
 	mesh: MeshGraph;
 	refinedGeometry: RefinedGeometry;
@@ -2196,7 +2198,6 @@ type ProvinceRenderCache = {
 const BASE_LAYER_KEY = '__terrainBaseLayer';
 const RIVER_LAYER_KEY = '__terrainRiverLayer';
 const PROVINCE_LAYER_KEY = '__terrainProvinceLayer';
-const MESH_OVERLAY_KEY = '__terrainGraphOverlay';
 const PROVINCE_CACHE_KEY = '__terrainProvinceCache';
 
 function ensureBaseLayer(terrainLayer: any): any {
@@ -2242,51 +2243,6 @@ function ensureProvinceLayer(terrainLayer: any): any {
 	return provinceLayer;
 }
 
-function ensureMeshOverlay(terrainLayer: any): MeshOverlay {
-	const existing = terrainLayer[MESH_OVERLAY_KEY];
-	if (existing) {
-		const overlay = existing as MeshOverlay;
-		terrainLayer.setChildIndex(overlay.container, terrainLayer.children.length - 1);
-		return overlay;
-	}
-	const container = new window.PIXI.Container();
-	const polygonGraph = new window.PIXI.Graphics();
-	const dualGraph = new window.PIXI.Graphics();
-	const cornerNodes = new window.PIXI.Graphics();
-	const centerNodes = new window.PIXI.Graphics();
-	const insertedNodes = new window.PIXI.Graphics();
-	container.addChild(polygonGraph);
-	container.addChild(dualGraph);
-	container.addChild(cornerNodes);
-	container.addChild(centerNodes);
-	container.addChild(insertedNodes);
-	terrainLayer.addChild(container);
-	const overlay = { container, polygonGraph, dualGraph, cornerNodes, centerNodes, insertedNodes };
-	terrainLayer[MESH_OVERLAY_KEY] = overlay;
-	return overlay;
-}
-
-export function setGraphOverlayVisibility(terrainLayer: any, controls: TerrainControls): void {
-	if (!terrainLayer) {
-		return;
-	}
-	const overlay = terrainLayer[MESH_OVERLAY_KEY] as MeshOverlay | undefined;
-	if (!overlay) {
-		return;
-	}
-	overlay.polygonGraph.visible = controls.showPolygonGraph;
-	overlay.dualGraph.visible = controls.showDualGraph;
-	overlay.cornerNodes.visible = controls.showCornerNodes;
-	overlay.centerNodes.visible = controls.showCenterNodes;
-	overlay.insertedNodes.visible = controls.showInsertedPoints;
-	overlay.container.visible =
-		controls.showPolygonGraph ||
-		controls.showDualGraph ||
-		controls.showCornerNodes ||
-		controls.showCenterNodes ||
-		controls.showInsertedPoints;
-}
-
 export function updateProvinceBorders(terrainLayer: any, controls: TerrainControls): void {
 	if (!terrainLayer) {
 		return;
@@ -2306,55 +2262,6 @@ export function updateProvinceBorders(terrainLayer: any, controls: TerrainContro
 		controls,
 		provinceLayer
 	);
-}
-
-function renderMeshOverlay(mesh: MeshGraph, insertedPoints: Vec2[], overlay: MeshOverlay): void {
-	overlay.polygonGraph.clear();
-	overlay.dualGraph.clear();
-	overlay.cornerNodes.clear();
-	overlay.centerNodes.clear();
-	overlay.insertedNodes.clear();
-
-	const polygonGraph = overlay.polygonGraph;
-	mesh.edges.forEach((edge) => {
-		const vertexA = mesh.vertices[edge.vertices[0]].point;
-		const vertexB = mesh.vertices[edge.vertices[1]].point;
-		polygonGraph.moveTo(vertexA.x, vertexA.y);
-		polygonGraph.lineTo(vertexB.x, vertexB.y);
-	});
-	polygonGraph.stroke({ width: 1.3, color: 0xff4d4f, alpha: 0.75 });
-
-	const dualGraph = overlay.dualGraph;
-	mesh.edges.forEach((edge) => {
-		const [faceA, faceB] = edge.faces;
-		if (faceA < 0 || faceB < 0) {
-			return;
-		}
-		const a = mesh.faces[faceA].point;
-		const b = mesh.faces[faceB].point;
-		dualGraph.moveTo(a.x, a.y);
-		dualGraph.lineTo(b.x, b.y);
-	});
-	dualGraph.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
-
-	const cornerNodes = overlay.cornerNodes;
-	mesh.vertices.forEach((vertex) => {
-		cornerNodes.circle(vertex.point.x, vertex.point.y, 1.8);
-	});
-	cornerNodes.fill({ color: 0xf3fff7, alpha: 0.9 });
-
-	const centerNodes = overlay.centerNodes;
-	mesh.faces.forEach((face) => {
-		centerNodes.circle(face.point.x, face.point.y, 2.3);
-	});
-	centerNodes.fill({ color: 0xff00c9, alpha: 0.95 });
-
-	const insertedNodes = overlay.insertedNodes;
-	for (let i = 0; i < insertedPoints.length; i += 1) {
-		const point = insertedPoints[i];
-		insertedNodes.circle(point.x, point.y, 2.2);
-	}
-	insertedNodes.fill({ color: 0xffe56b, alpha: 0.9 });
 }
 
 type ProvinceFace = {
@@ -2402,89 +2309,7 @@ type ProvinceSeedState = {
 };
 
 function buildProvinces(mesh: MeshGraph, controls: TerrainControls, random: () => number): ProvinceGraph {
-	const faceCount = mesh.faces.length;
-	const provinceByFace = new Array<number>(faceCount).fill(-1);
-	if (faceCount === 0) {
-		return {
-			faces: [],
-			outerEdges: [],
-			provinceByFace,
-			seedFaces: [],
-			landFaces: [],
-			isLand: [],
-		};
-	}
-
-	const landFaces: number[] = [];
-	const isLand = new Array<boolean>(faceCount).fill(false);
-	mesh.faces.forEach((face) => {
-		if (face.elevation >= 1) {
-			isLand[face.index] = true;
-			landFaces.push(face.index);
-		}
-	});
-
-	if (landFaces.length === 0) {
-		return {
-			faces: [],
-			outerEdges: [],
-			provinceByFace,
-			seedFaces: [],
-			landFaces,
-			isLand,
-		};
-	}
-
-	const provinceCount = clamp(Math.round(controls.provinceCount || 1), 1, landFaces.length);
-	const components = getLandComponents(mesh, isLand);
-	const componentAllocations = allocateProvinceSeeds(components, provinceCount);
-	const seedFaces: number[] = [];
-
-	for (let i = 0; i < components.length; i += 1) {
-		const component = components[i];
-		const seedCount = componentAllocations[i];
-		if (seedCount <= 0) {
-			continue;
-		}
-		const seeds = pickFarthestSeeds(component, mesh, seedCount, random);
-		seedFaces.push(...seeds);
-	}
-
-	const assignment = growProvinceRegions(mesh, isLand, landFaces, seedFaces, provinceCount, controls.spacing);
-	for (let i = 0; i < assignment.provinceByFace.length; i += 1) {
-		provinceByFace[i] = assignment.provinceByFace[i];
-	}
-
-	const hasUnassigned = landFaces.some((faceIndex) => provinceByFace[faceIndex] < 0);
-	if (hasUnassigned && seedFaces.length > 0) {
-		landFaces.forEach((faceIndex) => {
-			if (provinceByFace[faceIndex] >= 0) {
-				return;
-			}
-			let bestSeed = 0;
-			let bestDist = Number.POSITIVE_INFINITY;
-			const point = mesh.faces[faceIndex].point;
-			for (let i = 0; i < seedFaces.length; i += 1) {
-				const seedFace = seedFaces[i];
-				const seedPoint = mesh.faces[seedFace].point;
-				const dist = vec2Len(vec2Sub(point, seedPoint));
-				if (dist < bestDist) {
-					bestDist = dist;
-					bestSeed = i;
-				}
-			}
-			provinceByFace[faceIndex] = bestSeed;
-		});
-	}
-
-	const provinceGraph = buildProvinceGraph(mesh, provinceByFace, landFaces, isLand);
-	return {
-		...provinceGraph,
-		provinceByFace,
-		seedFaces,
-		landFaces,
-		isLand,
-	};
+	return basegenPolitical(mesh, controls, random);
 }
 
 function getLandComponents(mesh: MeshGraph, isLand: boolean[]): number[][] {
@@ -2515,40 +2340,137 @@ function getLandComponents(mesh: MeshGraph, isLand: boolean[]): number[][] {
 	return components;
 }
 
-function allocateProvinceSeeds(components: number[][], totalSeeds: number): number[] {
-	const allocations = new Array<number>(components.length).fill(0);
-	if (components.length === 0 || totalSeeds <= 0) {
+function getComponentStats(
+	mesh: MeshGraph,
+	components: number[][]
+): { sizes: number[]; centers: Vec2[] } {
+	const sizes = new Array<number>(components.length).fill(0);
+	const centers = new Array<Vec2>(components.length);
+	for (let i = 0; i < components.length; i += 1) {
+		const component = components[i];
+		const size = component.length;
+		sizes[i] = size;
+		let sumX = 0;
+		let sumY = 0;
+		for (let j = 0; j < size; j += 1) {
+			const point = mesh.faces[component[j]].point;
+			sumX += point.x;
+			sumY += point.y;
+		}
+		const denom = size > 0 ? size : 1;
+		centers[i] = { x: sumX / denom, y: sumY / denom };
+	}
+	return { sizes, centers };
+}
+
+function buildTinyComponentGroups(
+	tinyComponentIds: number[],
+	centers: Vec2[],
+	radius: number
+): number[][] {
+	const groups: number[][] = [];
+	if (tinyComponentIds.length === 0) {
+		return groups;
+	}
+	const visited = new Array<boolean>(centers.length).fill(false);
+	const radiusSq = radius * radius;
+	for (let i = 0; i < tinyComponentIds.length; i += 1) {
+		const startId = tinyComponentIds[i];
+		if (visited[startId]) {
+			continue;
+		}
+		const stack = [startId];
+		const group: number[] = [];
+		visited[startId] = true;
+		while (stack.length > 0) {
+			const current = stack.pop() as number;
+			group.push(current);
+			const currentCenter = centers[current];
+			for (let j = 0; j < tinyComponentIds.length; j += 1) {
+				const candidate = tinyComponentIds[j];
+				if (visited[candidate]) {
+					continue;
+				}
+				const delta = vec2Sub(currentCenter, centers[candidate]);
+				if (vec2LenSq(delta) <= radiusSq) {
+					visited[candidate] = true;
+					stack.push(candidate);
+				}
+			}
+		}
+		groups.push(group);
+	}
+	return groups;
+}
+
+function allocateSeedsBySizeWithCap(sizes: number[], totalSeeds: number): number[] {
+	const allocations = new Array<number>(sizes.length).fill(0);
+	if (sizes.length === 0 || totalSeeds <= 0) {
 		return allocations;
 	}
-	if (totalSeeds >= components.length) {
-		components.forEach((_, index) => {
-			allocations[index] = 1;
-		});
-		let remaining = totalSeeds - components.length;
-		if (remaining > 0) {
-			const totalLand = components.reduce((sum, component) => sum + component.length, 0);
-			const remainders = components.map((component, index) => {
-				const exact = (component.length / totalLand) * remaining;
-				const extra = Math.floor(exact);
-				allocations[index] += extra;
-				return { index, remainder: exact - extra };
-			});
-			remaining = totalSeeds - allocations.reduce((sum, value) => sum + value, 0);
-			remainders.sort((a, b) => b.remainder - a.remainder);
-			for (let i = 0; i < remaining; i += 1) {
-				allocations[remainders[i % remainders.length].index] += 1;
+	if (totalSeeds < sizes.length) {
+		const sorted = sizes
+			.map((size, index) => ({ index, size }))
+			.sort((a, b) => b.size - a.size);
+		for (let i = 0; i < totalSeeds; i += 1) {
+			if (sizes[sorted[i].index] > 0) {
+				allocations[sorted[i].index] = 1;
 			}
 		}
 		return allocations;
 	}
 
-	const sorted = components
-		.map((component, index) => ({ index, size: component.length }))
-		.sort((a, b) => b.size - a.size);
-	for (let i = 0; i < totalSeeds; i += 1) {
-		allocations[sorted[i].index] = 1;
+	for (let i = 0; i < sizes.length; i += 1) {
+		if (sizes[i] > 0) {
+			allocations[i] = 1;
+		}
+	}
+
+	let remaining = totalSeeds - allocations.reduce((sum, value) => sum + value, 0);
+	if (remaining > 0) {
+		const totalSize = sizes.reduce((sum, value) => sum + value, 0);
+		for (let i = 0; i < sizes.length; i += 1) {
+			const capacity = Math.max(0, sizes[i] - allocations[i]);
+			if (capacity <= 0) {
+				continue;
+			}
+			const exact = totalSize > 0 ? (sizes[i] / totalSize) * remaining : 0;
+			const extra = Math.min(capacity, Math.floor(exact));
+			if (extra > 0) {
+				allocations[i] += extra;
+			}
+		}
+		remaining = totalSeeds - allocations.reduce((sum, value) => sum + value, 0);
+		if (remaining > 0) {
+			const sorted = sizes
+				.map((size, index) => ({ index, size }))
+				.sort((a, b) => b.size - a.size);
+			for (let i = 0; i < sorted.length && remaining > 0; i += 1) {
+				const index = sorted[i].index;
+				while (allocations[index] < sizes[index] && remaining > 0) {
+					allocations[index] += 1;
+					remaining -= 1;
+				}
+			}
+		}
 	}
 	return allocations;
+}
+
+function findNearestSeedIndex(mesh: MeshGraph, faceIndex: number, seedFaces: number[]): number {
+	let bestSeed = 0;
+	let bestDist = Number.POSITIVE_INFINITY;
+	const point = mesh.faces[faceIndex].point;
+	for (let i = 0; i < seedFaces.length; i += 1) {
+		const seedFace = seedFaces[i];
+		const seedPoint = mesh.faces[seedFace].point;
+		const dist = vec2Len(vec2Sub(point, seedPoint));
+		if (dist < bestDist) {
+			bestDist = dist;
+			bestSeed = i;
+		}
+	}
+	return bestSeed;
 }
 
 function pickFarthestSeeds(
@@ -3126,9 +3048,6 @@ function pushUnique(values: number[], value: number): void {
 	}
 }
 
-function clamp(value: number, min: number, max: number): number {
-	return Math.max(min, Math.min(max, value));
-}
 
 function lerpColor(a: number, b: number, t: number): number {
 	const ar = (a >> 16) & 0xff;
@@ -3163,9 +3082,6 @@ function landElevationToColor(elevation: number, maxElevation: number): number {
 	return stops[stops.length - 1].color;
 }
 
-function smoothstep(t: number): number {
-	return t * t * (3 - 2 * t);
-}
 
 function hash2D(x: number, y: number, seed: number): number {
 	let n = x * 374761393 + y * 668265263 + seed * 2654435761;
@@ -3204,7 +3120,7 @@ function fbmValueNoise(x: number, y: number, seed: number, octaves: number): num
 	return norm > 0 ? sum / norm : 0;
 }
 
-function createRng(seed: number): () => number {
+export function createRng(seed: number): () => number {
 	let state = seed >>> 0;
 	return () => {
 		state = (Math.imul(state, 1664525) + 1013904223) >>> 0;

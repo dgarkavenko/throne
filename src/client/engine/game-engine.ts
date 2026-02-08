@@ -1,4 +1,14 @@
-import { drawVoronoiTerrain, setGraphOverlayVisibility, updateProvinceBorders, type TerrainControls } from './terrain';
+import {
+  createRng,
+  renderTerrain as renderTerrainLayer,
+  terrainBasegen,
+  terrainRefine,
+  updateProvinceBorders,
+  type TerrainBasegenResult,
+  type TerrainControls,
+  type TerrainRefineResult,
+} from './terrain';
+import { basegenPolitical, type ProvinceGraph } from './political';
 import type { PlayerState } from '../types';
 
 type GameEntity = {
@@ -14,6 +24,21 @@ type GameConfig = {
   uiOffset: { x: number; y: number };
 };
 
+type TerrainGenerationState = {
+  base: TerrainBasegenResult;
+  provinceGraph: ProvinceGraph;
+  refined: TerrainRefineResult;
+};
+
+type MeshOverlay = {
+  container: any;
+  polygonGraph: any;
+  dualGraph: any;
+  cornerNodes: any;
+  centerNodes: any;
+  insertedNodes: any;
+};
+
 export class GameEngine {
   private app: any = null;
   private engine: any = null;
@@ -25,6 +50,8 @@ export class GameEngine {
   private entities = new Set<GameEntity>();
   private typingPositions = new Map<string, { x: number; y: number }>();
   private readonly config: GameConfig;
+  private terrainState: TerrainGenerationState | null = null;
+  private meshOverlay: MeshOverlay | null = null;
   private terrainControls: TerrainControls = {
     spacing: 32,
     showPolygonGraph: false,
@@ -191,7 +218,7 @@ export class GameEngine {
     }
     if (this.layers.terrain) {
       updateProvinceBorders(this.layers.terrain, this.terrainControls);
-      setGraphOverlayVisibility(this.layers.terrain, this.terrainControls);
+      this.setGraphOverlayVisibility(this.terrainControls);
     }
   }
 
@@ -328,6 +355,10 @@ export class GameEngine {
     return this.typingPositions.get(id);
   }
 
+  getTerrainState(): TerrainGenerationState | null {
+    return this.terrainState;
+  }
+
   getHistorySpawnPosition(index: number, total: number): { x: number; y: number } {
     const clampedTotal = Math.max(1, total);
     const lowerBound = this.config.height - 140;
@@ -345,11 +376,21 @@ export class GameEngine {
     if (!this.layers.terrain) {
       return;
     }
-    drawVoronoiTerrain(
-      { width: this.config.width, height: this.config.height },
-      this.terrainControls,
-      this.layers.terrain
-    );
+    const config = { width: this.config.width, height: this.config.height };
+    const seed = this.terrainControls.seed >>> 0;
+    const random = createRng(seed);
+    const intermediateRandom = createRng(this.terrainControls.intermediateSeed >>> 0);
+    const riverSeed = (this.terrainControls.seed ^ 0x9e3779b9) >>> 0;
+    const riverRandom = createRng(riverSeed);
+    const base = terrainBasegen(config, this.terrainControls, random);
+    const provinceGraph = basegenPolitical(base.mesh, this.terrainControls, random);
+    const refined = terrainRefine(base.mesh, provinceGraph, this.terrainControls, intermediateRandom, riverRandom);
+
+    this.terrainState = { base, provinceGraph, refined };
+    renderTerrainLayer(config, this.terrainControls, this.layers.terrain, base, provinceGraph, refined);
+    const overlay = this.ensureMeshOverlay(this.layers.terrain);
+    this.renderMeshOverlay(base.mesh, refined.refinedGeometry.insertedPoints, overlay);
+    this.setGraphOverlayVisibility(this.terrainControls);
     this.hasTerrain = true;
   }
 
@@ -432,5 +473,92 @@ export class GameEngine {
         entity.update(deltaMs, this);
       }
     });
+  }
+
+  private ensureMeshOverlay(terrainLayer: any): MeshOverlay {
+    if (this.meshOverlay) {
+      terrainLayer.setChildIndex(this.meshOverlay.container, terrainLayer.children.length - 1);
+      return this.meshOverlay;
+    }
+    const container = new window.PIXI.Container();
+    const polygonGraph = new window.PIXI.Graphics();
+    const dualGraph = new window.PIXI.Graphics();
+    const cornerNodes = new window.PIXI.Graphics();
+    const centerNodes = new window.PIXI.Graphics();
+    const insertedNodes = new window.PIXI.Graphics();
+    container.addChild(polygonGraph);
+    container.addChild(dualGraph);
+    container.addChild(cornerNodes);
+    container.addChild(centerNodes);
+    container.addChild(insertedNodes);
+    terrainLayer.addChild(container);
+    this.meshOverlay = { container, polygonGraph, dualGraph, cornerNodes, centerNodes, insertedNodes };
+    return this.meshOverlay;
+  }
+
+  private setGraphOverlayVisibility(controls: TerrainControls): void {
+    if (!this.meshOverlay) {
+      return;
+    }
+    this.meshOverlay.polygonGraph.visible = controls.showPolygonGraph;
+    this.meshOverlay.dualGraph.visible = controls.showDualGraph;
+    this.meshOverlay.cornerNodes.visible = controls.showCornerNodes;
+    this.meshOverlay.centerNodes.visible = controls.showCenterNodes;
+    this.meshOverlay.insertedNodes.visible = controls.showInsertedPoints;
+    this.meshOverlay.container.visible =
+      controls.showPolygonGraph ||
+      controls.showDualGraph ||
+      controls.showCornerNodes ||
+      controls.showCenterNodes ||
+      controls.showInsertedPoints;
+  }
+
+  private renderMeshOverlay(mesh: any, insertedPoints: Array<{ x: number; y: number }>, overlay: MeshOverlay): void {
+    overlay.polygonGraph.clear();
+    overlay.dualGraph.clear();
+    overlay.cornerNodes.clear();
+    overlay.centerNodes.clear();
+    overlay.insertedNodes.clear();
+
+    const polygonGraph = overlay.polygonGraph;
+    mesh.edges.forEach((edge: any) => {
+      const vertexA = mesh.vertices[edge.vertices[0]].point;
+      const vertexB = mesh.vertices[edge.vertices[1]].point;
+      polygonGraph.moveTo(vertexA.x, vertexA.y);
+      polygonGraph.lineTo(vertexB.x, vertexB.y);
+    });
+    polygonGraph.stroke({ width: 1.3, color: 0xff4d4f, alpha: 0.75 });
+
+    const dualGraph = overlay.dualGraph;
+    mesh.edges.forEach((edge: any) => {
+      const [faceA, faceB] = edge.faces;
+      if (faceA < 0 || faceB < 0) {
+        return;
+      }
+      const a = mesh.faces[faceA].point;
+      const b = mesh.faces[faceB].point;
+      dualGraph.moveTo(a.x, a.y);
+      dualGraph.lineTo(b.x, b.y);
+    });
+    dualGraph.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
+
+    const cornerNodes = overlay.cornerNodes;
+    mesh.vertices.forEach((vertex: any) => {
+      cornerNodes.circle(vertex.point.x, vertex.point.y, 1.8);
+    });
+    cornerNodes.fill({ color: 0xf3fff7, alpha: 0.9 });
+
+    const centerNodes = overlay.centerNodes;
+    mesh.faces.forEach((face: any) => {
+      centerNodes.circle(face.point.x, face.point.y, 2.3);
+    });
+    centerNodes.fill({ color: 0xff00c9, alpha: 0.95 });
+
+    const insertedNodes = overlay.insertedNodes;
+    for (let i = 0; i < insertedPoints.length; i += 1) {
+      const point = insertedPoints[i];
+      insertedNodes.circle(point.x, point.y, 2.2);
+    }
+    insertedNodes.fill({ color: 0xffe56b, alpha: 0.9 });
   }
 }
