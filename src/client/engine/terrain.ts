@@ -173,9 +173,8 @@ export function drawVoronoiTerrain(
 	);
 	const landPalette = [0x2d5f3a, 0x3b7347, 0x4a8050, 0x5c8b61, 0x6d9570];
 	const mountainPalette = [0x6f6a62, 0x8c8479, 0xa39b8e, 0xb8b0a2];
-	const refinedGeometry = buildRefinedGeometry(mesh, controls, intermediateRandom);
-
 	const provinceResult = buildProvinces(mesh, controls, random);
+	const refinedGeometry = buildRefinedGeometry(mesh, provinceResult, controls, intermediateRandom);
 
 	mesh.faces.forEach((face) => {
 		const refinedCell = refinedGeometry.refinedCells[face.index];
@@ -305,21 +304,29 @@ function generateIntermediate(
 }
 function buildRefinedGeometry(
 	mesh: MeshGraph,
+	provinceGraph: ProvinceGraph,
 	controls: TerrainControls,
 	random: () => number
 ): RefinedGeometry {
-	const { edgePolylines, insertedPoints } = buildEdgePolylines(mesh, controls, random);
+	const { edgePolylines, insertedPoints } = buildEdgePolylines(mesh, provinceGraph, controls, random);
 	const refinedCells = buildRefinedCells(mesh, edgePolylines);
 	return { edgePolylines, refinedCells, insertedPoints };
 }
 
 function buildEdgePolylines(
 	mesh: MeshGraph,
+	provinceGraph: ProvinceGraph,
 	controls: TerrainControls,
 	random: () => number
 ): { edgePolylines: EdgePolyline[]; insertedPoints: Vec2[] } {
 	const edgePolylines: EdgePolyline[] = new Array(mesh.edges.length);
 	const insertedPoints: Vec2[] = [];
+	const baseIterations = Math.max(0, Math.round(controls.intermediateMaxIterations));
+	const baseRelMagnitude = controls.intermediateRelMagnitude;
+	const baseAbsMagnitude = controls.intermediateAbsMagnitude;
+	// Province borders get a subtler perturbation than internal edges.
+	const borderNoiseScale = 0.35;
+	const borderIterationScale = 0.6;
 
 	for (let i = 0; i < mesh.edges.length; i += 1) {
 		const edge = mesh.edges[i];
@@ -340,6 +347,19 @@ function buildEdgePolylines(
 			edgePolylines[edgeIndex] = [v0, v1];
 			continue;
 		}
+		const provinceA = provinceGraph.provinceByFace[faceA];
+		const provinceB = provinceGraph.provinceByFace[faceB];
+		const isProvinceBorder =
+			provinceGraph.isLand[faceA] &&
+			provinceGraph.isLand[faceB] &&
+			provinceA >= 0 &&
+			provinceB >= 0 &&
+			provinceA !== provinceB;
+		const noiseScale = isProvinceBorder ? borderNoiseScale : 1;
+		const iterationLimit = Math.max(
+			0,
+			Math.round(baseIterations * (isProvinceBorder ? borderIterationScale : 1))
+		);
 
 		const inter = generateIntermediate(
 			face0.point,
@@ -348,10 +368,10 @@ function buildEdgePolylines(
 			v1,
 			0,
 			random,
-			controls.intermediateMaxIterations,
+			iterationLimit,
 			controls.intermediateThreshold,
-			controls.intermediateRelMagnitude,
-			controls.intermediateAbsMagnitude
+			baseRelMagnitude * noiseScale,
+			baseAbsMagnitude * noiseScale
 		);
 
 		if (inter.length > 0) {
