@@ -1,12 +1,21 @@
 import {
+  applyMountains,
   createRng,
+  buildRiverTraces,
+  createStepRng,
+  generateMesh,
+  generateWater,
+  materializeRiverPaths,
   renderTerrain as renderTerrainLayer,
-  terrainBasegen,
   terrainRefine,
+  STEP_SEEDS,
   updateProvinceBorders,
-  type TerrainBasegenResult,
   type TerrainControls,
-  type TerrainRefineResult,
+  type TerrainMeshState,
+  type TerrainMountainState,
+  type TerrainRefineState,
+  type TerrainRiverState,
+  type TerrainWaterState,
 } from './terrain';
 import { basegenPolitical, type ProvinceGraph } from './political';
 import type { PlayerState } from '../types';
@@ -25,9 +34,21 @@ type GameConfig = {
 };
 
 type TerrainGenerationState = {
-  base: TerrainBasegenResult;
+  mesh: TerrainMeshState;
+  water: TerrainWaterState;
+  mountain: TerrainMountainState;
+  rivers: TerrainRiverState;
   provinceGraph: ProvinceGraph;
-  refined: TerrainRefineResult;
+  refined: TerrainRefineState;
+};
+
+type TerrainDirtyFlags = {
+  mesh: boolean;
+  water: boolean;
+  mountain: boolean;
+  river: boolean;
+  province: boolean;
+  refine: boolean;
 };
 
 type Vec2 = { x: number; y: number };
@@ -91,19 +112,26 @@ export class GameEngine {
     showInsertedPoints: false,
     provinceCount: 8,
     provinceBorderWidth: 6.5,
-      showLandBorders: true,
-      showShoreBorders: true,
-      landRelief: 0.95,
-      ridgeStrength: 0.85,
-      ridgeCount: 9,
-      plateauStrength: 0.8,
-      ridgeDistribution: 0.8,
-      ridgeSeparation: 0.95,
-      ridgeContinuity: 0.25,
-      ridgeContinuityThreshold: 0,
-      oceanPeakClamp: 0.05,
-      ridgeOceanClamp: 0.5,
-      ridgeWidth: 1,
+    provinceSizeVariance: 0.4,
+    provincePassageElevation: 6,
+    provinceRiverPenalty: 0.6,
+    provinceSmallIslandMultiplier: 0.35,
+    provinceArchipelagoMultiplier: 0.2,
+    provinceIslandSingleMultiplier: 1.6,
+    provinceArchipelagoRadiusMultiplier: 3,
+    showLandBorders: true,
+    showShoreBorders: true,
+    landRelief: 0.95,
+    ridgeStrength: 0.85,
+    ridgeCount: 9,
+    plateauStrength: 0.8,
+    ridgeDistribution: 0.8,
+    ridgeSeparation: 0.95,
+    ridgeContinuity: 0.25,
+    ridgeContinuityThreshold: 0,
+    oceanPeakClamp: 0.05,
+    ridgeOceanClamp: 0.5,
+    ridgeWidth: 1,
     seed: 1337,
     intermediateSeed: 1337,
     intermediateMaxIterations: 8,
@@ -173,6 +201,37 @@ export class GameEngine {
       showInsertedPoints: Boolean(nextControls.showInsertedPoints),
       provinceCount: this.clamp(Math.round(safeValue(nextControls.provinceCount, 8)), 1, 32),
       provinceBorderWidth: this.clamp(safeValue(nextControls.provinceBorderWidth, 6.5), 1, 24),
+      provinceSizeVariance: this.clamp(
+        Math.round(safeValue(nextControls.provinceSizeVariance, 0.4) * 100) / 100,
+        0,
+        0.75
+      ),
+      provincePassageElevation: this.clamp(Math.round(safeValue(nextControls.provincePassageElevation, 6)), 0, 32),
+      provinceRiverPenalty: this.clamp(
+        Math.round(safeValue(nextControls.provinceRiverPenalty, 0.6) * 100) / 100,
+        0,
+        2
+      ),
+      provinceSmallIslandMultiplier: this.clamp(
+        Math.round(safeValue(nextControls.provinceSmallIslandMultiplier, 0.35) * 100) / 100,
+        0,
+        1
+      ),
+      provinceArchipelagoMultiplier: this.clamp(
+        Math.round(safeValue(nextControls.provinceArchipelagoMultiplier, 0.2) * 100) / 100,
+        0,
+        1
+      ),
+      provinceIslandSingleMultiplier: this.clamp(
+        Math.round(safeValue(nextControls.provinceIslandSingleMultiplier, 1.6) * 100) / 100,
+        1,
+        3
+      ),
+      provinceArchipelagoRadiusMultiplier: this.clamp(
+        Math.round(safeValue(nextControls.provinceArchipelagoRadiusMultiplier, 3) * 10) / 10,
+        1,
+        6
+      ),
       showLandBorders: Boolean(nextControls.showLandBorders),
       showShoreBorders: Boolean(nextControls.showShoreBorders),
       landRelief: this.clamp(Math.round(safeValue(nextControls.landRelief, 0.95) * 100) / 100, 0, 1),
@@ -212,46 +271,34 @@ export class GameEngine {
       riverClimbChance: this.clamp(Math.round(safeValue(nextControls.riverClimbChance, 0.35) * 100) / 100, 0, 1),
     };
 
-    const needsRegeneration =
-      !this.hasTerrain ||
-      this.terrainControls.spacing !== sanitized.spacing ||
-      this.terrainControls.seed !== sanitized.seed ||
-      this.terrainControls.intermediateSeed !== sanitized.intermediateSeed ||
-      this.terrainControls.intermediateMaxIterations !== sanitized.intermediateMaxIterations ||
-      this.terrainControls.intermediateThreshold !== sanitized.intermediateThreshold ||
-      this.terrainControls.intermediateRelMagnitude !== sanitized.intermediateRelMagnitude ||
-      this.terrainControls.intermediateAbsMagnitude !== sanitized.intermediateAbsMagnitude ||
-      this.terrainControls.provinceCount !== sanitized.provinceCount ||
-      this.terrainControls.landRelief !== sanitized.landRelief ||
-      this.terrainControls.ridgeStrength !== sanitized.ridgeStrength ||
-      this.terrainControls.ridgeCount !== sanitized.ridgeCount ||
-      this.terrainControls.plateauStrength !== sanitized.plateauStrength ||
-      this.terrainControls.ridgeDistribution !== sanitized.ridgeDistribution ||
-      this.terrainControls.ridgeSeparation !== sanitized.ridgeSeparation ||
-      this.terrainControls.ridgeContinuity !== sanitized.ridgeContinuity ||
-      this.terrainControls.ridgeContinuityThreshold !== sanitized.ridgeContinuityThreshold ||
-      this.terrainControls.oceanPeakClamp !== sanitized.oceanPeakClamp ||
-      this.terrainControls.ridgeOceanClamp !== sanitized.ridgeOceanClamp ||
-      this.terrainControls.ridgeWidth !== sanitized.ridgeWidth ||
-      this.terrainControls.waterLevel !== sanitized.waterLevel ||
-      this.terrainControls.waterRoughness !== sanitized.waterRoughness ||
-      this.terrainControls.waterNoiseScale !== sanitized.waterNoiseScale ||
-      this.terrainControls.waterNoiseStrength !== sanitized.waterNoiseStrength ||
-      this.terrainControls.waterNoiseOctaves !== sanitized.waterNoiseOctaves ||
-      this.terrainControls.waterWarpScale !== sanitized.waterWarpScale ||
-      this.terrainControls.waterWarpStrength !== sanitized.waterWarpStrength ||
-      this.terrainControls.riverDensity !== sanitized.riverDensity ||
-      this.terrainControls.riverBranchChance !== sanitized.riverBranchChance ||
-      this.terrainControls.riverClimbChance !== sanitized.riverClimbChance;
+    const prevControls = this.terrainControls;
+    const dirty = this.computeDirtyFlags(prevControls, sanitized);
+    const renderOnlyChanged =
+      prevControls.provinceBorderWidth !== sanitized.provinceBorderWidth ||
+      prevControls.showLandBorders !== sanitized.showLandBorders ||
+      prevControls.showShoreBorders !== sanitized.showShoreBorders ||
+      prevControls.showPolygonGraph !== sanitized.showPolygonGraph ||
+      prevControls.showDualGraph !== sanitized.showDualGraph ||
+      prevControls.showCornerNodes !== sanitized.showCornerNodes ||
+      prevControls.showCenterNodes !== sanitized.showCenterNodes ||
+      prevControls.showInsertedPoints !== sanitized.showInsertedPoints;
 
     this.terrainControls = sanitized;
 
-    if (needsRegeneration) {
+    if (!this.hasTerrain) {
       this.regenerateTerrain();
       return;
     }
+
+    if (dirty.mesh || dirty.water || dirty.mountain || dirty.river || dirty.province || dirty.refine) {
+      this.regenerateTerrainPartial(dirty);
+      return;
+    }
+
     if (this.layers.terrain) {
-      updateProvinceBorders(this.layers.terrain, this.terrainControls);
+      if (renderOnlyChanged) {
+        updateProvinceBorders(this.layers.terrain, this.terrainControls);
+      }
       this.setGraphOverlayVisibility(this.terrainControls);
       this.renderProvinceInteractionOverlay();
     }
@@ -425,23 +472,198 @@ export class GameEngine {
   private generateTerrainState(): TerrainGenerationState {
     const config = { width: this.config.width, height: this.config.height };
     const seed = this.terrainControls.seed >>> 0;
-    const random = createRng(seed);
+    const meshRandom = createStepRng(seed, STEP_SEEDS.mesh);
+    const waterRandom = createStepRng(seed, STEP_SEEDS.water);
+    const mountainRandom = createStepRng(seed, STEP_SEEDS.mountain);
+    const riverRandom = createStepRng(seed, STEP_SEEDS.river);
+    const provinceRandom = createStepRng(seed, STEP_SEEDS.province);
     const intermediateRandom = createRng(this.terrainControls.intermediateSeed >>> 0);
-    const riverSeed = (this.terrainControls.seed ^ 0x9e3779b9) >>> 0;
-    const riverRandom = createRng(riverSeed);
-    const base = terrainBasegen(config, this.terrainControls, random);
-    const provinceGraph = basegenPolitical(base.mesh, this.terrainControls, random, base.isLand);
+
+    const mesh = generateMesh(config, this.terrainControls, meshRandom);
+    const water = generateWater(config, mesh.mesh, mesh.baseCells, this.terrainControls, waterRandom);
+    const mountain = applyMountains(mesh.mesh, water, this.terrainControls, mountainRandom);
+    const riverTraceResult = buildRiverTraces(
+      mesh.mesh,
+      this.terrainControls,
+      riverRandom,
+      water.isLand,
+      water.oceanWater
+    );
+    const provinceGraph = basegenPolitical(
+      mesh.mesh,
+      this.terrainControls,
+      provinceRandom,
+      water.isLand,
+      riverTraceResult.riverEdgeMask
+    );
     const refined = terrainRefine(
-      base.mesh,
-      provinceGraph,
+      mesh.mesh,
+      water.isLand,
       this.terrainControls,
       intermediateRandom,
       riverRandom,
-      base.isLand,
-      base.oceanWater
+      water.oceanWater,
+      riverTraceResult.traces
     );
 
-    return { base, provinceGraph, refined };
+    const rivers: TerrainRiverState = {
+      traces: riverTraceResult.traces,
+      riverEdgeMask: riverTraceResult.riverEdgeMask,
+      paths: refined.rivers,
+    };
+    const refinedState: TerrainRefineState = { refinedGeometry: refined.refinedGeometry };
+
+    return { mesh, water, mountain, rivers, provinceGraph, refined: refinedState };
+  }
+
+  private computeDirtyFlags(prev: TerrainControls, next: TerrainControls): TerrainDirtyFlags {
+    const meshChanged = prev.spacing !== next.spacing || prev.seed !== next.seed;
+    const waterChanged =
+      prev.waterLevel !== next.waterLevel ||
+      prev.waterRoughness !== next.waterRoughness ||
+      prev.waterNoiseScale !== next.waterNoiseScale ||
+      prev.waterNoiseStrength !== next.waterNoiseStrength ||
+      prev.waterNoiseOctaves !== next.waterNoiseOctaves ||
+      prev.waterWarpScale !== next.waterWarpScale ||
+      prev.waterWarpStrength !== next.waterWarpStrength;
+    const mountainChanged =
+      prev.landRelief !== next.landRelief ||
+      prev.ridgeStrength !== next.ridgeStrength ||
+      prev.ridgeCount !== next.ridgeCount ||
+      prev.plateauStrength !== next.plateauStrength ||
+      prev.ridgeDistribution !== next.ridgeDistribution ||
+      prev.ridgeSeparation !== next.ridgeSeparation ||
+      prev.ridgeContinuity !== next.ridgeContinuity ||
+      prev.ridgeContinuityThreshold !== next.ridgeContinuityThreshold ||
+      prev.oceanPeakClamp !== next.oceanPeakClamp ||
+      prev.ridgeOceanClamp !== next.ridgeOceanClamp ||
+      prev.ridgeWidth !== next.ridgeWidth;
+    const riverChanged =
+      prev.riverDensity !== next.riverDensity ||
+      prev.riverBranchChance !== next.riverBranchChance ||
+      prev.riverClimbChance !== next.riverClimbChance;
+    const provinceChanged =
+      prev.provinceCount !== next.provinceCount ||
+      prev.provinceSizeVariance !== next.provinceSizeVariance ||
+      prev.provincePassageElevation !== next.provincePassageElevation ||
+      prev.provinceRiverPenalty !== next.provinceRiverPenalty ||
+      prev.provinceSmallIslandMultiplier !== next.provinceSmallIslandMultiplier ||
+      prev.provinceArchipelagoMultiplier !== next.provinceArchipelagoMultiplier ||
+      prev.provinceIslandSingleMultiplier !== next.provinceIslandSingleMultiplier ||
+      prev.provinceArchipelagoRadiusMultiplier !== next.provinceArchipelagoRadiusMultiplier;
+    const refineChanged =
+      prev.intermediateSeed !== next.intermediateSeed ||
+      prev.intermediateMaxIterations !== next.intermediateMaxIterations ||
+      prev.intermediateThreshold !== next.intermediateThreshold ||
+      prev.intermediateRelMagnitude !== next.intermediateRelMagnitude ||
+      prev.intermediateAbsMagnitude !== next.intermediateAbsMagnitude;
+
+    const meshDirty = meshChanged;
+    const waterDirty = meshDirty || waterChanged;
+    const mountainDirty = waterDirty || mountainChanged;
+    const riverDirty = mountainDirty || riverChanged;
+    const provinceDirty = mountainDirty || riverDirty || provinceChanged;
+    const refineDirty = mountainDirty || refineChanged;
+
+    return {
+      mesh: meshDirty,
+      water: waterDirty,
+      mountain: mountainDirty,
+      river: riverDirty,
+      province: provinceDirty,
+      refine: refineDirty,
+    };
+  }
+
+  private regenerateTerrainPartial(flags: TerrainDirtyFlags): void {
+    if (!this.layers.terrain) {
+      return;
+    }
+    if (!this.terrainState || flags.mesh) {
+      const state = this.generateTerrainState();
+      this.terrainState = state;
+      this.renderTerrainState(state);
+      this.rebuildProvinceInteractionModel();
+      this.renderProvinceInteractionOverlay();
+      this.hasTerrain = true;
+      return;
+    }
+
+    const state = this.terrainState;
+    const config = { width: this.config.width, height: this.config.height };
+    const seed = this.terrainControls.seed >>> 0;
+
+    if (flags.water) {
+      const waterRandom = createStepRng(seed, STEP_SEEDS.water);
+      state.water = generateWater(
+        config,
+        state.mesh.mesh,
+        state.mesh.baseCells,
+        this.terrainControls,
+        waterRandom
+      );
+    }
+
+    if (flags.mountain) {
+      const mountainRandom = createStepRng(seed, STEP_SEEDS.mountain);
+      state.mountain = applyMountains(state.mesh.mesh, state.water, this.terrainControls, mountainRandom);
+    }
+
+    if (flags.river) {
+      const riverRandom = createStepRng(seed, STEP_SEEDS.river);
+      const riverTraceResult = buildRiverTraces(
+        state.mesh.mesh,
+        this.terrainControls,
+        riverRandom,
+        state.water.isLand,
+        state.water.oceanWater
+      );
+      state.rivers = {
+        traces: riverTraceResult.traces,
+        riverEdgeMask: riverTraceResult.riverEdgeMask,
+        paths: state.rivers.paths,
+      };
+    }
+
+    if (flags.province) {
+      const provinceRandom = createStepRng(seed, STEP_SEEDS.province);
+      state.provinceGraph = basegenPolitical(
+        state.mesh.mesh,
+        this.terrainControls,
+        provinceRandom,
+        state.water.isLand,
+        state.rivers.riverEdgeMask
+      );
+    }
+
+    if (flags.refine) {
+      const riverRandom = createStepRng(seed, STEP_SEEDS.river);
+      const intermediateRandom = createRng(this.terrainControls.intermediateSeed >>> 0);
+      const refined = terrainRefine(
+        state.mesh.mesh,
+        state.water.isLand,
+        this.terrainControls,
+        intermediateRandom,
+        riverRandom,
+        state.water.oceanWater,
+        state.rivers.traces
+      );
+      state.refined = { refinedGeometry: refined.refinedGeometry };
+      state.rivers.paths = refined.rivers;
+    } else if (flags.river) {
+      state.rivers.paths = materializeRiverPaths(
+        state.mesh.mesh,
+        state.refined.refinedGeometry,
+        this.terrainControls,
+        state.rivers.traces
+      );
+    }
+
+    this.terrainState = state;
+    this.renderTerrainState(state);
+    this.rebuildProvinceInteractionModel();
+    this.renderProvinceInteractionOverlay();
+    this.hasTerrain = true;
   }
 
   private renderTerrainState(state: TerrainGenerationState): void {
@@ -449,9 +671,16 @@ export class GameEngine {
       return;
     }
     const config = { width: this.config.width, height: this.config.height };
-    renderTerrainLayer(config, this.terrainControls, this.layers.terrain, state.base, state.provinceGraph, state.refined);
+    const base = {
+      mesh: state.mesh.mesh,
+      baseCells: state.mesh.baseCells,
+      isLand: state.water.isLand,
+      oceanWater: state.water.oceanWater,
+    };
+    const refined = { refinedGeometry: state.refined.refinedGeometry, rivers: state.rivers.paths };
+    renderTerrainLayer(config, this.terrainControls, this.layers.terrain, base, state.provinceGraph, refined);
     const overlay = this.ensureMeshOverlay(this.layers.terrain);
-    this.renderMeshOverlay(state.base.mesh, state.refined.refinedGeometry.insertedPoints, overlay);
+    this.renderMeshOverlay(state.mesh.mesh, state.refined.refinedGeometry.insertedPoints, overlay);
     this.setGraphOverlayVisibility(this.terrainControls);
   }
 
@@ -518,8 +747,8 @@ export class GameEngine {
       this.provinceInteractionModel = null;
       return;
     }
-    const { base, provinceGraph, refined } = this.terrainState;
-    const mesh = base.mesh;
+    const { mesh: meshState, provinceGraph, refined } = this.terrainState;
+    const mesh = meshState.mesh;
     const { refinedGeometry } = refined;
     const faceCount = mesh.faces.length;
     const facePolygons: Vec2[][] = new Array(faceCount);
@@ -531,7 +760,7 @@ export class GameEngine {
 
     for (let i = 0; i < faceCount; i += 1) {
       const refinedCell = refinedGeometry.refinedCells[i];
-      const baseCell = base.baseCells[i];
+      const baseCell = meshState.baseCells[i];
       const cell = refinedCell && refinedCell.length >= 3 ? refinedCell : baseCell;
       if (!cell || cell.length < 3) {
         facePolygons[i] = [];

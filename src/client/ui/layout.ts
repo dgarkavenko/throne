@@ -7,6 +7,13 @@ type TerrainSettings = {
   showInsertedPoints: boolean;
   provinceCount: number;
   provinceBorderWidth: number;
+  provinceSizeVariance: number;
+  provincePassageElevation: number;
+  provinceRiverPenalty: number;
+  provinceSmallIslandMultiplier: number;
+  provinceArchipelagoMultiplier: number;
+  provinceIslandSingleMultiplier: number;
+  provinceArchipelagoRadiusMultiplier: number;
   showLandBorders: boolean;
   showShoreBorders: boolean;
   landRelief: number;
@@ -88,6 +95,27 @@ export function createPageLayout(): PageLayout {
   const terrainResetButton = document.getElementById('terrain-reset') as HTMLButtonElement | null;
   const terrainProvinceCountInput = document.getElementById('terrain-province-count') as HTMLInputElement | null;
   const terrainProvinceBorderWidthInput = document.getElementById('terrain-province-border-width') as HTMLInputElement | null;
+  const terrainProvinceSizeVarianceInput = document.getElementById(
+    'terrain-province-size-variance'
+  ) as HTMLInputElement | null;
+  const terrainProvincePassageElevationInput = document.getElementById(
+    'terrain-province-passage-elevation'
+  ) as HTMLInputElement | null;
+  const terrainProvinceRiverPenaltyInput = document.getElementById(
+    'terrain-province-river-penalty'
+  ) as HTMLInputElement | null;
+  const terrainProvinceSmallIslandMultiplierInput = document.getElementById(
+    'terrain-province-small-island'
+  ) as HTMLInputElement | null;
+  const terrainProvinceArchipelagoMultiplierInput = document.getElementById(
+    'terrain-province-archipelago'
+  ) as HTMLInputElement | null;
+  const terrainProvinceIslandSingleMultiplierInput = document.getElementById(
+    'terrain-province-island-single'
+  ) as HTMLInputElement | null;
+  const terrainProvinceArchipelagoRadiusInput = document.getElementById(
+    'terrain-province-archipelago-radius'
+  ) as HTMLInputElement | null;
   const terrainProvinceLandBordersInput = document.getElementById('terrain-province-land-borders') as HTMLInputElement | null;
   const terrainProvinceShoreBordersInput = document.getElementById('terrain-province-shore-borders') as HTMLInputElement | null;
   const terrainLandReliefInput = document.getElementById('terrain-land-relief') as HTMLInputElement | null;
@@ -120,6 +148,23 @@ export function createPageLayout(): PageLayout {
   const terrainRiverClimbChanceValue = document.getElementById('terrain-river-climb-chance-value');
   const terrainProvinceCountValue = document.getElementById('terrain-province-count-value');
   const terrainProvinceBorderWidthValue = document.getElementById('terrain-province-border-width-value');
+  const terrainProvinceSizeVarianceValue = document.getElementById('terrain-province-size-variance-value');
+  const terrainProvincePassageElevationValue = document.getElementById(
+    'terrain-province-passage-elevation-value'
+  );
+  const terrainProvinceRiverPenaltyValue = document.getElementById('terrain-province-river-penalty-value');
+  const terrainProvinceSmallIslandMultiplierValue = document.getElementById(
+    'terrain-province-small-island-value'
+  );
+  const terrainProvinceArchipelagoMultiplierValue = document.getElementById(
+    'terrain-province-archipelago-value'
+  );
+  const terrainProvinceIslandSingleMultiplierValue = document.getElementById(
+    'terrain-province-island-single-value'
+  );
+  const terrainProvinceArchipelagoRadiusValue = document.getElementById(
+    'terrain-province-archipelago-radius-value'
+  );
   const terrainLandReliefValue = document.getElementById('terrain-land-relief-value');
   const terrainRidgeStrengthValue = document.getElementById('terrain-ridge-strength-value');
   const terrainRidgeCountValue = document.getElementById('terrain-ridge-count-value');
@@ -231,6 +276,27 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainProvinceBorderWidthInput) {
       terrainProvinceBorderWidthInput.value = terrainProvinceBorderWidthInput.defaultValue;
+    }
+    if (terrainProvinceSizeVarianceInput) {
+      terrainProvinceSizeVarianceInput.value = terrainProvinceSizeVarianceInput.defaultValue;
+    }
+    if (terrainProvincePassageElevationInput) {
+      terrainProvincePassageElevationInput.value = terrainProvincePassageElevationInput.defaultValue;
+    }
+    if (terrainProvinceRiverPenaltyInput) {
+      terrainProvinceRiverPenaltyInput.value = terrainProvinceRiverPenaltyInput.defaultValue;
+    }
+    if (terrainProvinceSmallIslandMultiplierInput) {
+      terrainProvinceSmallIslandMultiplierInput.value = terrainProvinceSmallIslandMultiplierInput.defaultValue;
+    }
+    if (terrainProvinceArchipelagoMultiplierInput) {
+      terrainProvinceArchipelagoMultiplierInput.value = terrainProvinceArchipelagoMultiplierInput.defaultValue;
+    }
+    if (terrainProvinceIslandSingleMultiplierInput) {
+      terrainProvinceIslandSingleMultiplierInput.value = terrainProvinceIslandSingleMultiplierInput.defaultValue;
+    }
+    if (terrainProvinceArchipelagoRadiusInput) {
+      terrainProvinceArchipelagoRadiusInput.value = terrainProvinceArchipelagoRadiusInput.defaultValue;
     }
     if (terrainProvinceLandBordersInput) {
       terrainProvinceLandBordersInput.checked = terrainProvinceLandBordersInput.defaultChecked;
@@ -346,6 +412,27 @@ export function createPageLayout(): PageLayout {
     if (typeof settings.provinceBorderWidth === 'number' && terrainProvinceBorderWidthInput) {
       terrainProvinceBorderWidthInput.value = settings.provinceBorderWidth.toString();
     }
+    if (typeof settings.provinceSizeVariance === 'number' && terrainProvinceSizeVarianceInput) {
+      terrainProvinceSizeVarianceInput.value = settings.provinceSizeVariance.toString();
+    }
+    if (typeof settings.provincePassageElevation === 'number' && terrainProvincePassageElevationInput) {
+      terrainProvincePassageElevationInput.value = settings.provincePassageElevation.toString();
+    }
+    if (typeof settings.provinceRiverPenalty === 'number' && terrainProvinceRiverPenaltyInput) {
+      terrainProvinceRiverPenaltyInput.value = settings.provinceRiverPenalty.toString();
+    }
+    if (typeof settings.provinceSmallIslandMultiplier === 'number' && terrainProvinceSmallIslandMultiplierInput) {
+      terrainProvinceSmallIslandMultiplierInput.value = settings.provinceSmallIslandMultiplier.toString();
+    }
+    if (typeof settings.provinceArchipelagoMultiplier === 'number' && terrainProvinceArchipelagoMultiplierInput) {
+      terrainProvinceArchipelagoMultiplierInput.value = settings.provinceArchipelagoMultiplier.toString();
+    }
+    if (typeof settings.provinceIslandSingleMultiplier === 'number' && terrainProvinceIslandSingleMultiplierInput) {
+      terrainProvinceIslandSingleMultiplierInput.value = settings.provinceIslandSingleMultiplier.toString();
+    }
+    if (typeof settings.provinceArchipelagoRadiusMultiplier === 'number' && terrainProvinceArchipelagoRadiusInput) {
+      terrainProvinceArchipelagoRadiusInput.value = settings.provinceArchipelagoRadiusMultiplier.toString();
+    }
     if (typeof settings.showLandBorders === 'boolean' && terrainProvinceLandBordersInput) {
       terrainProvinceLandBordersInput.checked = settings.showLandBorders;
     }
@@ -434,6 +521,41 @@ export function createPageLayout(): PageLayout {
     const riverClimbChance = clamp(parseFloatWithFallback(terrainRiverClimbChanceInput?.value, 0.35), 0, 1);
     const provinceCount = clamp(parseIntWithFallback(terrainProvinceCountInput?.value, 8), 1, 32);
     const provinceBorderWidth = clamp(parseFloatWithFallback(terrainProvinceBorderWidthInput?.value, 6.5), 1, 24);
+    const provinceSizeVariance = clamp(
+      parseFloatWithFallback(terrainProvinceSizeVarianceInput?.value, 0.4),
+      0,
+      0.75
+    );
+    const provincePassageElevation = clamp(
+      parseIntWithFallback(terrainProvincePassageElevationInput?.value, 6),
+      0,
+      32
+    );
+    const provinceRiverPenalty = clamp(
+      parseFloatWithFallback(terrainProvinceRiverPenaltyInput?.value, 0.6),
+      0,
+      2
+    );
+    const provinceSmallIslandMultiplier = clamp(
+      parseFloatWithFallback(terrainProvinceSmallIslandMultiplierInput?.value, 0.35),
+      0,
+      1
+    );
+    const provinceArchipelagoMultiplier = clamp(
+      parseFloatWithFallback(terrainProvinceArchipelagoMultiplierInput?.value, 0.2),
+      0,
+      1
+    );
+    const provinceIslandSingleMultiplier = clamp(
+      parseFloatWithFallback(terrainProvinceIslandSingleMultiplierInput?.value, 1.6),
+      1,
+      3
+    );
+    const provinceArchipelagoRadiusMultiplier = clamp(
+      parseFloatWithFallback(terrainProvinceArchipelagoRadiusInput?.value, 3),
+      1,
+      6
+    );
     const showLandBorders = Boolean(terrainProvinceLandBordersInput?.checked);
     const showShoreBorders = Boolean(terrainProvinceShoreBordersInput?.checked);
     const landRelief = clamp(parseFloatWithFallback(terrainLandReliefInput?.value, 0.95), 0, 1);
@@ -465,6 +587,13 @@ export function createPageLayout(): PageLayout {
       showInsertedPoints,
       provinceCount,
       provinceBorderWidth,
+      provinceSizeVariance,
+      provincePassageElevation,
+      provinceRiverPenalty,
+      provinceSmallIslandMultiplier,
+      provinceArchipelagoMultiplier,
+      provinceIslandSingleMultiplier,
+      provinceArchipelagoRadiusMultiplier,
       showLandBorders,
       showShoreBorders,
       landRelief,
@@ -554,6 +683,28 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainProvinceBorderWidthValue) {
       terrainProvinceBorderWidthValue.textContent = settings.provinceBorderWidth.toFixed(1);
+    }
+    if (terrainProvinceSizeVarianceValue) {
+      terrainProvinceSizeVarianceValue.textContent = settings.provinceSizeVariance.toFixed(2);
+    }
+    if (terrainProvincePassageElevationValue) {
+      terrainProvincePassageElevationValue.textContent = settings.provincePassageElevation.toString();
+    }
+    if (terrainProvinceRiverPenaltyValue) {
+      terrainProvinceRiverPenaltyValue.textContent = settings.provinceRiverPenalty.toFixed(2);
+    }
+    if (terrainProvinceSmallIslandMultiplierValue) {
+      terrainProvinceSmallIslandMultiplierValue.textContent = settings.provinceSmallIslandMultiplier.toFixed(2);
+    }
+    if (terrainProvinceArchipelagoMultiplierValue) {
+      terrainProvinceArchipelagoMultiplierValue.textContent = settings.provinceArchipelagoMultiplier.toFixed(2);
+    }
+    if (terrainProvinceIslandSingleMultiplierValue) {
+      terrainProvinceIslandSingleMultiplierValue.textContent = settings.provinceIslandSingleMultiplier.toFixed(2);
+    }
+    if (terrainProvinceArchipelagoRadiusValue) {
+      terrainProvinceArchipelagoRadiusValue.textContent =
+        settings.provinceArchipelagoRadiusMultiplier.toFixed(1);
     }
     if (terrainLandReliefValue) {
       terrainLandReliefValue.textContent = settings.landRelief.toFixed(2);
@@ -659,6 +810,13 @@ export function createPageLayout(): PageLayout {
     terrainRiverClimbChanceInput?.addEventListener('input', notify);
     terrainProvinceCountInput?.addEventListener('input', notify);
     terrainProvinceBorderWidthInput?.addEventListener('input', notify);
+    terrainProvinceSizeVarianceInput?.addEventListener('input', notify);
+    terrainProvincePassageElevationInput?.addEventListener('input', notify);
+    terrainProvinceRiverPenaltyInput?.addEventListener('input', notify);
+    terrainProvinceSmallIslandMultiplierInput?.addEventListener('input', notify);
+    terrainProvinceArchipelagoMultiplierInput?.addEventListener('input', notify);
+    terrainProvinceIslandSingleMultiplierInput?.addEventListener('input', notify);
+    terrainProvinceArchipelagoRadiusInput?.addEventListener('input', notify);
     terrainProvinceLandBordersInput?.addEventListener('change', notify);
     terrainProvinceShoreBordersInput?.addEventListener('change', notify);
     terrainLandReliefInput?.addEventListener('input', notify);

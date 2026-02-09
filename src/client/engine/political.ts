@@ -19,6 +19,13 @@ type MeshGraph = {
 export type PoliticalControls = {
 	provinceCount: number;
 	spacing: number;
+	provinceSizeVariance: number;
+	provincePassageElevation: number;
+	provinceRiverPenalty: number;
+	provinceSmallIslandMultiplier: number;
+	provinceArchipelagoMultiplier: number;
+	provinceIslandSingleMultiplier: number;
+	provinceArchipelagoRadiusMultiplier: number;
 };
 
 export type ProvinceFace = {
@@ -48,6 +55,10 @@ export type ProvinceGraph = {
 	faces: ProvinceFace[];
 	// Boundary edges between provinces or province/water.
 	outerEdges: ProvinceOuterEdge[];
+	// River edges by mesh edge index.
+	riverEdges: boolean[];
+	// Outer edge indices that are river borders between provinces.
+	riverBorders: number[];
 	// Per mesh face province lookup (-1 for water).
 	provinceByFace: number[];
 	// Seed faces used for province generation.
@@ -77,14 +88,22 @@ export function basegenPolitical(
 	mesh: MeshGraph,
 	controls: PoliticalControls,
 	random: () => number,
-	isLandOverride?: boolean[]
+	isLandOverride?: boolean[],
+	riverEdges?: boolean[]
 ): ProvinceGraph {
 	const faceCount = mesh.faces.length;
+	const edgeCount = mesh.edges.length;
+	const riverEdgeMask =
+		riverEdges && riverEdges.length === edgeCount
+			? riverEdges.slice()
+			: new Array<boolean>(edgeCount).fill(false);
 	const provinceByFace = new Array<number>(faceCount).fill(-1);
 	if (faceCount === 0) {
 		return {
 			faces: [],
 			outerEdges: [],
+			riverEdges: riverEdgeMask,
+			riverBorders: [],
 			provinceByFace,
 			seedFaces: [],
 			landFaces: [],
@@ -116,6 +135,8 @@ export function basegenPolitical(
 		return {
 			faces: [],
 			outerEdges: [],
+			riverEdges: riverEdgeMask,
+			riverBorders: [],
 			provinceByFace,
 			seedFaces: [],
 			landFaces,
@@ -125,15 +146,21 @@ export function basegenPolitical(
 
 	const components = getLandComponents(mesh, isLand);
 	const componentStats = getComponentStats(mesh, components);
-	const standardSize = Math.max(1, landFaces.length / components.length);
-	const tinyThreshold = standardSize / 3;
-	const archipelagoThreshold = standardSize * 0.5;
-	const archipelagoRadius = controls.spacing * 3;
+	const provinceCount = clamp(Math.round(controls.provinceCount || 1), 1, landFaces.length);
+	const avgProvinceSize = Math.max(1, landFaces.length / Math.max(1, provinceCount));
+	const smallIslandMultiplier = clamp(controls.provinceSmallIslandMultiplier ?? 0.35, 0, 1);
+	const archipelagoMultiplier = clamp(controls.provinceArchipelagoMultiplier ?? 0.2, 0, 1);
+	const islandSingleMultiplier = clamp(controls.provinceIslandSingleMultiplier ?? 1.6, 1, 3);
+	const archipelagoRadiusMultiplier = clamp(controls.provinceArchipelagoRadiusMultiplier ?? 3, 1, 6);
+	const smallIslandThreshold = avgProvinceSize * smallIslandMultiplier;
+	const archipelagoThreshold = avgProvinceSize * archipelagoMultiplier;
+	const archipelagoRadius = controls.spacing * archipelagoRadiusMultiplier;
 	const tinyComponentIds: number[] = [];
 	const majorComponentIds: number[] = [];
+	const mainlandId = getLargestComponentId(componentStats.sizes);
 
 	for (let i = 0; i < components.length; i += 1) {
-		if (componentStats.sizes[i] <= tinyThreshold) {
+		if (i !== mainlandId && componentStats.sizes[i] < smallIslandThreshold) {
 			tinyComponentIds.push(i);
 		} else {
 			majorComponentIds.push(i);
@@ -156,12 +183,19 @@ export function basegenPolitical(
 		}
 	}
 
-	const provinceGroups: { faces: number[]; size: number }[] = [];
+	const provinceGroups: { faces: number[]; size: number; maxSeeds: number }[] = [];
 	for (let i = 0; i < majorComponentIds.length; i += 1) {
 		const componentId = majorComponentIds[i];
+		const componentSize = componentStats.sizes[componentId];
+		const isMainland = componentId === mainlandId;
+		const maxSeeds =
+			!isMainland && componentSize <= avgProvinceSize * islandSingleMultiplier
+				? 1
+				: Number.POSITIVE_INFINITY;
 		provinceGroups.push({
 			faces: components[componentId].slice(),
-			size: componentStats.sizes[componentId],
+			size: componentSize,
+			maxSeeds,
 		});
 	}
 	for (let i = 0; i < eligibleTinyGroups.length; i += 1) {
@@ -173,7 +207,7 @@ export function basegenPolitical(
 			faces.push(...components[componentId]);
 			groupSize += componentStats.sizes[componentId];
 		}
-		provinceGroups.push({ faces, size: groupSize });
+		provinceGroups.push({ faces, size: groupSize, maxSeeds: 1 });
 	}
 
 	let annexFaces: number[] = [];
@@ -184,17 +218,24 @@ export function basegenPolitical(
 	if (provinceGroups.length === 0) {
 		const allFaces: number[] = [];
 		components.forEach((component) => allFaces.push(...component));
-		provinceGroups.push({ faces: allFaces, size: allFaces.length });
+		provinceGroups.push({
+			faces: allFaces,
+			size: allFaces.length,
+			maxSeeds: Number.POSITIVE_INFINITY,
+		});
 		annexFaces = [];
 	}
 
-	const provinceCount = clamp(Math.round(controls.provinceCount || 1), 1, landFaces.length);
 	const groupSizes = provinceGroups.map((group) => group.size);
-	const capacity = groupSizes.reduce((sum, value) => sum + value, 0);
+	const groupCaps = provinceGroups.map((group) =>
+		Number.isFinite(group.maxSeeds) ? Math.min(group.size, group.maxSeeds) : group.size
+	);
+	const capacity = groupCaps.reduce((sum, value) => sum + value, 0);
 	const effectiveCount = Math.min(provinceCount, capacity);
-	const groupAllocations = allocateSeedsBySizeWithCap(groupSizes, effectiveCount);
+	const groupAllocations = allocateSeedsBySizeWithCaps(groupSizes, groupCaps, effectiveCount);
 	const seedFaces: number[] = [];
 	let provinceOffset = 0;
+	const faceNeighborEdges = buildFaceNeighborEdges(mesh);
 
 	for (let i = 0; i < provinceGroups.length; i += 1) {
 		const group = provinceGroups[i];
@@ -218,7 +259,10 @@ export function basegenPolitical(
 			groupFaces,
 			seeds,
 			actualSeedCount,
-			controls.spacing
+			controls,
+			random,
+			faceNeighborEdges,
+			riverEdgeMask
 		);
 		for (let j = 0; j < groupFaces.length; j += 1) {
 			const faceIndex = groupFaces[j];
@@ -261,7 +305,7 @@ export function basegenPolitical(
 		});
 	}
 
-	const provinceGraph = buildProvinceGraph(mesh, provinceByFace, landFaces, isLand);
+	const provinceGraph = buildProvinceGraph(mesh, provinceByFace, landFaces, isLand, riverEdgeMask);
 	return {
 		...provinceGraph,
 		provinceByFace,
@@ -322,6 +366,21 @@ function getComponentStats(
 	return { sizes, centers };
 }
 
+function getLargestComponentId(sizes: number[]): number {
+	if (sizes.length === 0) {
+		return -1;
+	}
+	let bestIndex = 0;
+	let bestSize = sizes[0];
+	for (let i = 1; i < sizes.length; i += 1) {
+		if (sizes[i] > bestSize) {
+			bestSize = sizes[i];
+			bestIndex = i;
+		}
+	}
+	return bestIndex;
+}
+
 function buildTinyComponentGroups(
 	tinyComponentIds: number[],
 	centers: Vec2[],
@@ -362,58 +421,79 @@ function buildTinyComponentGroups(
 	return groups;
 }
 
-function allocateSeedsBySizeWithCap(sizes: number[], totalSeeds: number): number[] {
+function allocateSeedsBySizeWithCaps(sizes: number[], caps: number[], totalSeeds: number): number[] {
 	const allocations = new Array<number>(sizes.length).fill(0);
 	if (sizes.length === 0 || totalSeeds <= 0) {
 		return allocations;
 	}
-	if (totalSeeds < sizes.length) {
-		const sorted = sizes
-			.map((size, index) => ({ index, size }))
-			.sort((a, b) => b.size - a.size);
+	const eligible = sizes
+		.map((size, index) => ({ index, size, cap: Math.max(0, caps[index] ?? 0) }))
+		.filter((entry) => entry.size > 0 && entry.cap > 0);
+	if (eligible.length === 0) {
+		return allocations;
+	}
+	if (totalSeeds < eligible.length) {
+		const sorted = eligible.sort((a, b) => b.size - a.size);
 		for (let i = 0; i < totalSeeds; i += 1) {
-			if (sizes[sorted[i].index] > 0) {
-				allocations[sorted[i].index] = 1;
-			}
+			allocations[sorted[i].index] = 1;
 		}
 		return allocations;
 	}
 
-	for (let i = 0; i < sizes.length; i += 1) {
-		if (sizes[i] > 0) {
-			allocations[i] = 1;
-		}
+	for (let i = 0; i < eligible.length; i += 1) {
+		allocations[eligible[i].index] = 1;
 	}
 
 	let remaining = totalSeeds - allocations.reduce((sum, value) => sum + value, 0);
 	if (remaining > 0) {
-		const totalSize = sizes.reduce((sum, value) => sum + value, 0);
-		for (let i = 0; i < sizes.length; i += 1) {
-			const capacity = Math.max(0, sizes[i] - allocations[i]);
+		const totalSize = eligible.reduce((sum, value) => sum + value.size, 0);
+		let assigned = 0;
+		for (let i = 0; i < eligible.length; i += 1) {
+			const index = eligible[i].index;
+			const capacity = Math.max(0, Math.min(sizes[index], caps[index]) - allocations[index]);
 			if (capacity <= 0) {
 				continue;
 			}
-			const exact = totalSize > 0 ? (sizes[i] / totalSize) * remaining : 0;
+			const exact = totalSize > 0 ? (sizes[index] / totalSize) * remaining : 0;
 			const extra = Math.min(capacity, Math.floor(exact));
 			if (extra > 0) {
-				allocations[i] += extra;
+				allocations[index] += extra;
+				assigned += extra;
 			}
 		}
-		remaining = totalSeeds - allocations.reduce((sum, value) => sum + value, 0);
-		if (remaining > 0) {
-			const sorted = sizes
-				.map((size, index) => ({ index, size }))
-				.sort((a, b) => b.size - a.size);
-			for (let i = 0; i < sorted.length && remaining > 0; i += 1) {
-				const index = sorted[i].index;
-				while (allocations[index] < sizes[index] && remaining > 0) {
-					allocations[index] += 1;
-					remaining -= 1;
-				}
+		remaining -= assigned;
+	}
+
+	if (remaining > 0) {
+		const sorted = eligible.sort((a, b) => b.size - a.size);
+		for (let i = 0; i < sorted.length && remaining > 0; i += 1) {
+			const index = sorted[i].index;
+			const cap = Math.min(sizes[index], caps[index]);
+			while (allocations[index] < cap && remaining > 0) {
+				allocations[index] += 1;
+				remaining -= 1;
 			}
 		}
 	}
+
 	return allocations;
+}
+
+function buildFaceNeighborEdges(mesh: MeshGraph): Map<number, number>[] {
+	const lookups: Map<number, number>[] = new Array(mesh.faces.length);
+	for (let i = 0; i < lookups.length; i += 1) {
+		lookups[i] = new Map<number, number>();
+	}
+	for (let i = 0; i < mesh.edges.length; i += 1) {
+		const edge = mesh.edges[i];
+		const [faceA, faceB] = edge.faces;
+		if (faceA < 0 || faceB < 0) {
+			continue;
+		}
+		lookups[faceA].set(faceB, i);
+		lookups[faceB].set(faceA, i);
+	}
+	return lookups;
 }
 
 function findNearestSeedIndex(mesh: MeshGraph, faceIndex: number, seedFaces: number[]): number {
@@ -472,8 +552,9 @@ function buildProvinceGraph(
 	mesh: MeshGraph,
 	provinceByFace: number[],
 	landFaces: number[],
-	isLand: boolean[]
-): { faces: ProvinceFace[]; outerEdges: ProvinceOuterEdge[] } {
+	isLand: boolean[],
+	riverEdges: boolean[]
+): { faces: ProvinceFace[]; outerEdges: ProvinceOuterEdge[]; riverEdges: boolean[]; riverBorders: number[] } {
 	let provinceCount = 0;
 	for (let i = 0; i < landFaces.length; i += 1) {
 		const provinceId = provinceByFace[landFaces[i]];
@@ -501,6 +582,7 @@ function buildProvinceGraph(
 	}
 
 	const outerEdges: ProvinceOuterEdge[] = [];
+	const riverBorders: number[] = [];
 	const addAdjacent = (a: number, b: number): void => {
 		if (a < 0 || b < 0) {
 			return;
@@ -531,6 +613,14 @@ function buildProvinceGraph(
 		if (provinceB >= 0) {
 			faces[provinceB].outerEdges.push(index);
 			addAdjacent(provinceB, provinceA);
+		}
+		if (
+			provinceA >= 0 &&
+			provinceB >= 0 &&
+			provinceA !== provinceB &&
+			riverEdges[edgeIndex]
+		) {
+			riverBorders.push(index);
 		}
 	};
 
@@ -564,7 +654,7 @@ function buildProvinceGraph(
 		}
 	}
 
-	return { faces, outerEdges };
+	return { faces, outerEdges, riverEdges, riverBorders };
 }
 
 class ProvinceMinHeap {
@@ -631,15 +721,44 @@ function growProvinceRegions(
 	landFaces: number[],
 	seedFaces: number[],
 	provinceCount: number,
-	spacing: number
+	controls: PoliticalControls,
+	random: () => number,
+	faceNeighborEdges: Map<number, number>[],
+	riverEdges: boolean[]
 ): ProvinceSeedState {
 	const faceCount = mesh.faces.length;
 	const provinceByFace = new Array<number>(faceCount).fill(-1);
 	const seedPoints = seedFaces.map((faceIndex) => mesh.faces[faceIndex].point);
 	const actualProvinceCount = Math.min(provinceCount, seedFaces.length);
 	const provinceSizes = new Array<number>(actualProvinceCount).fill(0);
-	const targetSize = Math.max(1, Math.floor(landFaces.length / Math.max(1, actualProvinceCount)));
+	const baseTarget = Math.max(1, landFaces.length / Math.max(1, actualProvinceCount));
+	const sizeVariance = clamp(controls.provinceSizeVariance ?? 0, 0, 0.75);
+	const targetSizes = new Array<number>(actualProvinceCount).fill(Math.round(baseTarget));
+	if (actualProvinceCount > 0 && sizeVariance > 0) {
+		const multipliers = new Array<number>(actualProvinceCount);
+		let sum = 0;
+		for (let i = 0; i < actualProvinceCount; i += 1) {
+			const m = 1 + (random() * 2 - 1) * sizeVariance;
+			multipliers[i] = m;
+			sum += m;
+		}
+		const avg = sum > 0 ? sum / actualProvinceCount : 1;
+		for (let i = 0; i < actualProvinceCount; i += 1) {
+			targetSizes[i] = Math.max(1, Math.round(baseTarget * (multipliers[i] / avg)));
+		}
+	}
+	const spacing = controls.spacing;
 	const balanceWeight = Math.max(8, spacing * 1.1);
+	const passageThreshold = clamp(controls.provincePassageElevation ?? 0, 0, 32);
+	const riverPenaltyScale = Math.max(0, controls.provinceRiverPenalty ?? 0) * Math.max(1, spacing);
+
+	const computeEdgePenalty = (fromFace: number, toFace: number): number => {
+		const edgeIndex = faceNeighborEdges[fromFace]?.get(toFace);
+		if (edgeIndex === undefined) {
+			return 0;
+		}
+		return riverEdges[edgeIndex] ? riverPenaltyScale : 0;
+	};
 
 	const heap = new ProvinceMinHeap();
 	for (let i = 0; i < actualProvinceCount; i += 1) {
@@ -652,8 +771,13 @@ function growProvinceRegions(
 			if (!isLand[neighbor] || provinceByFace[neighbor] >= 0) {
 				continue;
 			}
+			const elevationDelta = Math.abs(mesh.faces[seedFace].elevation - mesh.faces[neighbor].elevation);
+			if (elevationDelta > passageThreshold) {
+				continue;
+			}
 			const dist = vec2Len(vec2Sub(mesh.faces[neighbor].point, seedPoints[i]));
-			const score = dist + balanceWeight * (provinceSizes[i] / targetSize);
+			const penalty = computeEdgePenalty(seedFace, neighbor);
+			const score = dist + balanceWeight * (provinceSizes[i] / targetSizes[i]) + penalty;
 			heap.push({ score, dist, provinceId: i, faceId: neighbor });
 		}
 	}
@@ -674,8 +798,16 @@ function growProvinceRegions(
 			if (!isLand[neighbor] || provinceByFace[neighbor] >= 0) {
 				continue;
 			}
+			const elevationDelta = Math.abs(mesh.faces[entry.faceId].elevation - mesh.faces[neighbor].elevation);
+			if (elevationDelta > passageThreshold) {
+				continue;
+			}
 			const dist = vec2Len(vec2Sub(mesh.faces[neighbor].point, seedPoints[entry.provinceId]));
-			const score = dist + balanceWeight * (provinceSizes[entry.provinceId] / targetSize);
+			const penalty = computeEdgePenalty(entry.faceId, neighbor);
+			const score =
+				dist +
+				balanceWeight * (provinceSizes[entry.provinceId] / targetSizes[entry.provinceId]) +
+				penalty;
 			heap.push({ score, dist, provinceId: entry.provinceId, faceId: neighbor });
 		}
 	}

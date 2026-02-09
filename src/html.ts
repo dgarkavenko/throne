@@ -358,6 +358,97 @@ export const html = `<!doctype html>
               </label>
               <input id="terrain-province-border-width" type="range" min="1" max="24" step="0.5" value="6.5" />
             </div>
+            <div class="control">
+              <label for="terrain-province-size-variance">
+                Size Variance <span id="terrain-province-size-variance-value">0.40</span>
+              </label>
+              <input
+                id="terrain-province-size-variance"
+                type="range"
+                min="0"
+                max="0.75"
+                step="0.05"
+                value="0.4"
+              />
+            </div>
+            <div class="control">
+              <label for="terrain-province-passage-elevation">
+                Passage Threshold <span id="terrain-province-passage-elevation-value">6</span>
+              </label>
+              <input
+                id="terrain-province-passage-elevation"
+                type="range"
+                min="0"
+                max="32"
+                step="1"
+                value="6"
+              />
+            </div>
+            <div class="control">
+              <label for="terrain-province-river-penalty">
+                River Penalty <span id="terrain-province-river-penalty-value">0.60</span>
+              </label>
+              <input
+                id="terrain-province-river-penalty"
+                type="range"
+                min="0"
+                max="2"
+                step="0.1"
+                value="0.6"
+              />
+            </div>
+            <div class="control">
+              <label for="terrain-province-small-island">
+                Small Island Multiplier <span id="terrain-province-small-island-value">0.35</span>
+              </label>
+              <input
+                id="terrain-province-small-island"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value="0.35"
+              />
+            </div>
+            <div class="control">
+              <label for="terrain-province-archipelago">
+                Archipelago Multiplier <span id="terrain-province-archipelago-value">0.20</span>
+              </label>
+              <input
+                id="terrain-province-archipelago"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value="0.2"
+              />
+            </div>
+            <div class="control">
+              <label for="terrain-province-island-single">
+                Island Single Multiplier <span id="terrain-province-island-single-value">1.60</span>
+              </label>
+              <input
+                id="terrain-province-island-single"
+                type="range"
+                min="1"
+                max="3"
+                step="0.1"
+                value="1.6"
+              />
+            </div>
+            <div class="control">
+              <label for="terrain-province-archipelago-radius">
+                Archipelago Radius <span id="terrain-province-archipelago-radius-value">3.0</span>
+              </label>
+              <input
+                id="terrain-province-archipelago-radius"
+                type="range"
+                min="1"
+                max="6"
+                step="0.5"
+                value="3"
+              />
+            </div>
             <div class="control toggle">
               <label for="terrain-province-land-borders">
                 <input id="terrain-province-land-borders" type="checkbox" checked />
