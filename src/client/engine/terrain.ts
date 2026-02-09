@@ -664,9 +664,9 @@ export function renderTerrain(
 	const baseLayer = ensureBaseLayer(terrainLayer);
 	const riverLayer = ensureRiverLayer(terrainLayer);
 	const provinceLayer = ensureProvinceLayer(terrainLayer);
-	baseLayer.removeChildren();
-	riverLayer.removeChildren();
-	provinceLayer.removeChildren();
+	clearLayerChildren(baseLayer);
+	clearLayerChildren(riverLayer);
+	clearLayerChildren(provinceLayer);
 
 	const waterTint = new window.PIXI.Graphics();
 	waterTint.rect(0, 0, config.width, config.height);
@@ -3411,6 +3411,14 @@ function ensureProvinceLayer(terrainLayer: any): any {
 	return provinceLayer;
 }
 
+function clearLayerChildren(layer: any): void {
+	const removed = layer.removeChildren();
+	for (let i = 0; i < removed.length; i += 1) {
+		const child = removed[i] as { destroy?: (options?: { children?: boolean }) => void };
+		child?.destroy?.({ children: true });
+	}
+}
+
 export function updateProvinceBorders(terrainLayer: any, controls: TerrainControls): void {
 	if (!terrainLayer) {
 		return;
@@ -3420,7 +3428,7 @@ export function updateProvinceBorders(terrainLayer: any, controls: TerrainContro
 		return;
 	}
 	const provinceLayer = ensureProvinceLayer(terrainLayer);
-	provinceLayer.removeChildren();
+	clearLayerChildren(provinceLayer);
 	renderProvinceBorders(
 		cache.mesh,
 		cache.refinedGeometry,
