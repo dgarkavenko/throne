@@ -347,6 +347,32 @@ export const html = `<!doctype html>
               <input id="terrain-province-count" type="range" min="1" max="32" step="1" value="8" />
             </div>
             <div class="control">
+              <label for="terrain-province-mountain-threshold">
+                Mountain Passage Threshold <span id="terrain-province-mountain-threshold-value">0.65</span>
+              </label>
+              <input
+                id="terrain-province-mountain-threshold"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value="0.65"
+              />
+            </div>
+            <div class="control">
+              <label for="terrain-province-single-island-max">
+                Single-Island Max % Land <span id="terrain-province-single-island-max-value">10</span>
+              </label>
+              <input
+                id="terrain-province-single-island-max"
+                type="range"
+                min="0"
+                max="25"
+                step="1"
+                value="10"
+              />
+            </div>
+            <div class="control">
               <label for="terrain-province-border-width">
                 Border Width <span id="terrain-province-border-width-value">6.5</span>
               </label>

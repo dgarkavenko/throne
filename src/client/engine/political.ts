@@ -1,4 +1,5 @@
-import { clamp, vec2Len, vec2LenSq, vec2Sub, type Vec2 } from './throne-math';
+import { clamp, vec2Len, vec2Sub, type Vec2 } from './throne-math';
+import type { RiverNetwork } from './rivers';
 
 type MeshFace = {
 	index: number;
@@ -19,6 +20,8 @@ type MeshGraph = {
 export type PoliticalControls = {
 	provinceCount: number;
 	spacing: number;
+	provinceMountainPassageThreshold: number;
+	provinceSingleIslandMaxPercent: number;
 };
 
 export type ProvinceFace = {
@@ -30,6 +33,8 @@ export type ProvinceFace = {
 	outerEdges: number[];
 	// Neighboring province indices (unique, excludes water).
 	adjacentProvinces: number[];
+	// Neighboring province indices reachable via passable edges.
+	connectedProvinces: number[];
 };
 
 export type ProvinceOuterEdge = {
@@ -63,6 +68,7 @@ type ProvinceSeedState = {
 	seedFaces: number[];
 	landFaces: number[];
 	isLand: boolean[];
+	provinceCount: number;
 };
 
 type ProvinceHeapEntry = {
@@ -72,11 +78,29 @@ type ProvinceHeapEntry = {
 	faceId: number;
 };
 
+type EdgeKey = `${number}:${number}`;
+
+const MAX_LAND_ELEVATION = 32;
+
+type PassabilityResult = {
+	isEdgePassable: (faceA: number, faceB: number) => boolean;
+	edgeByFacePair: Map<EdgeKey, number>;
+};
+
+type IslandPlan = {
+	faces: number[];
+	size: number;
+	forceSingle: boolean;
+	passableComponents: number[][];
+	minSeeds: number;
+	seedCount: number;
+};
 
 export function basegenPolitical(
 	mesh: MeshGraph,
 	controls: PoliticalControls,
-	random: () => number
+	random: () => number,
+	riverNetwork?: RiverNetwork
 ): ProvinceGraph {
 	const faceCount = mesh.faces.length;
 	const provinceByFace = new Array<number>(faceCount).fill(-1);
@@ -112,144 +136,84 @@ export function basegenPolitical(
 	}
 
 	const components = getLandComponents(mesh, isLand);
-	const componentStats = getComponentStats(mesh, components);
-	const standardSize = Math.max(1, landFaces.length / components.length);
-	const tinyThreshold = standardSize / 3;
-	const archipelagoThreshold = standardSize * 0.5;
-	const archipelagoRadius = controls.spacing * 3;
-	const tinyComponentIds: number[] = [];
-	const majorComponentIds: number[] = [];
+	const totalLandFaces = landFaces.length;
+	const passability = buildPassability(mesh, controls, isLand, riverNetwork);
+	const maxIslandPercent = clamp(controls.provinceSingleIslandMaxPercent ?? 10, 0, 25);
 
+	const islandPlans: IslandPlan[] = [];
 	for (let i = 0; i < components.length; i += 1) {
-		if (componentStats.sizes[i] <= tinyThreshold) {
-			tinyComponentIds.push(i);
-		} else {
-			majorComponentIds.push(i);
-		}
-	}
-
-	const tinyGroups = buildTinyComponentGroups(tinyComponentIds, componentStats.centers, archipelagoRadius);
-	const eligibleTinyGroups: number[][] = [];
-	const ineligibleTinyComponentIds: number[] = [];
-	for (let i = 0; i < tinyGroups.length; i += 1) {
-		const group = tinyGroups[i];
-		let groupSize = 0;
-		for (let j = 0; j < group.length; j += 1) {
-			groupSize += componentStats.sizes[group[j]];
-		}
-		if (groupSize >= archipelagoThreshold) {
-			eligibleTinyGroups.push(group);
-		} else {
-			ineligibleTinyComponentIds.push(...group);
-		}
-	}
-
-	const provinceGroups: { faces: number[]; size: number }[] = [];
-	for (let i = 0; i < majorComponentIds.length; i += 1) {
-		const componentId = majorComponentIds[i];
-		provinceGroups.push({
-			faces: components[componentId].slice(),
-			size: componentStats.sizes[componentId],
+		const faces = components[i].slice();
+		const size = faces.length;
+		const islandPercent = (size / totalLandFaces) * 100;
+		const forceSingle = islandPercent <= maxIslandPercent;
+		const passableComponents = forceSingle
+			? [faces.slice()]
+			: getPassableComponents(mesh, faces, passability.isEdgePassable);
+		const minSeeds = forceSingle ? 1 : passableComponents.length;
+		islandPlans.push({
+			faces,
+			size,
+			forceSingle,
+			passableComponents,
+			minSeeds,
+			seedCount: minSeeds,
 		});
 	}
-	for (let i = 0; i < eligibleTinyGroups.length; i += 1) {
-		const group = eligibleTinyGroups[i];
-		const faces: number[] = [];
-		let groupSize = 0;
-		for (let j = 0; j < group.length; j += 1) {
-			const componentId = group[j];
-			faces.push(...components[componentId]);
-			groupSize += componentStats.sizes[componentId];
-		}
-		provinceGroups.push({ faces, size: groupSize });
+
+	const provinceTarget = clamp(Math.round(controls.provinceCount || 1), 1, landFaces.length);
+	const totalMinSeeds = islandPlans.reduce((sum, plan) => sum + plan.minSeeds, 0);
+	const finalTarget = totalMinSeeds > provinceTarget ? totalMinSeeds : provinceTarget;
+	const extraSeeds = finalTarget - totalMinSeeds;
+	if (extraSeeds > 0) {
+		allocateExtraSeeds(islandPlans, extraSeeds);
 	}
 
-	let annexFaces: number[] = [];
-	for (let i = 0; i < ineligibleTinyComponentIds.length; i += 1) {
-		annexFaces.push(...components[ineligibleTinyComponentIds[i]]);
-	}
-
-	if (provinceGroups.length === 0) {
-		const allFaces: number[] = [];
-		components.forEach((component) => allFaces.push(...component));
-		provinceGroups.push({ faces: allFaces, size: allFaces.length });
-		annexFaces = [];
-	}
-
-	const provinceCount = clamp(Math.round(controls.provinceCount || 1), 1, landFaces.length);
-	const groupSizes = provinceGroups.map((group) => group.size);
-	const capacity = groupSizes.reduce((sum, value) => sum + value, 0);
-	const effectiveCount = Math.min(provinceCount, capacity);
-	const groupAllocations = allocateSeedsBySizeWithCap(groupSizes, effectiveCount);
 	const seedFaces: number[] = [];
 	let provinceOffset = 0;
-
-	for (let i = 0; i < provinceGroups.length; i += 1) {
-		const group = provinceGroups[i];
-		const seedCount = groupAllocations[i];
-		if (seedCount <= 0) {
+	for (let i = 0; i < islandPlans.length; i += 1) {
+		const plan = islandPlans[i];
+		if (plan.seedCount <= 0) {
 			continue;
 		}
-		const groupFaces = group.faces;
-		const seeds = pickFarthestSeeds(groupFaces, mesh, seedCount, random);
-		const actualSeedCount = seeds.length;
-		if (actualSeedCount <= 0) {
-			continue;
+		const baseSeeds: number[] = [];
+		if (plan.forceSingle) {
+			baseSeeds.push(...pickFarthestSeeds(plan.faces, mesh, 1, random));
+		} else {
+			for (let j = 0; j < plan.passableComponents.length; j += 1) {
+				const componentFaces = plan.passableComponents[j];
+				baseSeeds.push(...pickFarthestSeeds(componentFaces, mesh, 1, random));
+			}
 		}
-		const groupIsLand = new Array<boolean>(faceCount).fill(false);
-		for (let j = 0; j < groupFaces.length; j += 1) {
-			groupIsLand[groupFaces[j]] = true;
+		const extra = Math.max(0, plan.seedCount - baseSeeds.length);
+		const seeds = pickAdditionalSeeds(plan.faces, mesh, baseSeeds, extra);
+		const planIsLand = new Array<boolean>(faceCount).fill(false);
+		for (let j = 0; j < plan.faces.length; j += 1) {
+			planIsLand[plan.faces[j]] = true;
 		}
+		const isEdgePassable = plan.forceSingle ? undefined : passability.isEdgePassable;
 		const assignment = growProvinceRegions(
 			mesh,
-			groupIsLand,
-			groupFaces,
+			planIsLand,
+			plan.faces,
 			seeds,
-			actualSeedCount,
-			controls.spacing
+			controls.spacing,
+			isEdgePassable
 		);
-		for (let j = 0; j < groupFaces.length; j += 1) {
-			const faceIndex = groupFaces[j];
+		const localProvinceCount = assignment.provinceCount;
+		for (let j = 0; j < plan.faces.length; j += 1) {
+			const faceIndex = plan.faces[j];
 			const localProvince = assignment.provinceByFace[faceIndex];
 			if (localProvince >= 0) {
 				provinceByFace[faceIndex] = localProvince + provinceOffset;
 			}
 		}
-		for (let j = 0; j < groupFaces.length; j += 1) {
-			const faceIndex = groupFaces[j];
-			if (provinceByFace[faceIndex] >= 0) {
-				continue;
-			}
-			const seedIndex = findNearestSeedIndex(mesh, faceIndex, seeds);
-			provinceByFace[faceIndex] = provinceOffset + seedIndex;
+		for (let j = 0; j < assignment.seedFaces.length; j += 1) {
+			seedFaces.push(assignment.seedFaces[j]);
 		}
-		seedFaces.push(...seeds);
-		provinceOffset += actualSeedCount;
+		provinceOffset += localProvinceCount;
 	}
 
-	if (annexFaces.length > 0 && seedFaces.length > 0) {
-		for (let i = 0; i < annexFaces.length; i += 1) {
-			const faceIndex = annexFaces[i];
-			if (provinceByFace[faceIndex] >= 0) {
-				continue;
-			}
-			const seedIndex = findNearestSeedIndex(mesh, faceIndex, seedFaces);
-			provinceByFace[faceIndex] = seedIndex;
-		}
-	}
-
-	const hasUnassigned = landFaces.some((faceIndex) => provinceByFace[faceIndex] < 0);
-	if (hasUnassigned && seedFaces.length > 0) {
-		landFaces.forEach((faceIndex) => {
-			if (provinceByFace[faceIndex] >= 0) {
-				return;
-			}
-			const seedIndex = findNearestSeedIndex(mesh, faceIndex, seedFaces);
-			provinceByFace[faceIndex] = seedIndex;
-		});
-	}
-
-	const provinceGraph = buildProvinceGraph(mesh, provinceByFace, landFaces, isLand);
+	const provinceGraph = buildProvinceGraph(mesh, provinceByFace, landFaces, isLand, passability);
 	return {
 		...provinceGraph,
 		provinceByFace,
@@ -285,139 +249,6 @@ function getLandComponents(mesh: MeshGraph, isLand: boolean[]): number[][] {
 		components.push(component);
 	}
 	return components;
-}
-
-function getComponentStats(
-	mesh: MeshGraph,
-	components: number[][]
-): { sizes: number[]; centers: Vec2[] } {
-	const sizes = new Array<number>(components.length).fill(0);
-	const centers = new Array<Vec2>(components.length);
-	for (let i = 0; i < components.length; i += 1) {
-		const component = components[i];
-		const size = component.length;
-		sizes[i] = size;
-		let sumX = 0;
-		let sumY = 0;
-		for (let j = 0; j < size; j += 1) {
-			const point = mesh.faces[component[j]].point;
-			sumX += point.x;
-			sumY += point.y;
-		}
-		const denom = size > 0 ? size : 1;
-		centers[i] = { x: sumX / denom, y: sumY / denom };
-	}
-	return { sizes, centers };
-}
-
-function buildTinyComponentGroups(
-	tinyComponentIds: number[],
-	centers: Vec2[],
-	radius: number
-): number[][] {
-	const groups: number[][] = [];
-	if (tinyComponentIds.length === 0) {
-		return groups;
-	}
-	const visited = new Array<boolean>(centers.length).fill(false);
-	const radiusSq = radius * radius;
-	for (let i = 0; i < tinyComponentIds.length; i += 1) {
-		const startId = tinyComponentIds[i];
-		if (visited[startId]) {
-			continue;
-		}
-		const stack = [startId];
-		const group: number[] = [];
-		visited[startId] = true;
-		while (stack.length > 0) {
-			const current = stack.pop() as number;
-			group.push(current);
-			const currentCenter = centers[current];
-			for (let j = 0; j < tinyComponentIds.length; j += 1) {
-				const candidate = tinyComponentIds[j];
-				if (visited[candidate]) {
-					continue;
-				}
-				const delta = vec2Sub(currentCenter, centers[candidate]);
-				if (vec2LenSq(delta) <= radiusSq) {
-					visited[candidate] = true;
-					stack.push(candidate);
-				}
-			}
-		}
-		groups.push(group);
-	}
-	return groups;
-}
-
-function allocateSeedsBySizeWithCap(sizes: number[], totalSeeds: number): number[] {
-	const allocations = new Array<number>(sizes.length).fill(0);
-	if (sizes.length === 0 || totalSeeds <= 0) {
-		return allocations;
-	}
-	if (totalSeeds < sizes.length) {
-		const sorted = sizes
-			.map((size, index) => ({ index, size }))
-			.sort((a, b) => b.size - a.size);
-		for (let i = 0; i < totalSeeds; i += 1) {
-			if (sizes[sorted[i].index] > 0) {
-				allocations[sorted[i].index] = 1;
-			}
-		}
-		return allocations;
-	}
-
-	for (let i = 0; i < sizes.length; i += 1) {
-		if (sizes[i] > 0) {
-			allocations[i] = 1;
-		}
-	}
-
-	let remaining = totalSeeds - allocations.reduce((sum, value) => sum + value, 0);
-	if (remaining > 0) {
-		const totalSize = sizes.reduce((sum, value) => sum + value, 0);
-		for (let i = 0; i < sizes.length; i += 1) {
-			const capacity = Math.max(0, sizes[i] - allocations[i]);
-			if (capacity <= 0) {
-				continue;
-			}
-			const exact = totalSize > 0 ? (sizes[i] / totalSize) * remaining : 0;
-			const extra = Math.min(capacity, Math.floor(exact));
-			if (extra > 0) {
-				allocations[i] += extra;
-			}
-		}
-		remaining = totalSeeds - allocations.reduce((sum, value) => sum + value, 0);
-		if (remaining > 0) {
-			const sorted = sizes
-				.map((size, index) => ({ index, size }))
-				.sort((a, b) => b.size - a.size);
-			for (let i = 0; i < sorted.length && remaining > 0; i += 1) {
-				const index = sorted[i].index;
-				while (allocations[index] < sizes[index] && remaining > 0) {
-					allocations[index] += 1;
-					remaining -= 1;
-				}
-			}
-		}
-	}
-	return allocations;
-}
-
-function findNearestSeedIndex(mesh: MeshGraph, faceIndex: number, seedFaces: number[]): number {
-	let bestSeed = 0;
-	let bestDist = Number.POSITIVE_INFINITY;
-	const point = mesh.faces[faceIndex].point;
-	for (let i = 0; i < seedFaces.length; i += 1) {
-		const seedFace = seedFaces[i];
-		const seedPoint = mesh.faces[seedFace].point;
-		const dist = vec2Len(vec2Sub(point, seedPoint));
-		if (dist < bestDist) {
-			bestDist = dist;
-			bestSeed = i;
-		}
-	}
-	return bestSeed;
 }
 
 function pickFarthestSeeds(
@@ -456,11 +287,53 @@ function pickFarthestSeeds(
 	return seeds;
 }
 
+function pickAdditionalSeeds(
+	componentFaces: number[],
+	mesh: MeshGraph,
+	baseSeeds: number[],
+	extraCount: number
+): number[] {
+	const seeds = baseSeeds.slice();
+	if (extraCount <= 0 || componentFaces.length === 0) {
+		return seeds;
+	}
+	while (seeds.length < baseSeeds.length + extraCount && seeds.length < componentFaces.length) {
+		let bestFace = componentFaces[0];
+		let bestDist = -1;
+		for (let i = 0; i < componentFaces.length; i += 1) {
+			const faceIndex = componentFaces[i];
+			if (seeds.includes(faceIndex)) {
+				continue;
+			}
+			let minDist = Number.POSITIVE_INFINITY;
+			const point = mesh.faces[faceIndex].point;
+			for (let s = 0; s < seeds.length; s += 1) {
+				const seedPoint = mesh.faces[seeds[s]].point;
+				const dist = vec2Len(vec2Sub(point, seedPoint));
+				if (dist < minDist) {
+					minDist = dist;
+				}
+			}
+			if (minDist > bestDist) {
+				bestDist = minDist;
+				bestFace = faceIndex;
+			}
+		}
+		if (!seeds.includes(bestFace)) {
+			seeds.push(bestFace);
+		} else {
+			break;
+		}
+	}
+	return seeds;
+}
+
 function buildProvinceGraph(
 	mesh: MeshGraph,
 	provinceByFace: number[],
 	landFaces: number[],
-	isLand: boolean[]
+	isLand: boolean[],
+	passability: PassabilityResult
 ): { faces: ProvinceFace[]; outerEdges: ProvinceOuterEdge[] } {
 	let provinceCount = 0;
 	for (let i = 0; i < landFaces.length; i += 1) {
@@ -477,6 +350,7 @@ function buildProvinceGraph(
 			faces: [],
 			outerEdges: [],
 			adjacentProvinces: [],
+			connectedProvinces: [],
 		};
 	}
 
@@ -497,6 +371,14 @@ function buildProvinceGraph(
 			faces[a].adjacentProvinces.push(b);
 		}
 	};
+	const addConnected = (a: number, b: number): void => {
+		if (a < 0 || b < 0) {
+			return;
+		}
+		if (!faces[a].connectedProvinces.includes(b)) {
+			faces[a].connectedProvinces.push(b);
+		}
+	};
 
 	const registerOuterEdge = (
 		edgeIndex: number,
@@ -515,10 +397,16 @@ function buildProvinceGraph(
 		if (provinceA >= 0) {
 			faces[provinceA].outerEdges.push(index);
 			addAdjacent(provinceA, provinceB);
+			if (provinceB >= 0 && passability.isEdgePassable(faceA, faceB)) {
+				addConnected(provinceA, provinceB);
+			}
 		}
 		if (provinceB >= 0) {
 			faces[provinceB].outerEdges.push(index);
 			addAdjacent(provinceB, provinceA);
+			if (provinceA >= 0 && passability.isEdgePassable(faceB, faceA)) {
+				addConnected(provinceB, provinceA);
+			}
 		}
 	};
 
@@ -618,13 +506,13 @@ function growProvinceRegions(
 	isLand: boolean[],
 	landFaces: number[],
 	seedFaces: number[],
-	provinceCount: number,
-	spacing: number
+	spacing: number,
+	isEdgePassable?: (faceA: number, faceB: number) => boolean
 ): ProvinceSeedState {
 	const faceCount = mesh.faces.length;
 	const provinceByFace = new Array<number>(faceCount).fill(-1);
 	const seedPoints = seedFaces.map((faceIndex) => mesh.faces[faceIndex].point);
-	const actualProvinceCount = Math.min(provinceCount, seedFaces.length);
+	const actualProvinceCount = Math.min(seedFaces.length, landFaces.length);
 	const provinceSizes = new Array<number>(actualProvinceCount).fill(0);
 	const targetSize = Math.max(1, Math.floor(landFaces.length / Math.max(1, actualProvinceCount)));
 	const balanceWeight = Math.max(8, spacing * 1.1);
@@ -637,6 +525,9 @@ function growProvinceRegions(
 		const face = mesh.faces[seedFace];
 		for (let j = 0; j < face.adjacentFaces.length; j += 1) {
 			const neighbor = face.adjacentFaces[j];
+			if (isEdgePassable && !isEdgePassable(seedFace, neighbor)) {
+				continue;
+			}
 			if (!isLand[neighbor] || provinceByFace[neighbor] >= 0) {
 				continue;
 			}
@@ -659,6 +550,9 @@ function growProvinceRegions(
 		const face = mesh.faces[entry.faceId];
 		for (let j = 0; j < face.adjacentFaces.length; j += 1) {
 			const neighbor = face.adjacentFaces[j];
+			if (isEdgePassable && !isEdgePassable(entry.faceId, neighbor)) {
+				continue;
+			}
 			if (!isLand[neighbor] || provinceByFace[neighbor] >= 0) {
 				continue;
 			}
@@ -668,5 +562,178 @@ function growProvinceRegions(
 		}
 	}
 
-	return { provinceByFace, seedFaces, landFaces, isLand };
+	const fallbackSeeds: number[] = [];
+	let provinceCount = actualProvinceCount;
+	const unassigned = landFaces.filter((faceIndex) => provinceByFace[faceIndex] < 0);
+	if (unassigned.length > 0) {
+		const components = getPassableComponents(
+			mesh,
+			unassigned,
+			(a, b) => {
+				if (!isEdgePassable) {
+					return true;
+				}
+				return isEdgePassable(a, b);
+			},
+			new Set(unassigned)
+		);
+		for (let i = 0; i < components.length; i += 1) {
+			const component = components[i];
+			if (component.length === 0) {
+				continue;
+			}
+			const seedFace = component[0];
+			const newProvinceId = provinceCount;
+			provinceCount += 1;
+			fallbackSeeds.push(seedFace);
+			const queue = [seedFace];
+			provinceByFace[seedFace] = newProvinceId;
+			while (queue.length > 0) {
+				const current = queue.pop() as number;
+				const currentFace = mesh.faces[current];
+				for (let j = 0; j < currentFace.adjacentFaces.length; j += 1) {
+					const neighbor = currentFace.adjacentFaces[j];
+					if (!isLand[neighbor] || provinceByFace[neighbor] >= 0) {
+						continue;
+					}
+					if (isEdgePassable && !isEdgePassable(current, neighbor)) {
+						continue;
+					}
+					provinceByFace[neighbor] = newProvinceId;
+					queue.push(neighbor);
+				}
+			}
+		}
+	}
+
+	return {
+		provinceByFace,
+		seedFaces: seedFaces.concat(fallbackSeeds),
+		landFaces,
+		isLand,
+		provinceCount,
+	};
+}
+
+function buildPassability(
+	mesh: MeshGraph,
+	controls: PoliticalControls,
+	isLand: boolean[],
+	riverNetwork?: RiverNetwork
+): PassabilityResult {
+	const edgeByFacePair = new Map<EdgeKey, number>();
+	for (let e = 0; e < mesh.edges.length; e += 1) {
+		const edge = mesh.edges[e];
+		const [faceA, faceB] = edge.faces;
+		if (faceA < 0 || faceB < 0) {
+			continue;
+		}
+		const key: EdgeKey = faceA < faceB ? `${faceA}:${faceB}` : `${faceB}:${faceA}`;
+		edgeByFacePair.set(key, e);
+	}
+	const threshold = clamp(controls.provinceMountainPassageThreshold ?? 0.65, 0, 1);
+	const barrierEdgeSet = riverNetwork?.barrierEdgeSet ?? new Set<number>();
+	const isEdgePassable = (faceA: number, faceB: number): boolean => {
+		if (!isLand[faceA] || !isLand[faceB]) {
+			return false;
+		}
+		const key: EdgeKey = faceA < faceB ? `${faceA}:${faceB}` : `${faceB}:${faceA}`;
+		const edgeIndex = edgeByFacePair.get(key);
+		if (edgeIndex === undefined) {
+			return false;
+		}
+		if (barrierEdgeSet.has(edgeIndex)) {
+			return false;
+		}
+		const elevA = mesh.faces[faceA].elevation;
+		const elevB = mesh.faces[faceB].elevation;
+		const mountainScore = Math.min(elevA, elevB) / MAX_LAND_ELEVATION;
+		if (mountainScore >= threshold) {
+			return false;
+		}
+		return true;
+	};
+	return { isEdgePassable, edgeByFacePair };
+}
+
+function getPassableComponents(
+	mesh: MeshGraph,
+	faces: number[],
+	isEdgePassable: (faceA: number, faceB: number) => boolean,
+	allowedSet?: Set<number>
+): number[][] {
+	const set = allowedSet ?? new Set<number>(faces);
+	const visited = new Set<number>();
+	const components: number[][] = [];
+	for (let i = 0; i < faces.length; i += 1) {
+		const start = faces[i];
+		if (!set.has(start) || visited.has(start)) {
+			continue;
+		}
+		const stack = [start];
+		const component: number[] = [];
+		visited.add(start);
+		while (stack.length > 0) {
+			const current = stack.pop() as number;
+			component.push(current);
+			const face = mesh.faces[current];
+			for (let j = 0; j < face.adjacentFaces.length; j += 1) {
+				const neighbor = face.adjacentFaces[j];
+				if (!set.has(neighbor) || visited.has(neighbor)) {
+					continue;
+				}
+				if (!isEdgePassable(current, neighbor)) {
+					continue;
+				}
+				visited.add(neighbor);
+				stack.push(neighbor);
+			}
+		}
+		components.push(component);
+	}
+	return components;
+}
+
+function allocateExtraSeeds(plans: IslandPlan[], totalExtras: number): void {
+	if (totalExtras <= 0) {
+		return;
+	}
+	const candidates = plans.map((plan) => ({
+		plan,
+		capacity: plan.forceSingle ? 0 : Math.max(0, plan.size - plan.minSeeds),
+	}));
+	let remaining = totalExtras;
+	const totalSize = candidates.reduce((sum, entry) => sum + (entry.capacity > 0 ? entry.plan.size : 0), 0);
+	if (totalSize > 0) {
+		for (let i = 0; i < candidates.length; i += 1) {
+			const entry = candidates[i];
+			if (entry.capacity <= 0) {
+				continue;
+			}
+			const exact = (entry.plan.size / totalSize) * remaining;
+			const extra = Math.min(entry.capacity, Math.floor(exact));
+			if (extra > 0) {
+				entry.plan.seedCount += extra;
+				entry.capacity -= extra;
+				remaining -= extra;
+			}
+		}
+	}
+	if (remaining > 0) {
+		const sorted = candidates
+			.filter((entry) => entry.capacity > 0)
+			.sort((a, b) => b.plan.size - a.plan.size);
+		let idx = 0;
+		while (remaining > 0 && sorted.length > 0) {
+			const entry = sorted[idx % sorted.length];
+			if (entry.capacity <= 0) {
+				idx += 1;
+				continue;
+			}
+			entry.plan.seedCount += 1;
+			entry.capacity -= 1;
+			remaining -= 1;
+			idx += 1;
+		}
+	}
 }

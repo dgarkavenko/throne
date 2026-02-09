@@ -9,6 +9,7 @@ import {
   type TerrainRefineResult,
 } from './terrain';
 import { basegenPolitical, type ProvinceGraph } from './political';
+import { buildRiverNetwork } from './rivers';
 import type { PlayerState } from '../types';
 
 type GameEntity = {
@@ -89,6 +90,8 @@ export class GameEngine {
     waterWarpStrength: 0.7,
     riverDensity: 1,
     riverBranchChance: 0.25,
+    provinceMountainPassageThreshold: 0.65,
+    provinceSingleIslandMaxPercent: 10,
   };
   private hasTerrain = false;
 
@@ -177,6 +180,16 @@ export class GameEngine {
       waterWarpStrength: this.clamp(Math.round(safeValue(nextControls.waterWarpStrength, 0.7) * 100) / 100, 0, 0.8),
       riverDensity: this.clamp(Math.round(safeValue(nextControls.riverDensity, 1) * 10) / 10, 0, 2),
       riverBranchChance: this.clamp(Math.round(safeValue(nextControls.riverBranchChance, 0.25) * 100) / 100, 0, 1),
+      provinceMountainPassageThreshold: this.clamp(
+        Math.round(safeValue(nextControls.provinceMountainPassageThreshold, 0.65) * 100) / 100,
+        0,
+        1
+      ),
+      provinceSingleIslandMaxPercent: this.clamp(
+        Math.round(safeValue(nextControls.provinceSingleIslandMaxPercent, 10)),
+        0,
+        25
+      ),
     };
 
     const needsRegeneration =
@@ -208,7 +221,9 @@ export class GameEngine {
       this.terrainControls.waterWarpScale !== sanitized.waterWarpScale ||
       this.terrainControls.waterWarpStrength !== sanitized.waterWarpStrength ||
       this.terrainControls.riverDensity !== sanitized.riverDensity ||
-      this.terrainControls.riverBranchChance !== sanitized.riverBranchChance;
+      this.terrainControls.riverBranchChance !== sanitized.riverBranchChance ||
+      this.terrainControls.provinceMountainPassageThreshold !== sanitized.provinceMountainPassageThreshold ||
+      this.terrainControls.provinceSingleIslandMaxPercent !== sanitized.provinceSingleIslandMaxPercent;
 
     this.terrainControls = sanitized;
 
@@ -383,8 +398,16 @@ export class GameEngine {
     const riverSeed = (this.terrainControls.seed ^ 0x9e3779b9) >>> 0;
     const riverRandom = createRng(riverSeed);
     const base = terrainBasegen(config, this.terrainControls, random);
-    const provinceGraph = basegenPolitical(base.mesh, this.terrainControls, random);
-    const refined = terrainRefine(base.mesh, provinceGraph, this.terrainControls, intermediateRandom, riverRandom);
+    const riverNetwork = buildRiverNetwork(base.mesh, this.terrainControls, riverRandom);
+    const provinceGraph = basegenPolitical(base.mesh, this.terrainControls, random, riverNetwork);
+    const refined = terrainRefine(
+      base.mesh,
+      provinceGraph,
+      this.terrainControls,
+      intermediateRandom,
+      riverRandom,
+      riverNetwork
+    );
 
     this.terrainState = { base, provinceGraph, refined };
     renderTerrainLayer(config, this.terrainControls, this.layers.terrain, base, provinceGraph, refined);

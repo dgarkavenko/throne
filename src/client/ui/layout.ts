@@ -6,6 +6,8 @@ type TerrainSettings = {
   showCenterNodes: boolean;
   showInsertedPoints: boolean;
   provinceCount: number;
+  provinceMountainPassageThreshold: number;
+  provinceSingleIslandMaxPercent: number;
   provinceBorderWidth: number;
   showLandBorders: boolean;
   showShoreBorders: boolean;
@@ -85,6 +87,12 @@ export function createPageLayout(): PageLayout {
   const terrainGraphInsertedInput = document.getElementById('terrain-graph-inserted') as HTMLInputElement | null;
   const terrainResetButton = document.getElementById('terrain-reset') as HTMLButtonElement | null;
   const terrainProvinceCountInput = document.getElementById('terrain-province-count') as HTMLInputElement | null;
+  const terrainProvinceMountainThresholdInput = document.getElementById(
+    'terrain-province-mountain-threshold'
+  ) as HTMLInputElement | null;
+  const terrainProvinceSingleIslandMaxInput = document.getElementById(
+    'terrain-province-single-island-max'
+  ) as HTMLInputElement | null;
   const terrainProvinceBorderWidthInput = document.getElementById('terrain-province-border-width') as HTMLInputElement | null;
   const terrainProvinceLandBordersInput = document.getElementById('terrain-province-land-borders') as HTMLInputElement | null;
   const terrainProvinceShoreBordersInput = document.getElementById('terrain-province-shore-borders') as HTMLInputElement | null;
@@ -116,6 +124,8 @@ export function createPageLayout(): PageLayout {
   const terrainRiverDensityValue = document.getElementById('terrain-river-density-value');
   const terrainRiverBranchChanceValue = document.getElementById('terrain-river-branch-chance-value');
   const terrainProvinceCountValue = document.getElementById('terrain-province-count-value');
+  const terrainProvinceMountainThresholdValue = document.getElementById('terrain-province-mountain-threshold-value');
+  const terrainProvinceSingleIslandMaxValue = document.getElementById('terrain-province-single-island-max-value');
   const terrainProvinceBorderWidthValue = document.getElementById('terrain-province-border-width-value');
   const terrainLandReliefValue = document.getElementById('terrain-land-relief-value');
   const terrainRidgeStrengthValue = document.getElementById('terrain-ridge-strength-value');
@@ -222,6 +232,12 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainProvinceCountInput) {
       terrainProvinceCountInput.value = terrainProvinceCountInput.defaultValue;
+    }
+    if (terrainProvinceMountainThresholdInput) {
+      terrainProvinceMountainThresholdInput.value = terrainProvinceMountainThresholdInput.defaultValue;
+    }
+    if (terrainProvinceSingleIslandMaxInput) {
+      terrainProvinceSingleIslandMaxInput.value = terrainProvinceSingleIslandMaxInput.defaultValue;
     }
     if (terrainProvinceBorderWidthInput) {
       terrainProvinceBorderWidthInput.value = terrainProvinceBorderWidthInput.defaultValue;
@@ -334,6 +350,12 @@ export function createPageLayout(): PageLayout {
     if (typeof settings.provinceCount === 'number' && terrainProvinceCountInput) {
       terrainProvinceCountInput.value = settings.provinceCount.toString();
     }
+    if (typeof settings.provinceMountainPassageThreshold === 'number' && terrainProvinceMountainThresholdInput) {
+      terrainProvinceMountainThresholdInput.value = settings.provinceMountainPassageThreshold.toString();
+    }
+    if (typeof settings.provinceSingleIslandMaxPercent === 'number' && terrainProvinceSingleIslandMaxInput) {
+      terrainProvinceSingleIslandMaxInput.value = settings.provinceSingleIslandMaxPercent.toString();
+    }
     if (typeof settings.provinceBorderWidth === 'number' && terrainProvinceBorderWidthInput) {
       terrainProvinceBorderWidthInput.value = settings.provinceBorderWidth.toString();
     }
@@ -423,6 +445,16 @@ export function createPageLayout(): PageLayout {
     const riverDensity = clamp(parseFloatWithFallback(terrainRiverDensityInput?.value, 1), 0, 2);
     const riverBranchChance = clamp(parseFloatWithFallback(terrainRiverBranchChanceInput?.value, 0.25), 0, 1);
     const provinceCount = clamp(parseIntWithFallback(terrainProvinceCountInput?.value, 8), 1, 32);
+    const provinceMountainPassageThreshold = clamp(
+      parseFloatWithFallback(terrainProvinceMountainThresholdInput?.value, 0.65),
+      0,
+      1
+    );
+    const provinceSingleIslandMaxPercent = clamp(
+      parseIntWithFallback(terrainProvinceSingleIslandMaxInput?.value, 10),
+      0,
+      25
+    );
     const provinceBorderWidth = clamp(parseFloatWithFallback(terrainProvinceBorderWidthInput?.value, 6.5), 1, 24);
     const showLandBorders = Boolean(terrainProvinceLandBordersInput?.checked);
     const showShoreBorders = Boolean(terrainProvinceShoreBordersInput?.checked);
@@ -454,6 +486,8 @@ export function createPageLayout(): PageLayout {
       showCenterNodes,
       showInsertedPoints,
       provinceCount,
+      provinceMountainPassageThreshold,
+      provinceSingleIslandMaxPercent,
       provinceBorderWidth,
       showLandBorders,
       showShoreBorders,
@@ -537,6 +571,12 @@ export function createPageLayout(): PageLayout {
     }
     if (terrainProvinceCountValue) {
       terrainProvinceCountValue.textContent = settings.provinceCount.toString();
+    }
+    if (terrainProvinceMountainThresholdValue) {
+      terrainProvinceMountainThresholdValue.textContent = settings.provinceMountainPassageThreshold.toFixed(2);
+    }
+    if (terrainProvinceSingleIslandMaxValue) {
+      terrainProvinceSingleIslandMaxValue.textContent = settings.provinceSingleIslandMaxPercent.toString();
     }
     if (terrainProvinceBorderWidthValue) {
       terrainProvinceBorderWidthValue.textContent = settings.provinceBorderWidth.toFixed(1);
@@ -643,6 +683,8 @@ export function createPageLayout(): PageLayout {
     terrainRiverDensityInput?.addEventListener('input', notify);
     terrainRiverBranchChanceInput?.addEventListener('input', notify);
     terrainProvinceCountInput?.addEventListener('input', notify);
+    terrainProvinceMountainThresholdInput?.addEventListener('input', notify);
+    terrainProvinceSingleIslandMaxInput?.addEventListener('input', notify);
     terrainProvinceBorderWidthInput?.addEventListener('input', notify);
     terrainProvinceLandBordersInput?.addEventListener('change', notify);
     terrainProvinceShoreBordersInput?.addEventListener('change', notify);
