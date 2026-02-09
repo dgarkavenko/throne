@@ -30,6 +30,28 @@ type TerrainGenerationState = {
   refined: TerrainRefineResult;
 };
 
+type Vec2 = { x: number; y: number };
+
+type ProvinceInteractionModel = {
+  facePolygons: Vec2[][];
+  faceAabbs: Array<{ minX: number; minY: number; maxX: number; maxY: number }>;
+  gridSize: number;
+  gridColumns: number;
+  gridRows: number;
+  grid: Map<number, number[]>;
+  provinceByFace: number[];
+  isLand: boolean[];
+  provinceCentroids: Array<Vec2 | null>;
+  provinceBorderPaths: Vec2[][][];
+};
+
+type ProvinceInteractionOverlay = {
+  container: any;
+  hoverGraphics: any;
+  selectedGraphics: any;
+  neighborGraphics: any;
+};
+
 type MeshOverlay = {
   container: any;
   polygonGraph: any;
@@ -52,6 +74,14 @@ export class GameEngine {
   private readonly config: GameConfig;
   private terrainState: TerrainGenerationState | null = null;
   private meshOverlay: MeshOverlay | null = null;
+  private provinceInteractionModel: ProvinceInteractionModel | null = null;
+  private provinceInteractionOverlay: ProvinceInteractionOverlay | null = null;
+  private hoveredProvinceId: number | null = null;
+  private selectedProvinceId: number | null = null;
+  private selectionListeners = new Set<(provinceId: number | null) => void>();
+  private pointerMoveHandler: ((event: PointerEvent) => void) | null = null;
+  private pointerLeaveHandler: ((event: PointerEvent) => void) | null = null;
+  private pointerDownHandler: ((event: PointerEvent) => void) | null = null;
   private terrainControls: TerrainControls = {
     spacing: 32,
     showPolygonGraph: false,
@@ -127,8 +157,9 @@ export class GameEngine {
     this.layers.world = worldLayer;
     this.layers.ui = uiLayer;
 
-    this.renderTerrain();
+    this.regenerateTerrain();
     this.setupPhysics();
+    this.setupProvinceInteractionEvents();
   }
 
   setVoronoiControls(nextControls: TerrainControls): void {
@@ -216,12 +247,13 @@ export class GameEngine {
     this.terrainControls = sanitized;
 
     if (needsRegeneration) {
-      this.renderTerrain();
+      this.regenerateTerrain();
       return;
     }
     if (this.layers.terrain) {
       updateProvinceBorders(this.layers.terrain, this.terrainControls);
       this.setGraphOverlayVisibility(this.terrainControls);
+      this.renderProvinceInteractionOverlay();
     }
   }
 
@@ -362,6 +394,21 @@ export class GameEngine {
     return this.terrainState;
   }
 
+  getHoveredProvinceId(): number | null {
+    return this.hoveredProvinceId;
+  }
+
+  getSelectedProvinceId(): number | null {
+    return this.selectedProvinceId;
+  }
+
+  onProvinceSelectionChange(listener: (provinceId: number | null) => void): () => void {
+    this.selectionListeners.add(listener);
+    return () => {
+      this.selectionListeners.delete(listener);
+    };
+  }
+
   getHistorySpawnPosition(index: number, total: number): { x: number; y: number } {
     const clampedTotal = Math.max(1, total);
     const lowerBound = this.config.height - 140;
@@ -375,10 +422,7 @@ export class GameEngine {
     };
   }
 
-  private renderTerrain(): void {
-    if (!this.layers.terrain) {
-      return;
-    }
+  private generateTerrainState(): TerrainGenerationState {
     const config = { width: this.config.width, height: this.config.height };
     const seed = this.terrainControls.seed >>> 0;
     const random = createRng(seed);
@@ -397,12 +441,368 @@ export class GameEngine {
       base.oceanWater
     );
 
-    this.terrainState = { base, provinceGraph, refined };
-    renderTerrainLayer(config, this.terrainControls, this.layers.terrain, base, provinceGraph, refined);
+    return { base, provinceGraph, refined };
+  }
+
+  private renderTerrainState(state: TerrainGenerationState): void {
+    if (!this.layers.terrain) {
+      return;
+    }
+    const config = { width: this.config.width, height: this.config.height };
+    renderTerrainLayer(config, this.terrainControls, this.layers.terrain, state.base, state.provinceGraph, state.refined);
     const overlay = this.ensureMeshOverlay(this.layers.terrain);
-    this.renderMeshOverlay(base.mesh, refined.refinedGeometry.insertedPoints, overlay);
+    this.renderMeshOverlay(state.base.mesh, state.refined.refinedGeometry.insertedPoints, overlay);
     this.setGraphOverlayVisibility(this.terrainControls);
+  }
+
+  private regenerateTerrain(): void {
+    if (!this.layers.terrain) {
+      return;
+    }
+    const state = this.generateTerrainState();
+    this.terrainState = state;
+    this.renderTerrainState(state);
+    this.rebuildProvinceInteractionModel();
+    this.renderProvinceInteractionOverlay();
     this.hasTerrain = true;
+  }
+
+  private setupProvinceInteractionEvents(): void {
+    if (!this.app) {
+      return;
+    }
+    const canvas = this.app.canvas ?? this.app.view;
+    if (!canvas || !canvas.addEventListener) {
+      return;
+    }
+    if (this.pointerMoveHandler) {
+      canvas.removeEventListener('pointermove', this.pointerMoveHandler);
+    }
+    if (this.pointerLeaveHandler) {
+      canvas.removeEventListener('pointerleave', this.pointerLeaveHandler);
+    }
+    if (this.pointerDownHandler) {
+      canvas.removeEventListener('pointerdown', this.pointerDownHandler);
+    }
+
+    this.pointerMoveHandler = (event: PointerEvent) => {
+      const position = this.getPointerWorldPosition(event);
+      if (!position) {
+        return;
+      }
+      const nextHover = this.pickProvinceAt(position.x, position.y);
+      this.setHoveredProvince(nextHover);
+    };
+    this.pointerLeaveHandler = () => {
+      this.setHoveredProvince(null);
+    };
+    this.pointerDownHandler = (event: PointerEvent) => {
+      if (event.button !== 0) {
+        return;
+      }
+      const position = this.getPointerWorldPosition(event);
+      if (!position) {
+        return;
+      }
+      const nextSelection = this.pickProvinceAt(position.x, position.y);
+      this.setSelectedProvince(nextSelection);
+    };
+
+    canvas.addEventListener('pointermove', this.pointerMoveHandler);
+    canvas.addEventListener('pointerleave', this.pointerLeaveHandler);
+    canvas.addEventListener('pointerdown', this.pointerDownHandler);
+  }
+
+  private rebuildProvinceInteractionModel(): void {
+    if (!this.terrainState) {
+      this.provinceInteractionModel = null;
+      return;
+    }
+    const { base, provinceGraph, refined } = this.terrainState;
+    const mesh = base.mesh;
+    const { refinedGeometry } = refined;
+    const faceCount = mesh.faces.length;
+    const facePolygons: Vec2[][] = new Array(faceCount);
+    const faceAabbs: Array<{ minX: number; minY: number; maxX: number; maxY: number }> = new Array(faceCount);
+    const gridSize = Math.max(32, this.terrainControls.spacing * 2);
+    const gridColumns = Math.max(1, Math.ceil(this.config.width / gridSize));
+    const gridRows = Math.max(1, Math.ceil(this.config.height / gridSize));
+    const grid = new Map<number, number[]>();
+
+    for (let i = 0; i < faceCount; i += 1) {
+      const refinedCell = refinedGeometry.refinedCells[i];
+      const baseCell = base.baseCells[i];
+      const cell = refinedCell && refinedCell.length >= 3 ? refinedCell : baseCell;
+      if (!cell || cell.length < 3) {
+        facePolygons[i] = [];
+        faceAabbs[i] = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+        continue;
+      }
+      facePolygons[i] = cell;
+      let minX = cell[0].x;
+      let maxX = cell[0].x;
+      let minY = cell[0].y;
+      let maxY = cell[0].y;
+      for (let j = 1; j < cell.length; j += 1) {
+        const point = cell[j];
+        minX = Math.min(minX, point.x);
+        maxX = Math.max(maxX, point.x);
+        minY = Math.min(minY, point.y);
+        maxY = Math.max(maxY, point.y);
+      }
+      faceAabbs[i] = { minX, minY, maxX, maxY };
+      const startX = Math.max(0, Math.floor(minX / gridSize));
+      const endX = Math.min(gridColumns - 1, Math.floor(maxX / gridSize));
+      const startY = Math.max(0, Math.floor(minY / gridSize));
+      const endY = Math.min(gridRows - 1, Math.floor(maxY / gridSize));
+      for (let gx = startX; gx <= endX; gx += 1) {
+        for (let gy = startY; gy <= endY; gy += 1) {
+          const key = gx + gy * gridColumns;
+          const bucket = grid.get(key);
+          if (bucket) {
+            bucket.push(i);
+          } else {
+            grid.set(key, [i]);
+          }
+        }
+      }
+    }
+
+    const provinceCentroids: Array<Vec2 | null> = new Array(provinceGraph.faces.length).fill(null);
+    provinceGraph.faces.forEach((province, index) => {
+      if (!province.faces || province.faces.length === 0) {
+        provinceCentroids[index] = null;
+        return;
+      }
+      let sumX = 0;
+      let sumY = 0;
+      let count = 0;
+      province.faces.forEach((faceIndex) => {
+        const point = mesh.faces[faceIndex]?.point;
+        if (!point) {
+          return;
+        }
+        sumX += point.x;
+        sumY += point.y;
+        count += 1;
+      });
+      provinceCentroids[index] = count > 0 ? { x: sumX / count, y: sumY / count } : null;
+    });
+
+    const provinceBorderPaths: Vec2[][][] = new Array(provinceGraph.faces.length);
+    provinceGraph.faces.forEach((province, index) => {
+      const segments: Vec2[][] = [];
+      province.outerEdges.forEach((edgeIndex) => {
+        const outerEdge = provinceGraph.outerEdges[edgeIndex];
+        const polyline = refinedGeometry.edgePolylines[outerEdge.edge];
+        if (polyline && polyline.length > 1) {
+          segments.push(polyline);
+        }
+      });
+      provinceBorderPaths[index] = segments;
+    });
+
+    this.provinceInteractionModel = {
+      facePolygons,
+      faceAabbs,
+      gridSize,
+      gridColumns,
+      gridRows,
+      grid,
+      provinceByFace: provinceGraph.provinceByFace,
+      isLand: provinceGraph.isLand,
+      provinceCentroids,
+      provinceBorderPaths,
+    };
+    this.hoveredProvinceId = null;
+    this.selectedProvinceId = null;
+  }
+
+  private ensureProvinceInteractionOverlay(): ProvinceInteractionOverlay | null {
+    if (!this.layers.terrain || !window.PIXI) {
+      return null;
+    }
+    if (this.provinceInteractionOverlay) {
+      const meshIndex = this.meshOverlay?.container
+        ? this.layers.terrain.children.indexOf(this.meshOverlay.container)
+        : -1;
+      if (meshIndex >= 0) {
+        const targetIndex = Math.max(0, meshIndex - 1);
+        this.layers.terrain.setChildIndex(this.provinceInteractionOverlay.container, targetIndex);
+      }
+      return this.provinceInteractionOverlay;
+    }
+    const container = new window.PIXI.Container();
+    const neighborGraphics = new window.PIXI.Graphics();
+    const hoverGraphics = new window.PIXI.Graphics();
+    const selectedGraphics = new window.PIXI.Graphics();
+    container.addChild(neighborGraphics);
+    container.addChild(hoverGraphics);
+    container.addChild(selectedGraphics);
+    const meshIndex = this.meshOverlay?.container
+      ? this.layers.terrain.children.indexOf(this.meshOverlay.container)
+      : -1;
+    if (meshIndex >= 0) {
+      this.layers.terrain.addChildAt(container, Math.max(0, meshIndex));
+    } else {
+      this.layers.terrain.addChild(container);
+    }
+    this.provinceInteractionOverlay = { container, hoverGraphics, selectedGraphics, neighborGraphics };
+    return this.provinceInteractionOverlay;
+  }
+
+  private renderProvinceInteractionOverlay(): void {
+    const overlay = this.ensureProvinceInteractionOverlay();
+    if (!overlay || !this.provinceInteractionModel) {
+      return;
+    }
+    overlay.hoverGraphics.clear();
+    overlay.selectedGraphics.clear();
+    overlay.neighborGraphics.clear();
+
+    const borderWidth = this.terrainControls.provinceBorderWidth;
+    const hoverWidth = Math.max(1, borderWidth * 0.6);
+    const selectedWidth = Math.max(2, borderWidth * 0.95);
+
+    if (this.hoveredProvinceId !== null) {
+      const segments = this.provinceInteractionModel.provinceBorderPaths[this.hoveredProvinceId];
+      if (segments && segments.length > 0) {
+        this.drawProvinceBorder(overlay.hoverGraphics, segments, 0xdcecff, 0.5, hoverWidth);
+      }
+    }
+
+    if (this.selectedProvinceId !== null) {
+      const segments = this.provinceInteractionModel.provinceBorderPaths[this.selectedProvinceId];
+      if (segments && segments.length > 0) {
+        this.drawProvinceBorder(overlay.selectedGraphics, segments, 0xffffff, 0.95, selectedWidth);
+      }
+      const center = this.provinceInteractionModel.provinceCentroids[this.selectedProvinceId];
+      const neighbors = this.terrainState?.provinceGraph.faces[this.selectedProvinceId]?.adjacentProvinces ?? [];
+      if (center && neighbors.length > 0) {
+        neighbors.forEach((neighborId) => {
+          const neighborCenter = this.provinceInteractionModel?.provinceCentroids[neighborId];
+          if (!neighborCenter) {
+            return;
+          }
+          overlay.neighborGraphics.moveTo(center.x, center.y);
+          overlay.neighborGraphics.lineTo(neighborCenter.x, neighborCenter.y);
+        });
+        overlay.neighborGraphics.stroke({ width: Math.max(1.5, borderWidth * 0.5), color: 0xffffff, alpha: 0.6 });
+      }
+    }
+  }
+
+  private drawProvinceBorder(
+    graphics: any,
+    segments: Vec2[][],
+    color: number,
+    alpha: number,
+    width: number
+  ): void {
+    segments.forEach((segment) => {
+      if (!segment || segment.length < 2) {
+        return;
+      }
+      graphics.moveTo(segment[0].x, segment[0].y);
+      for (let i = 1; i < segment.length; i += 1) {
+        graphics.lineTo(segment[i].x, segment[i].y);
+      }
+    });
+    graphics.stroke({ width, color, alpha });
+  }
+
+  private pickProvinceAt(worldX: number, worldY: number): number | null {
+    const model = this.provinceInteractionModel;
+    if (!model) {
+      return null;
+    }
+    const gridX = Math.floor(worldX / model.gridSize);
+    const gridY = Math.floor(worldY / model.gridSize);
+    if (gridX < 0 || gridY < 0 || gridX >= model.gridColumns || gridY >= model.gridRows) {
+      return null;
+    }
+    const key = gridX + gridY * model.gridColumns;
+    const candidates = model.grid.get(key);
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+    for (let i = 0; i < candidates.length; i += 1) {
+      const faceIndex = candidates[i];
+      const bounds = model.faceAabbs[faceIndex];
+      if (
+        worldX < bounds.minX ||
+        worldX > bounds.maxX ||
+        worldY < bounds.minY ||
+        worldY > bounds.maxY
+      ) {
+        continue;
+      }
+      const polygon = model.facePolygons[faceIndex];
+      if (!polygon || polygon.length < 3) {
+        continue;
+      }
+      if (!this.pointInPolygon(worldX, worldY, polygon)) {
+        continue;
+      }
+      if (!model.isLand[faceIndex]) {
+        return null;
+      }
+      const provinceId = model.provinceByFace[faceIndex];
+      return provinceId >= 0 ? provinceId : null;
+    }
+    return null;
+  }
+
+  private pointInPolygon(x: number, y: number, polygon: Vec2[]): boolean {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+      const xi = polygon[i].x;
+      const yi = polygon[i].y;
+      const xj = polygon[j].x;
+      const yj = polygon[j].y;
+      const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+      if (intersect) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  private getPointerWorldPosition(event: PointerEvent): Vec2 | null {
+    if (!this.app) {
+      return null;
+    }
+    const canvas = this.app.canvas ?? this.app.view;
+    if (!canvas || !canvas.getBoundingClientRect) {
+      return null;
+    }
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return null;
+    }
+    const scaleX = this.config.width / rect.width;
+    const scaleY = this.config.height / rect.height;
+    return {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
+    };
+  }
+
+  private setHoveredProvince(provinceId: number | null): void {
+    if (this.hoveredProvinceId === provinceId) {
+      return;
+    }
+    this.hoveredProvinceId = provinceId;
+    this.renderProvinceInteractionOverlay();
+  }
+
+  private setSelectedProvince(provinceId: number | null): void {
+    if (this.selectedProvinceId === provinceId) {
+      return;
+    }
+    this.selectedProvinceId = provinceId;
+    this.renderProvinceInteractionOverlay();
+    this.selectionListeners.forEach((listener) => listener(provinceId));
   }
 
   private clamp(value: number, min: number, max: number): number {
