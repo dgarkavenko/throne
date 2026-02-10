@@ -394,6 +394,43 @@ describe('pathfinding', () => {
 		expect(findFacePathAStar(highKGraph, 0, 2).facePath).toEqual([0, 3, 4, 2]);
 	});
 
+	it('uses deterministic tie-breaks for equal-cost alternatives', () => {
+		const points = [
+			{ x: 0, y: 0 }, // 0
+			{ x: 1, y: 1 }, // 1
+			{ x: 1, y: -1 }, // 2
+			{ x: 2, y: 0 }, // 3
+		];
+		const elevations = [2, 2, 2, 2];
+		const adjacency = [
+			[2, 1], // intentionally unsorted
+			[0, 3],
+			[0, 3],
+			[1, 2],
+		];
+		const edges: Array<[number, number]> = [
+			[0, 1],
+			[0, 2],
+			[1, 3],
+			[2, 3],
+		];
+		const graph = buildNavigationGraph(
+			makeMesh(points, elevations, adjacency, edges),
+			[true, true, true, true],
+			[false, false, false, false],
+			{
+				lowlandThreshold: 10,
+				impassableThreshold: 28,
+				elevationPower: 1,
+				elevationGainK: 1,
+				riverPenalty: 0,
+			}
+		);
+
+		expect(graph.nodes[0]?.neighbors.map((neighbor) => neighbor.neighborFaceId)).toEqual([1, 2]);
+		expect(findFacePathAStar(graph, 0, 3).facePath).toEqual([0, 1, 3]);
+	});
+
 	it('advances along polyline smoothly without overshoot', () => {
 		const points = [
 			{ x: 0, y: 0 },

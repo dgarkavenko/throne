@@ -130,6 +130,7 @@ export function buildNavigationGraph(
 			}
 			neighbors.push({ neighborFaceId, edgeId, stepCost });
 		}
+		neighbors.sort((a, b) => a.neighborFaceId - b.neighborFaceId);
 		nodes[faceId] = { faceId, point: face.point, neighbors };
 		landFaceIds.push(faceId);
 	}
@@ -439,7 +440,7 @@ class MinHeap {
 		let index = startIndex;
 		while (index > 0) {
 			const parent = Math.floor((index - 1) / 2);
-			if (this.entries[parent].score <= this.entries[index].score) {
+			if (compareHeapEntries(this.entries[parent], this.entries[index]) <= 0) {
 				break;
 			}
 			[this.entries[parent], this.entries[index]] = [this.entries[index], this.entries[parent]];
@@ -453,10 +454,16 @@ class MinHeap {
 			const left = index * 2 + 1;
 			const right = left + 1;
 			let smallest = index;
-			if (left < this.entries.length && this.entries[left].score < this.entries[smallest].score) {
+			if (
+				left < this.entries.length &&
+				compareHeapEntries(this.entries[left], this.entries[smallest]) < 0
+			) {
 				smallest = left;
 			}
-			if (right < this.entries.length && this.entries[right].score < this.entries[smallest].score) {
+			if (
+				right < this.entries.length &&
+				compareHeapEntries(this.entries[right], this.entries[smallest]) < 0
+			) {
 				smallest = right;
 			}
 			if (smallest === index) {
@@ -466,4 +473,14 @@ class MinHeap {
 			index = smallest;
 		}
 	}
+}
+
+function compareHeapEntries(a: MinHeapEntry, b: MinHeapEntry): number {
+	if (a.score < b.score) {
+		return -1;
+	}
+	if (a.score > b.score) {
+		return 1;
+	}
+	return a.faceId - b.faceId;
 }

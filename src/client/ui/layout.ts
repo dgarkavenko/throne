@@ -57,8 +57,13 @@ type PageLayout = {
   setSessionElapsed: (elapsedMs: number | null) => void;
   setFps: (fps: number | null) => void;
   setConnected: (isConnected: boolean) => void;
+  setSettingsVisible: (visible: boolean) => void;
+  setDebugControlsOnly: (onlyDebug: boolean) => void;
+  setTerrainSyncStatus: (message: string) => void;
+  setTerrainPublishVisible: (visible: boolean) => void;
   getTerrainSettings: () => TerrainSettings;
   onTerrainSettingsChange: (onChange: (settings: TerrainSettings) => void) => void;
+  onPublishTerrain: (onPublish: () => void) => void;
 };
 
 const TERRAIN_SETTINGS_STORAGE_KEY = 'throne.terrainSettings.v1';
@@ -73,6 +78,9 @@ function formatDuration(ms: number): string {
 
 export function createPageLayout(): PageLayout {
   const field = document.getElementById('field');
+  const settingsPanel = document.getElementById('settings-panel');
+  const settingsOverlayGroup = document.getElementById('settings-overlay-group') as HTMLDetailsElement | null;
+  const settingsAgentsGroup = document.getElementById('settings-agents-group') as HTMLDetailsElement | null;
   const statusEl = document.getElementById('status');
   const sessionEl = document.getElementById('session');
   const fpsEl = document.getElementById('fps');
@@ -104,7 +112,17 @@ export function createPageLayout(): PageLayout {
   const agentElevationPowerInput = document.getElementById('agent-elevation-power') as HTMLInputElement | null;
   const agentElevationGainKInput = document.getElementById('agent-elevation-gain-k') as HTMLInputElement | null;
   const agentDebugPathsInput = document.getElementById('agent-debug-paths') as HTMLInputElement | null;
+  const agentTimePerFaceControl = document.getElementById('agent-time-per-face-control') as HTMLElement | null;
+  const agentLowlandThresholdControl = document.getElementById('agent-lowland-threshold-control') as HTMLElement | null;
+  const agentImpassableThresholdControl = document.getElementById('agent-impassable-threshold-control') as HTMLElement | null;
+  const agentElevationPowerControl = document.getElementById('agent-elevation-power-control') as HTMLElement | null;
+  const agentElevationGainKControl = document.getElementById('agent-elevation-gain-k-control') as HTMLElement | null;
+  const agentDebugPathsControl = document.getElementById('agent-debug-paths-control') as HTMLElement | null;
   const terrainResetButton = document.getElementById('terrain-reset') as HTMLButtonElement | null;
+  const terrainPublishButton = document.getElementById('terrain-publish') as HTMLButtonElement | null;
+  const terrainPublishWrap = document.getElementById('terrain-publish-wrap') as HTMLElement | null;
+  const terrainSyncStatusControl = document.getElementById('terrain-sync-status-control') as HTMLElement | null;
+  const terrainSyncStatus = document.getElementById('terrain-sync-status');
   const terrainProvinceCountInput = document.getElementById('terrain-province-count') as HTMLInputElement | null;
   const terrainProvinceBorderWidthInput = document.getElementById('terrain-province-border-width') as HTMLInputElement | null;
   const terrainProvinceSizeVarianceInput = document.getElementById(
@@ -701,6 +719,59 @@ export function createPageLayout(): PageLayout {
     applyStoredSettings(storedSettings);
   }
 
+  let terrainPublishVisible = false;
+  let debugControlsOnly = false;
+  const allControlGroups = settingsPanel
+    ? Array.from(settingsPanel.querySelectorAll('.control-group')) as HTMLElement[]
+    : [];
+  const nonDebugAgentControls = [
+    agentTimePerFaceControl,
+    agentLowlandThresholdControl,
+    agentImpassableThresholdControl,
+    agentElevationPowerControl,
+    agentElevationGainKControl,
+    terrainSyncStatusControl,
+  ];
+
+  const applyTerrainPublishVisibility = (): void => {
+    if (!terrainPublishWrap) {
+      return;
+    }
+    terrainPublishWrap.hidden = !terrainPublishVisible || debugControlsOnly;
+  };
+
+  const applySettingsScope = (): void => {
+    if (!settingsPanel) {
+      return;
+    }
+    for (let i = 0; i < allControlGroups.length; i += 1) {
+      const group = allControlGroups[i];
+      const keepForDebug = group === settingsOverlayGroup || group === settingsAgentsGroup;
+      group.hidden = debugControlsOnly && !keepForDebug;
+    }
+    if (terrainResetButton) {
+      terrainResetButton.hidden = debugControlsOnly;
+    }
+    for (let i = 0; i < nonDebugAgentControls.length; i += 1) {
+      const control = nonDebugAgentControls[i];
+      if (control) {
+        control.hidden = debugControlsOnly;
+      }
+    }
+    if (agentDebugPathsControl) {
+      agentDebugPathsControl.hidden = false;
+    }
+    if (debugControlsOnly) {
+      if (settingsOverlayGroup) {
+        settingsOverlayGroup.open = true;
+      }
+      if (settingsAgentsGroup) {
+        settingsAgentsGroup.open = true;
+      }
+    }
+    applyTerrainPublishVisibility();
+  };
+
   const syncTerrainLabels = (): void => {
     const settings = readTerrainSettings();
     if (terrainSpacingValue) {
@@ -827,6 +898,7 @@ export function createPageLayout(): PageLayout {
   };
 
   syncTerrainLabels();
+  applySettingsScope();
 
   return {
     field,
@@ -858,6 +930,26 @@ export function createPageLayout(): PageLayout {
     },
     setConnected(isConnected) {
       document.body.classList.toggle('connected', isConnected);
+    },
+    setSettingsVisible(visible) {
+      if (!settingsPanel) {
+        return;
+      }
+      settingsPanel.toggleAttribute('hidden', !visible);
+    },
+    setDebugControlsOnly(onlyDebug) {
+      debugControlsOnly = onlyDebug;
+      applySettingsScope();
+    },
+    setTerrainSyncStatus(message) {
+      if (!terrainSyncStatus) {
+        return;
+      }
+      terrainSyncStatus.textContent = message;
+    },
+    setTerrainPublishVisible(visible) {
+      terrainPublishVisible = visible;
+      applyTerrainPublishVisibility();
     },
     getTerrainSettings() {
       return readTerrainSettings();
@@ -927,6 +1019,14 @@ export function createPageLayout(): PageLayout {
     agentElevationGainKInput?.addEventListener('input', notify);
     agentDebugPathsInput?.addEventListener('change', notify);
     terrainResetButton?.addEventListener('click', reset);
+    },
+    onPublishTerrain(onPublish) {
+      if (!terrainPublishButton) {
+        return;
+      }
+      terrainPublishButton.addEventListener('click', () => {
+        onPublish();
+      });
     },
   };
 }

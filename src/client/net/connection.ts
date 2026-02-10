@@ -1,18 +1,34 @@
-import type { HistoryEntry, LaunchMessage, PlayerState, ServerMessage } from '../types';
+import type {
+  ActorCommandMessage,
+  ActorRejectMessage,
+  HistoryEntry,
+  LaunchMessage,
+  PlayerState,
+  ServerMessage,
+  TerrainSnapshot,
+  TerrainSnapshotMessage,
+  WorldSnapshotMessage,
+} from '../types';
 
 type ConnectionEvents = {
   onStatus?: (message: string) => void;
   onConnected?: (roomId: string) => void;
   onDisconnected?: () => void;
   onWelcome?: (playerId: string) => void;
-  onState?: (players: PlayerState[], sessionStart: number | null) => void;
+  onState?: (players: PlayerState[], sessionStart: number | null, hostId: string | null) => void;
   onHistory?: (messages: HistoryEntry[]) => void;
   onLaunch?: (message: LaunchMessage) => void;
+  onTerrainSnapshot?: (message: TerrainSnapshotMessage) => void;
+  onActorCommand?: (message: ActorCommandMessage) => void;
+  onWorldSnapshot?: (message: WorldSnapshotMessage) => void;
+  onActorReject?: (message: ActorRejectMessage) => void;
 };
 
 type Connection = {
   sendTyping: (text: string) => void;
   sendLaunch: (text: string) => void;
+  publishTerrainSnapshot: (terrain: TerrainSnapshot, clientVersion?: number) => void;
+  sendActorMove: (actorId: string, targetFace: number, commandId: number, terrainVersion: number) => void;
 };
 
 export function connectToRoom(events: ConnectionEvents = {}): Connection {
@@ -39,15 +55,38 @@ export function connectToRoom(events: ConnectionEvents = {}): Connection {
     const payload = JSON.parse(event.data) as ServerMessage;
     if (payload.type === 'welcome') {
       events.onWelcome?.(payload.id);
+      return;
     }
     if (payload.type === 'state') {
-      events.onState?.(payload.players || [], typeof payload.sessionStart === 'number' ? payload.sessionStart : null);
+      events.onState?.(
+        payload.players || [],
+        typeof payload.sessionStart === 'number' ? payload.sessionStart : null,
+        typeof payload.hostId === 'string' ? payload.hostId : null
+      );
+      return;
     }
     if (payload.type === 'history' && Array.isArray(payload.messages)) {
       events.onHistory?.(payload.messages);
+      return;
     }
     if (payload.type === 'launch') {
       events.onLaunch?.(payload);
+      return;
+    }
+    if (payload.type === 'terrain_snapshot') {
+      events.onTerrainSnapshot?.(payload);
+      return;
+    }
+    if (payload.type === 'actor_command') {
+      events.onActorCommand?.(payload);
+      return;
+    }
+    if (payload.type === 'world_snapshot') {
+      events.onWorldSnapshot?.(payload);
+      return;
+    }
+    if (payload.type === 'actor_reject') {
+      events.onActorReject?.(payload);
     }
   });
 
@@ -60,28 +99,41 @@ export function connectToRoom(events: ConnectionEvents = {}): Connection {
     events.onDisconnected?.();
   });
 
+  const send = (payload: object): void => {
+    if (socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    socket.send(JSON.stringify(payload));
+  };
+
   return {
     sendTyping(text) {
-      if (socket.readyState !== WebSocket.OPEN) {
-        return;
-      }
-      socket.send(
-        JSON.stringify({
-          type: 'typing',
-          text,
-        })
-      );
+      send({
+        type: 'typing',
+        text,
+      });
     },
     sendLaunch(text) {
-      if (socket.readyState !== WebSocket.OPEN) {
-        return;
-      }
-      socket.send(
-        JSON.stringify({
-          type: 'launch',
-          text,
-        })
-      );
+      send({
+        type: 'launch',
+        text,
+      });
+    },
+    publishTerrainSnapshot(terrain, clientVersion = Date.now()) {
+      send({
+        type: 'terrain_publish',
+        terrain,
+        clientVersion,
+      });
+    },
+    sendActorMove(actorId, targetFace, commandId, terrainVersion) {
+      send({
+        type: 'actor_move',
+        actorId,
+        targetFace,
+        commandId,
+        terrainVersion,
+      });
     },
   };
 }

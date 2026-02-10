@@ -199,7 +199,7 @@ export const html = `<!doctype html>
       <div class="session" id="session">Session: --:--</div>
       <div class="fps" id="fps">FPS: --</div>
       <div class="layout">
-        <div class="controls">
+        <div class="controls" id="settings-panel">
           <button class="control-button" id="terrain-reset" type="button">Reset Settings</button>
           <details class="control-group">
             <summary>Sampling</summary>
@@ -493,7 +493,7 @@ export const html = `<!doctype html>
               <input id="terrain-intermediate-abs-magnitude" type="range" min="0" max="10" step="0.1" value="2" />
             </div>
           </details>
-          <details class="control-group" open>
+          <details class="control-group" id="settings-overlay-group" open>
             <summary>Overlay</summary>
             <div class="control toggle">
               <label for="terrain-graph-polygons">
@@ -526,42 +526,50 @@ export const html = `<!doctype html>
               </label>
             </div>
           </details>
-          <details class="control-group">
+          <details class="control-group" id="settings-agents-group">
             <summary>Agents</summary>
-            <div class="control">
+            <div class="control" id="agent-time-per-face-control">
               <label for="agent-time-per-face">
                 Time / Face (s) <span id="agent-time-per-face-value">180</span>
               </label>
               <input id="agent-time-per-face" type="range" min="1" max="600" step="1" value="180" />
             </div>
-            <div class="control">
+            <div class="control" id="agent-lowland-threshold-control">
               <label for="agent-lowland-threshold">
                 Lowland Threshold <span id="agent-lowland-threshold-value">10</span>
               </label>
               <input id="agent-lowland-threshold" type="range" min="1" max="31" step="1" value="10" />
             </div>
-            <div class="control">
+            <div class="control" id="agent-impassable-threshold-control">
               <label for="agent-impassable-threshold">
                 Impassable Threshold <span id="agent-impassable-threshold-value">28</span>
               </label>
               <input id="agent-impassable-threshold" type="range" min="2" max="32" step="1" value="28" />
             </div>
-            <div class="control">
+            <div class="control" id="agent-elevation-power-control">
               <label for="agent-elevation-power">
                 Elevation Power <span id="agent-elevation-power-value">0.80</span>
               </label>
               <input id="agent-elevation-power" type="range" min="0.5" max="2" step="0.05" value="0.8" />
             </div>
-            <div class="control">
+            <div class="control" id="agent-elevation-gain-k-control">
               <label for="agent-elevation-gain-k">
                 Elevation Gain k <span id="agent-elevation-gain-k-value">1.00</span>
               </label>
               <input id="agent-elevation-gain-k" type="range" min="0" max="4" step="0.05" value="1" />
             </div>
-            <div class="control toggle">
+            <div class="control toggle" id="agent-debug-paths-control">
               <label for="agent-debug-paths">
-                <input id="agent-debug-paths" type="checkbox" />
+                <input id="agent-debug-paths" type="checkbox" checked />
                 Draw Paths (Debug)
+              </label>
+            </div>
+            <div class="control" id="terrain-publish-wrap" hidden>
+              <button class="control-button" id="terrain-publish" type="button">Publish Terrain To Server</button>
+            </div>
+            <div class="control" id="terrain-sync-status-control">
+              <label>
+                Terrain Sync <span id="terrain-sync-status">Unsynced</span>
               </label>
             </div>
           </details>

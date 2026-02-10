@@ -19,7 +19,6 @@ import {
 } from './terrain';
 import { basegenPolitical, type ProvinceGraph } from './political';
 import {
-  advanceAlongPolyline,
   buildNavigationGraph,
   createPolylineAdvanceState,
   facePathToPoints,
@@ -27,7 +26,7 @@ import {
   type NavigationGraph,
   type PolylineAdvanceState,
 } from './pathfinding';
-import type { PlayerState } from '../types';
+import type { ActorCommandMessage, ActorSnapshot, PlayerState, TerrainSnapshot, WorldSnapshotMessage } from '../types';
 
 type GameEntity = {
   onAdd?: (currentGame: GameEngine) => void;
@@ -105,13 +104,21 @@ type MovementTestConfig = {
 };
 
 type MovementTestUnit = {
-  id: number;
+  actorId: string;
+  ownerId: string;
   color: number;
   sprite: any;
+  lastStateSeq: number;
+  routeStartFace: number;
+  routeTargetFace: number | null;
+  routeStartedAtServerMs: number;
+  segmentDurationsMs: number[];
+  segmentPrefixMs: number[];
+  correctionOffset: { startedAtClientMs: number; endsAtClientMs: number; offsetX: number; offsetY: number } | null;
   currentFace: number;
   targetFace: number | null;
+  commandId: number;
   facePath: number[];
-  segmentTerrainFactors: number[];
   movement: PolylineAdvanceState | null;
 };
 
@@ -137,8 +144,16 @@ export class GameEngine {
   private pointerMoveHandler: ((event: PointerEvent) => void) | null = null;
   private pointerLeaveHandler: ((event: PointerEvent) => void) | null = null;
   private pointerDownHandler: ((event: PointerEvent) => void) | null = null;
+  private contextMenuHandler: ((event: MouseEvent) => void) | null = null;
+  private localPlayerId: string | null = null;
+  private selectedActorId: string | null = null;
+  private hoveredActorId: string | null = null;
+  private lastTerrainVersion = 0;
+  private actorById = new Map<string, MovementTestUnit>();
+  private playerColorById = new Map<string, string>();
+  private actorMoveListeners = new Set<(actorId: string, targetFace: number) => void>();
   private movementTestConfig: MovementTestConfig = {
-    enabled: true,
+    enabled: false,
     unitCount: 8,
     timePerFaceSeconds: 180,
     lowlandThreshold: 10,
@@ -146,12 +161,15 @@ export class GameEngine {
     elevationPower: 0.8,
     elevationGainK: 1,
     riverPenalty: 0.8,
-    showPaths: false,
+    showPaths: true,
     spacingTarget: 16,
   };
   private navigationGraph: NavigationGraph | null = null;
   private movementUnits: MovementTestUnit[] = [];
   private movementPathGraphics: any = null;
+  private serverClockOffsetMs = 0;
+  private hasServerClockOffset = false;
+  private lastWorldSnapshotSeq = -1;
   private terrainControls: TerrainControls = {
     spacing: 16,
     showPolygonGraph: false,
@@ -544,10 +562,12 @@ export class GameEngine {
     if (!this.layers.ui || !window.PIXI) {
       return;
     }
+    this.playerColorById.clear();
     const uiLayer = this.layers.ui;
     uiLayer.removeChildren();
     this.typingPositions.clear();
     players.forEach((player, index) => {
+      this.playerColorById.set(player.id, player.color || '#f5f5f5');
       const style = new window.PIXI.TextStyle({
         fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
         fontSize: 28,
@@ -569,6 +589,7 @@ export class GameEngine {
         y: uiLayer.y + row.y + avatarText.height / 2,
       });
     });
+    this.refreshAllActorVisuals();
   }
 
   getTypingPosition(id: string): { x: number; y: number } | undefined {
@@ -585,6 +606,134 @@ export class GameEngine {
 
   getSelectedProvinceId(): number | null {
     return this.selectedProvinceId;
+  }
+
+  getTerrainVersion(): number {
+    return this.lastTerrainVersion;
+  }
+
+  setLocalPlayerId(playerId: string | null): void {
+    this.localPlayerId = playerId;
+    if (this.selectedActorId && this.actorById.get(this.selectedActorId)?.ownerId !== this.localPlayerId) {
+      this.selectedActorId = null;
+    }
+    this.refreshAllActorVisuals();
+  }
+
+  setSelectedActor(actorId: string | null): void {
+    if (actorId && this.actorById.get(actorId)?.ownerId !== this.localPlayerId) {
+      return;
+    }
+    if (this.selectedActorId === actorId) {
+      return;
+    }
+    this.selectedActorId = actorId;
+    this.refreshAllActorVisuals();
+  }
+
+  getSelectedActorId(): string | null {
+    return this.selectedActorId;
+  }
+
+  onActorMoveCommand(listener: (actorId: string, targetFace: number) => void): () => void {
+    this.actorMoveListeners.add(listener);
+    return () => {
+      this.actorMoveListeners.delete(listener);
+    };
+  }
+
+  getTerrainSnapshotForReplication(): TerrainSnapshot {
+    return {
+      controls: { ...this.terrainControls },
+      movement: {
+        timePerFaceSeconds: this.movementTestConfig.timePerFaceSeconds,
+        lowlandThreshold: this.movementTestConfig.lowlandThreshold,
+        impassableThreshold: this.movementTestConfig.impassableThreshold,
+        elevationPower: this.movementTestConfig.elevationPower,
+        elevationGainK: this.movementTestConfig.elevationGainK,
+        riverPenalty: this.movementTestConfig.riverPenalty,
+      },
+      mapWidth: this.config.width,
+      mapHeight: this.config.height,
+    };
+  }
+
+  applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void {
+    this.lastTerrainVersion = Math.max(0, Math.round(terrainVersion));
+    this.lastWorldSnapshotSeq = -1;
+    this.setVoronoiControls(snapshot.controls as TerrainControls);
+    this.setMovementTestConfig({
+      timePerFaceSeconds: snapshot.movement.timePerFaceSeconds,
+      lowlandThreshold: snapshot.movement.lowlandThreshold,
+      impassableThreshold: snapshot.movement.impassableThreshold,
+      elevationPower: snapshot.movement.elevationPower,
+      elevationGainK: snapshot.movement.elevationGainK,
+      riverPenalty: snapshot.movement.riverPenalty,
+    });
+    this.replanMovementUnitsToCurrentTargets();
+    this.renderMovementPathDebug();
+  }
+
+  applyActorCommand(command: ActorCommandMessage): void {
+    if (!this.terrainState || !this.navigationGraph || command.terrainVersion !== this.lastTerrainVersion) {
+      return;
+    }
+    const actor = this.ensureReplicatedActor(command.actorId, command.ownerId);
+    if (command.commandId < actor.commandId) {
+      return;
+    }
+    actor.commandId = command.commandId;
+    actor.routeStartFace = command.startFace;
+    actor.routeTargetFace = command.targetFace;
+    actor.routeStartedAtServerMs = command.routeStartedAtServerMs;
+    actor.currentFace = command.startFace;
+    actor.targetFace = command.targetFace;
+    actor.correctionOffset = null;
+    this.assignPathFromFaceToTarget(actor, command.startFace, command.targetFace);
+    const clientNow = Date.now();
+    const estimatedServerNow = this.getEstimatedServerNow(clientNow);
+    this.updateUnitPoseFromTimeline(actor, estimatedServerNow, clientNow);
+    this.refreshActorVisual(actor);
+    this.renderMovementPathDebug();
+  }
+
+  applyWorldSnapshot(snapshot: WorldSnapshotMessage): void {
+    if (!this.navigationGraph || !this.terrainState || snapshot.terrainVersion !== this.lastTerrainVersion) {
+      return;
+    }
+    if (snapshot.snapshotSeq <= this.lastWorldSnapshotSeq) {
+      return;
+    }
+    this.lastWorldSnapshotSeq = snapshot.snapshotSeq;
+    const clientReceiveMs = Date.now();
+    this.updateServerClockOffset(snapshot.serverTime, clientReceiveMs);
+    const estimatedServerNow = this.getEstimatedServerNow(clientReceiveMs);
+    const liveActorIds = new Set<string>();
+    for (let i = 0; i < snapshot.actors.length; i += 1) {
+      const actorSnapshot = snapshot.actors[i];
+      if (actorSnapshot.terrainVersion !== snapshot.terrainVersion) {
+        continue;
+      }
+      liveActorIds.add(actorSnapshot.actorId);
+      const actor = this.ensureReplicatedActor(actorSnapshot.actorId, actorSnapshot.ownerId);
+      if (actorSnapshot.commandId < actor.commandId || actorSnapshot.stateSeq < actor.lastStateSeq) {
+        continue;
+      }
+      this.syncActorFromSnapshot(actor, actorSnapshot, estimatedServerNow, clientReceiveMs);
+    }
+    const staleActorIds: string[] = [];
+    this.actorById.forEach((_, actorId) => {
+      if (!liveActorIds.has(actorId)) {
+        staleActorIds.push(actorId);
+      }
+    });
+    for (let i = 0; i < staleActorIds.length; i += 1) {
+      this.removeReplicatedActor(staleActorIds[i]);
+    }
+    if (this.selectedActorId && !this.actorById.has(this.selectedActorId)) {
+      this.selectedActorId = null;
+    }
+    this.renderMovementPathDebug();
   }
 
   onProvinceSelectionChange(listener: (provinceId: number | null) => void): () => void {
@@ -854,33 +1003,69 @@ export class GameEngine {
     if (this.pointerDownHandler) {
       canvas.removeEventListener('pointerdown', this.pointerDownHandler);
     }
+    if (this.contextMenuHandler) {
+      canvas.removeEventListener('contextmenu', this.contextMenuHandler);
+    }
 
     this.pointerMoveHandler = (event: PointerEvent) => {
       const position = this.getPointerWorldPosition(event);
       if (!position) {
         return;
       }
+      const hoveredActorId = this.pickActorAt(position.x, position.y);
+      if (this.hoveredActorId !== hoveredActorId) {
+        this.hoveredActorId = hoveredActorId;
+        this.refreshAllActorVisuals();
+      }
+      if (hoveredActorId) {
+        this.setHoveredProvince(null);
+        return;
+      }
       const nextHover = this.pickProvinceAt(position.x, position.y);
       this.setHoveredProvince(nextHover);
     };
     this.pointerLeaveHandler = () => {
+      this.hoveredActorId = null;
+      this.refreshAllActorVisuals();
       this.setHoveredProvince(null);
     };
     this.pointerDownHandler = (event: PointerEvent) => {
-      if (event.button !== 0) {
-        return;
-      }
       const position = this.getPointerWorldPosition(event);
       if (!position) {
         return;
       }
-      const nextSelection = this.pickProvinceAt(position.x, position.y);
-      this.setSelectedProvince(nextSelection);
+      if (event.button === 0) {
+        const actorId = this.pickActorAt(position.x, position.y);
+        if (actorId && this.actorById.get(actorId)?.ownerId === this.localPlayerId) {
+          this.setSelectedActor(actorId);
+          this.setSelectedProvince(null);
+          return;
+        }
+        const nextSelection = this.pickProvinceAt(position.x, position.y);
+        this.setSelectedProvince(nextSelection);
+        return;
+      }
+      if (event.button === 2) {
+        const selectedActorId = this.selectedActorId;
+        const selectedActor = selectedActorId ? this.actorById.get(selectedActorId) : null;
+        if (!selectedActorId || !selectedActor || selectedActor.ownerId !== this.localPlayerId) {
+          return;
+        }
+        const targetFace = this.pickFaceAt(position.x, position.y);
+        if (targetFace === null) {
+          return;
+        }
+        this.actorMoveListeners.forEach((listener) => listener(selectedActorId, targetFace));
+      }
+    };
+    this.contextMenuHandler = (event: MouseEvent) => {
+      event.preventDefault();
     };
 
     canvas.addEventListener('pointermove', this.pointerMoveHandler);
     canvas.addEventListener('pointerleave', this.pointerLeaveHandler);
     canvas.addEventListener('pointerdown', this.pointerDownHandler);
+    canvas.addEventListener('contextmenu', this.contextMenuHandler);
   }
 
   private rebuildProvinceInteractionModel(): void {
@@ -1081,7 +1266,7 @@ export class GameEngine {
     graphics.stroke({ width, color, alpha });
   }
 
-  private pickProvinceAt(worldX: number, worldY: number): number | null {
+  pickFaceAt(worldX: number, worldY: number): number | null {
     const model = this.provinceInteractionModel;
     if (!model) {
       return null;
@@ -1117,10 +1302,37 @@ export class GameEngine {
       if (!model.isLand[faceIndex]) {
         return null;
       }
-      const provinceId = model.provinceByFace[faceIndex];
-      return provinceId >= 0 ? provinceId : null;
+      return faceIndex;
     }
     return null;
+  }
+
+  pickActorAt(worldX: number, worldY: number): string | null {
+    let bestId: string | null = null;
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
+    this.actorById.forEach((actor, actorId) => {
+      const dx = worldX - actor.sprite.x;
+      const dy = worldY - actor.sprite.y;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq <= 100 && distanceSq < bestDistanceSq) {
+        bestDistanceSq = distanceSq;
+        bestId = actorId;
+      }
+    });
+    return bestId;
+  }
+
+  private pickProvinceAt(worldX: number, worldY: number): number | null {
+    const faceIndex = this.pickFaceAt(worldX, worldY);
+    if (faceIndex === null) {
+      return null;
+    }
+    const model = this.provinceInteractionModel;
+    if (!model) {
+      return null;
+    }
+    const provinceId = model.provinceByFace[faceIndex];
+    return provinceId >= 0 ? provinceId : null;
   }
 
   private pointInPolygon(x: number, y: number, polygon: Vec2[]): boolean {
@@ -1177,7 +1389,9 @@ export class GameEngine {
 
   private rebuildMovementNavigationAndUnits(): void {
     this.rebuildMovementNavigationGraph();
-    this.resetMovementUnits();
+    this.replanMovementUnitsToCurrentTargets();
+    this.syncAllActorSpritePositionsToFaces();
+    this.renderMovementPathDebug();
   }
 
   private rebuildMovementNavigationGraph(): void {
@@ -1202,6 +1416,9 @@ export class GameEngine {
   }
 
   private clearMovementUnits(): void {
+    this.actorById.clear();
+    this.selectedActorId = null;
+    this.hoveredActorId = null;
     this.movementUnits = [];
     if (!this.layers.units) {
       return;
@@ -1215,44 +1432,8 @@ export class GameEngine {
   }
 
   private resetMovementUnits(): void {
-    this.clearMovementUnits();
-    if (!this.movementTestConfig.enabled || !this.layers.units || !window.PIXI || !this.navigationGraph) {
-      this.renderMovementPathDebug();
+    if (!this.layers.units || !window.PIXI || !this.navigationGraph) {
       return;
-    }
-
-    this.ensureMovementPathGraphics();
-    const landFaceIds = this.navigationGraph.landFaceIds;
-    if (landFaceIds.length === 0) {
-      this.renderMovementPathDebug();
-      return;
-    }
-
-    const targetCount = Math.min(this.movementTestConfig.unitCount, landFaceIds.length);
-    for (let i = 0; i < targetCount; i += 1) {
-      const startFace = this.pickRandomLandFace();
-      if (startFace === null) {
-        break;
-      }
-      const node = this.navigationGraph.nodes[startFace];
-      if (!node) {
-        continue;
-      }
-      const color = this.getMovementUnitColor(i);
-      const sprite = this.createMovementUnitSprite(color);
-      sprite.x = node.point.x;
-      sprite.y = node.point.y;
-      this.layers.units.addChild(sprite);
-      this.movementUnits.push({
-        id: i,
-        color,
-        sprite,
-        currentFace: startFace,
-        targetFace: null,
-        facePath: [startFace],
-        segmentTerrainFactors: [],
-        movement: null,
-      });
     }
     this.renderMovementPathDebug();
   }
@@ -1267,67 +1448,231 @@ export class GameEngine {
     graphic.circle(0, 0, 5);
     graphic.fill({ color, alpha: 0.95 });
     graphic.stroke({ width: 2, color: 0x0b0e12, alpha: 0.9 });
+    graphic.eventMode = 'none';
+    graphic.tint = color;
     return graphic;
   }
 
-  private pickRandomLandFace(excludeFace?: number): number | null {
-    if (!this.navigationGraph || this.navigationGraph.landFaceIds.length === 0) {
-      return null;
+  private ensureReplicatedActor(actorId: string, ownerId: string): MovementTestUnit {
+    const existing = this.actorById.get(actorId);
+    if (existing) {
+      existing.ownerId = ownerId;
+      existing.color = this.resolveActorColor(ownerId, existing.color);
+      existing.sprite.tint = existing.color;
+      this.refreshActorVisual(existing);
+      return existing;
     }
-    const landFaceIds = this.navigationGraph.landFaceIds;
-    if (landFaceIds.length === 1) {
-      return excludeFace === landFaceIds[0] ? null : landFaceIds[0];
+
+    const fallbackColor = this.getMovementUnitColor(this.movementUnits.length);
+    const color = this.resolveActorColor(ownerId, fallbackColor);
+    const sprite = this.createMovementUnitSprite(color);
+    const unit: MovementTestUnit = {
+      actorId,
+      ownerId,
+      color,
+      sprite,
+      lastStateSeq: 0,
+      routeStartFace: 0,
+      routeTargetFace: null,
+      routeStartedAtServerMs: 0,
+      segmentDurationsMs: [],
+      segmentPrefixMs: [0],
+      correctionOffset: null,
+      currentFace: 0,
+      targetFace: null,
+      commandId: 0,
+      facePath: [],
+      movement: null,
+    };
+    this.actorById.set(actorId, unit);
+    this.movementUnits.push(unit);
+    if (this.layers.units) {
+      this.layers.units.addChild(sprite);
     }
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const candidate = landFaceIds[Math.floor(Math.random() * landFaceIds.length)];
-      if (candidate !== excludeFace) {
-        return candidate;
-      }
-    }
-    return landFaceIds.find((faceId) => faceId !== excludeFace) ?? null;
+    this.refreshActorVisual(unit);
+    return unit;
   }
 
-  private assignPathToUnit(unit: MovementTestUnit): void {
-    const maxAttempts = 16;
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const targetFace = this.pickRandomLandFace(unit.currentFace);
-      if (targetFace === null) {
-        break;
-      }
-      if (this.assignPathToTargetFace(unit, targetFace, false)) {
-        return;
+  private removeReplicatedActor(actorId: string): void {
+    const unit = this.actorById.get(actorId);
+    if (!unit) {
+      return;
+    }
+    this.actorById.delete(actorId);
+    const nextUnits: MovementTestUnit[] = [];
+    for (let i = 0; i < this.movementUnits.length; i += 1) {
+      const entry = this.movementUnits[i];
+      if (entry.actorId !== actorId) {
+        nextUnits.push(entry);
       }
     }
-
-    unit.targetFace = null;
-    unit.facePath = [unit.currentFace];
-    unit.segmentTerrainFactors = [];
-    unit.movement = null;
+    this.movementUnits = nextUnits;
+    if (unit.sprite?.removeFromParent) {
+      unit.sprite.removeFromParent();
+    }
+    unit.sprite?.destroy?.();
   }
 
-  private assignPathToTargetFace(unit: MovementTestUnit, targetFace: number, fromCurrentPosition: boolean): boolean {
-    if (!this.terrainState || !this.navigationGraph) {
-      unit.targetFace = null;
-      unit.segmentTerrainFactors = [];
-      unit.movement = null;
-      return false;
+  private syncActorFromSnapshot(
+    actor: MovementTestUnit,
+    snapshot: ActorSnapshot,
+    estimatedServerNow: number,
+    clientReceiveMs: number
+  ): void {
+    actor.commandId = snapshot.commandId;
+    actor.lastStateSeq = snapshot.stateSeq;
+    actor.ownerId = snapshot.ownerId;
+    actor.color = this.resolveActorColor(snapshot.ownerId, actor.color);
+    actor.sprite.tint = actor.color;
+    actor.currentFace = snapshot.currentFace;
+
+    const currentFacePoint = this.getFacePoint(snapshot.currentFace);
+    if (!snapshot.moving || snapshot.targetFace === null || snapshot.routeTargetFace === null) {
+      actor.routeStartFace = snapshot.currentFace;
+      actor.targetFace = null;
+      actor.routeTargetFace = null;
+      actor.facePath = [snapshot.currentFace];
+      actor.segmentDurationsMs = [];
+      actor.segmentPrefixMs = [0];
+      actor.movement = null;
+      actor.correctionOffset = null;
+      if (currentFacePoint) {
+        actor.sprite.x = currentFacePoint.x;
+        actor.sprite.y = currentFacePoint.y;
+      }
+      this.refreshActorVisual(actor);
+      return;
     }
 
-    if (!this.navigationGraph.nodes[targetFace]) {
-      return false;
+    actor.routeStartFace = snapshot.routeStartFace;
+    actor.routeTargetFace = snapshot.routeTargetFace;
+    actor.routeStartedAtServerMs = snapshot.routeStartedAtServerMs;
+    actor.targetFace = snapshot.targetFace;
+
+    const routeReady = this.assignPathFromFaceToTarget(actor, snapshot.routeStartFace, snapshot.routeTargetFace);
+    if (!routeReady || !actor.movement || actor.facePath.length < 2) {
+      actor.targetFace = null;
+      actor.routeTargetFace = null;
+      actor.movement = null;
+      actor.correctionOffset = null;
+      if (currentFacePoint) {
+        actor.sprite.x = currentFacePoint.x;
+        actor.sprite.y = currentFacePoint.y;
+      }
+      this.refreshActorVisual(actor);
+      return;
     }
 
+    const predicted = this.evaluateUnitTimeline(actor, estimatedServerNow);
+    if (!predicted) {
+      this.refreshActorVisual(actor);
+      return;
+    }
+
+    const segmentIndex = this.findSegmentIndexByFaces(actor.facePath, snapshot.segmentFromFace, snapshot.segmentToFace);
+    const topologyMismatch = segmentIndex < 0;
+    const authoritativeT = this.clamp(snapshot.segmentTQ16 / 65535, 0, 1);
+    const fromPoint = topologyMismatch
+      ? predicted.fromPoint
+      : actor.movement.points[segmentIndex];
+    const toPoint = topologyMismatch
+      ? predicted.toPoint
+      : actor.movement.points[segmentIndex + 1] ?? predicted.toPoint;
+    const authoritativePos = this.computeLerp(fromPoint, toPoint, authoritativeT);
+    const drift = Math.hypot(authoritativePos.x - predicted.position.x, authoritativePos.y - predicted.position.y);
+
+    if (topologyMismatch || drift > 32) {
+      const safeSegmentIndex = topologyMismatch ? predicted.segmentIndex : segmentIndex;
+      const segmentDuration = actor.segmentDurationsMs[safeSegmentIndex] ?? 0;
+      const elapsedToAuthoritativePoint =
+        (actor.segmentPrefixMs[safeSegmentIndex] ?? 0) + segmentDuration * authoritativeT;
+      actor.routeStartedAtServerMs = estimatedServerNow - elapsedToAuthoritativePoint;
+      actor.correctionOffset = null;
+    } else if (drift > 6) {
+      actor.correctionOffset = {
+        startedAtClientMs: clientReceiveMs,
+        endsAtClientMs: clientReceiveMs + 150,
+        offsetX: authoritativePos.x - predicted.position.x,
+        offsetY: authoritativePos.y - predicted.position.y,
+      };
+    } else {
+      actor.correctionOffset = null;
+    }
+
+    this.updateUnitPoseFromTimeline(actor, estimatedServerNow, clientReceiveMs);
+    this.refreshActorVisual(actor);
+  }
+
+  private syncAllActorSpritePositionsToFaces(): void {
+    if (!this.navigationGraph) {
+      return;
+    }
+    const clientNow = Date.now();
+    const estimatedServerNow = this.getEstimatedServerNow(clientNow);
+    for (let i = 0; i < this.movementUnits.length; i += 1) {
+      this.updateUnitPoseFromTimeline(this.movementUnits[i], estimatedServerNow, clientNow);
+      this.refreshActorVisual(this.movementUnits[i]);
+    }
+  }
+
+  private refreshAllActorVisuals(): void {
+    for (let i = 0; i < this.movementUnits.length; i += 1) {
+      this.refreshActorVisual(this.movementUnits[i]);
+    }
+  }
+
+  private refreshActorVisual(actor: MovementTestUnit): void {
+    if (!actor.sprite) {
+      return;
+    }
+    const isSelected = this.selectedActorId === actor.actorId;
+    const isHovered = this.hoveredActorId === actor.actorId;
+    const isOwned = actor.ownerId === this.localPlayerId;
+    const scale = isSelected ? 1.45 : isHovered ? 1.2 : 1;
+    actor.sprite.scale?.set?.(scale, scale);
+    actor.sprite.alpha = isOwned ? 0.97 : 0.88;
+  }
+
+  private resolveActorColor(ownerId: string, fallbackColor: number): number {
+    const cssColor = this.playerColorById.get(ownerId);
+    if (!cssColor) {
+      return fallbackColor;
+    }
+    const normalized = cssColor.trim();
+    const match6 = /^#([0-9a-f]{6})$/i.exec(normalized);
+    if (match6) {
+      return Number.parseInt(match6[1], 16);
+    }
+    const match3 = /^#([0-9a-f]{3})$/i.exec(normalized);
+    if (match3) {
+      const expanded = `${match3[1][0]}${match3[1][0]}${match3[1][1]}${match3[1][1]}${match3[1][2]}${match3[1][2]}`;
+      return Number.parseInt(expanded, 16);
+    }
+    return fallbackColor;
+  }
+
+  private assignPathToTargetFace(unit: MovementTestUnit, targetFace: number, _fromCurrentPosition: boolean): boolean {
     const startFace = this.resolveUnitPathStartFace(unit);
-    if (startFace === null || !this.navigationGraph.nodes[startFace]) {
+    if (startFace === null) {
+      return false;
+    }
+    return this.assignPathFromFaceToTarget(unit, startFace, targetFace);
+  }
+
+  private assignPathFromFaceToTarget(unit: MovementTestUnit, startFace: number, targetFace: number): boolean {
+    if (!this.terrainState || !this.navigationGraph || !this.navigationGraph.nodes[startFace] || !this.navigationGraph.nodes[targetFace]) {
       return false;
     }
 
     if (startFace === targetFace) {
+      unit.routeStartFace = startFace;
+      unit.routeTargetFace = null;
       unit.currentFace = startFace;
       unit.targetFace = null;
       unit.facePath = [startFace];
-      unit.segmentTerrainFactors = [];
-      unit.movement = null;
+      unit.segmentDurationsMs = [];
+      unit.segmentPrefixMs = [0];
+      unit.movement = createPolylineAdvanceState([{ ...this.navigationGraph.nodes[startFace].point }], 0);
       return true;
     }
 
@@ -1337,35 +1682,23 @@ export class GameEngine {
     }
 
     const pathPoints = facePathToPoints(this.terrainState.mesh.mesh, result.facePath);
-    if (pathPoints.length < 2) {
-      return false;
-    }
-
-    let points = pathPoints;
-    let segmentTerrainFactors = this.buildPathSegmentTerrainFactors(result.facePath);
-    if (fromCurrentPosition) {
-      const spritePoint = { x: unit.sprite.x, y: unit.sprite.y };
-      const startPoint = pathPoints[0];
-      const gap = Math.hypot(spritePoint.x - startPoint.x, spritePoint.y - startPoint.y);
-      if (gap > 1e-3) {
-        points = [spritePoint, ...pathPoints];
-        const firstFactor = segmentTerrainFactors[0] ?? 1;
-        segmentTerrainFactors = [firstFactor, ...segmentTerrainFactors];
-      }
-    }
-    if (segmentTerrainFactors.length !== points.length - 1) {
+    const segmentDurationsMs = this.buildPathSegmentDurationsMs(result.facePath);
+    if (pathPoints.length < 2 || segmentDurationsMs.length !== pathPoints.length - 1) {
       return false;
     }
 
     unit.currentFace = startFace;
+    unit.routeStartFace = startFace;
+    unit.routeTargetFace = targetFace;
     unit.targetFace = targetFace;
     unit.facePath = result.facePath;
-    unit.segmentTerrainFactors = segmentTerrainFactors;
-    unit.movement = createPolylineAdvanceState(points, 0);
-    if (!fromCurrentPosition) {
-      unit.sprite.x = points[0].x;
-      unit.sprite.y = points[0].y;
-    }
+    unit.segmentDurationsMs = segmentDurationsMs;
+    unit.segmentPrefixMs = this.buildSegmentPrefixMs(segmentDurationsMs);
+    unit.movement = createPolylineAdvanceState(pathPoints, 0);
+    unit.movement.segmentIndex = 0;
+    unit.movement.segmentT = 0;
+    unit.movement.position = { ...pathPoints[0] };
+    unit.movement.finished = false;
     return true;
   }
 
@@ -1373,82 +1706,151 @@ export class GameEngine {
     if (!this.navigationGraph) {
       return null;
     }
-    if (unit.movement && unit.facePath.length > 1) {
-      const segmentIndex = this.clamp(Math.floor(unit.movement.segmentIndex), 0, unit.facePath.length - 2);
-      const fromFace = unit.facePath[segmentIndex];
-      const toFace = unit.facePath[segmentIndex + 1];
-      const primaryFace = unit.movement.segmentT >= 0.5 ? toFace : fromFace;
-      const secondaryFace = unit.movement.segmentT >= 0.5 ? fromFace : toFace;
-      if (Number.isFinite(primaryFace) && this.navigationGraph.nodes[primaryFace]) {
-        return primaryFace;
-      }
-      if (Number.isFinite(secondaryFace) && this.navigationGraph.nodes[secondaryFace]) {
-        return secondaryFace;
-      }
-    }
     if (this.navigationGraph.nodes[unit.currentFace]) {
       return unit.currentFace;
     }
-    for (let i = unit.facePath.length - 1; i >= 0; i -= 1) {
-      const candidateFace = unit.facePath[i];
-      if (this.navigationGraph.nodes[candidateFace]) {
-        return candidateFace;
+    if (unit.facePath.length > 0) {
+      for (let i = unit.facePath.length - 1; i >= 0; i -= 1) {
+        const candidate = unit.facePath[i];
+        if (this.navigationGraph.nodes[candidate]) {
+          return candidate;
+        }
       }
     }
-    return this.pickRandomLandFace();
+    return null;
   }
 
   private replanMovementUnitsToCurrentTargets(): void {
-    if (!this.navigationGraph || !this.terrainState || !this.movementTestConfig.enabled) {
+    if (!this.navigationGraph || !this.terrainState) {
       return;
     }
     for (let i = 0; i < this.movementUnits.length; i += 1) {
       const unit = this.movementUnits[i];
-      if (unit.targetFace === null) {
+      const targetFace = unit.routeTargetFace ?? unit.targetFace;
+      if (targetFace === null) {
         continue;
       }
-      const replanned = this.assignPathToTargetFace(unit, unit.targetFace, true);
+      const replanned = this.assignPathFromFaceToTarget(unit, unit.currentFace, targetFace);
       if (!replanned) {
-        this.assignPathToUnit(unit);
+        unit.targetFace = null;
+        unit.routeTargetFace = null;
+        unit.facePath = [unit.currentFace];
+        unit.segmentDurationsMs = [];
+        unit.segmentPrefixMs = [0];
+        unit.movement = null;
+      } else {
+        unit.routeStartedAtServerMs = this.getEstimatedServerNow(Date.now());
       }
     }
   }
 
-  private updateMovementTestUnits(deltaMs: number): void {
-    if (!this.movementTestConfig.enabled || !this.navigationGraph || this.movementUnits.length === 0) {
+  private updateMovementTestUnits(_deltaMs: number): void {
+    if (!this.navigationGraph || this.movementUnits.length === 0) {
       this.renderMovementPathDebug();
       return;
     }
-
+    const clientNow = Date.now();
+    const estimatedServerNow = this.getEstimatedServerNow(clientNow);
     for (let i = 0; i < this.movementUnits.length; i += 1) {
-      const unit = this.movementUnits[i];
-      if (!unit.movement || unit.movement.finished) {
-        this.assignPathToUnit(unit);
-      }
-      if (!unit.movement) {
-        continue;
-      }
-
-      unit.movement = this.advanceUnitAlongTerrainAwarePath(unit, deltaMs);
-      unit.sprite.x = unit.movement.position.x;
-      unit.sprite.y = unit.movement.position.y;
-
-      if (unit.movement.finished) {
-        const lastFace = unit.facePath[unit.facePath.length - 1];
-        if (Number.isFinite(lastFace)) {
-          unit.currentFace = lastFace;
-        }
-        unit.movement = null;
-      }
+      this.updateUnitPoseFromTimeline(this.movementUnits[i], estimatedServerNow, clientNow);
     }
     this.renderMovementPathDebug();
   }
 
-  private buildPathSegmentTerrainFactors(facePath: number[]): number[] {
+  private updateUnitPoseFromTimeline(unit: MovementTestUnit, estimatedServerNow: number, clientNow: number): void {
+    if (!unit.movement || unit.facePath.length < 2 || unit.segmentDurationsMs.length === 0 || unit.routeTargetFace === null) {
+      const point = this.getFacePoint(unit.currentFace);
+      if (point) {
+        unit.sprite.x = point.x;
+        unit.sprite.y = point.y;
+      }
+      return;
+    }
+    const state = this.evaluateUnitTimeline(unit, estimatedServerNow);
+    if (!state) {
+      return;
+    }
+    unit.movement.segmentIndex = state.segmentIndex;
+    unit.movement.segmentT = state.segmentT;
+    unit.movement.finished = state.finished;
+    const corrected = this.applyUnitCorrection(unit, state.position, clientNow);
+    unit.movement.position = corrected;
+    unit.sprite.x = corrected.x;
+    unit.sprite.y = corrected.y;
+    if (state.finished) {
+      const finalFace = unit.facePath[unit.facePath.length - 1];
+      if (Number.isFinite(finalFace)) {
+        unit.currentFace = finalFace;
+      }
+      unit.targetFace = null;
+      unit.routeTargetFace = null;
+    } else {
+      const fromFace = unit.facePath[state.segmentIndex];
+      const toFace = unit.facePath[state.segmentIndex + 1];
+      unit.currentFace = state.segmentT >= 0.5 ? toFace : fromFace;
+    }
+  }
+
+  private evaluateUnitTimeline(
+    unit: MovementTestUnit,
+    estimatedServerNow: number
+  ): { position: Vec2; fromPoint: Vec2; toPoint: Vec2; segmentIndex: number; segmentT: number; finished: boolean } | null {
+    if (!unit.movement || unit.movement.points.length < 2 || unit.segmentDurationsMs.length === 0) {
+      return null;
+    }
+    const totalMs = unit.segmentPrefixMs[unit.segmentPrefixMs.length - 1] ?? 0;
+    if (totalMs <= 0) {
+      const lastPoint = unit.movement.points[unit.movement.points.length - 1];
+      return {
+        position: { ...lastPoint },
+        fromPoint: { ...lastPoint },
+        toPoint: { ...lastPoint },
+        segmentIndex: Math.max(0, unit.movement.points.length - 2),
+        segmentT: 1,
+        finished: true,
+      };
+    }
+    const elapsedMs = this.clamp(estimatedServerNow - unit.routeStartedAtServerMs, 0, totalMs);
+    const segmentIndex = this.findSegmentIndexByElapsed(unit.segmentPrefixMs, elapsedMs);
+    const segmentDurationMs = unit.segmentDurationsMs[segmentIndex] ?? 0;
+    const segmentStartMs = unit.segmentPrefixMs[segmentIndex] ?? 0;
+    const segmentT =
+      segmentDurationMs <= 1e-6 ? 1 : this.clamp((elapsedMs - segmentStartMs) / segmentDurationMs, 0, 1);
+    const fromPoint = unit.movement.points[segmentIndex];
+    const toPoint = unit.movement.points[segmentIndex + 1] ?? fromPoint;
+    return {
+      position: this.computeLerp(fromPoint, toPoint, segmentT),
+      fromPoint: { ...fromPoint },
+      toPoint: { ...toPoint },
+      segmentIndex,
+      segmentT,
+      finished: elapsedMs >= totalMs - 0.001,
+    };
+  }
+
+  private applyUnitCorrection(unit: MovementTestUnit, basePosition: Vec2, clientNow: number): Vec2 {
+    const correction = unit.correctionOffset;
+    if (!correction) {
+      return basePosition;
+    }
+    if (clientNow >= correction.endsAtClientMs) {
+      unit.correctionOffset = null;
+      return basePosition;
+    }
+    const durationMs = Math.max(1, correction.endsAtClientMs - correction.startedAtClientMs);
+    const progress = this.clamp((clientNow - correction.startedAtClientMs) / durationMs, 0, 1);
+    const remaining = 1 - progress;
+    return {
+      x: basePosition.x + correction.offsetX * remaining,
+      y: basePosition.y + correction.offsetY * remaining,
+    };
+  }
+
+  private buildPathSegmentDurationsMs(facePath: number[]): number[] {
     if (!this.navigationGraph || facePath.length < 2) {
       return [];
     }
-    const factors: number[] = [];
+    const durations: number[] = [];
     for (let i = 0; i < facePath.length - 1; i += 1) {
       const fromFaceId = facePath[i];
       const toFaceId = facePath[i + 1];
@@ -1460,70 +1862,94 @@ export class GameEngine {
       if (!neighbor || !Number.isFinite(neighbor.stepCost) || neighbor.stepCost <= 0) {
         return [];
       }
-      factors.push(neighbor.stepCost);
+      durations.push(this.movementTestConfig.timePerFaceSeconds * neighbor.stepCost * 1000);
     }
-    return factors;
+    return durations;
   }
 
-  private advanceUnitAlongTerrainAwarePath(unit: MovementTestUnit, deltaMs: number): PolylineAdvanceState {
-    if (!unit.movement || unit.movement.finished) {
-      return unit.movement ?? createPolylineAdvanceState([], 0);
+  private buildSegmentPrefixMs(segmentDurationsMs: number[]): number[] {
+    const prefix = new Array<number>(segmentDurationsMs.length + 1);
+    prefix[0] = 0;
+    for (let i = 0; i < segmentDurationsMs.length; i += 1) {
+      prefix[i + 1] = prefix[i] + Math.max(0, segmentDurationsMs[i]);
     }
-    const movement = unit.movement;
-    let remainingMs = Math.max(0, deltaMs);
-    const MIN_STEP_MS = 0.001;
-    while (remainingMs > 0 && !movement.finished) {
-      const speedPxPerSec = this.computeUnitSegmentSpeedPxPerSec(unit, movement);
-      if (!Number.isFinite(speedPxPerSec) || speedPxPerSec <= 0) {
-        movement.speedPxPerSec = 0;
-        break;
+    return prefix;
+  }
+
+  private findSegmentIndexByElapsed(prefix: number[], elapsedMs: number): number {
+    if (prefix.length <= 1) {
+      return 0;
+    }
+    const clamped = this.clamp(elapsedMs, 0, prefix[prefix.length - 1]);
+    let low = 0;
+    let high = prefix.length - 2;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const start = prefix[mid];
+      const end = prefix[mid + 1];
+      if (clamped < start) {
+        high = mid - 1;
+        continue;
       }
-      movement.speedPxPerSec = speedPxPerSec;
-      const msToSegmentEnd = this.computeMsToSegmentEnd(movement, speedPxPerSec);
-      const clampedMsToSegmentEnd = Number.isFinite(msToSegmentEnd) ? msToSegmentEnd : remainingMs;
-      const stepMs = Math.min(remainingMs, Math.max(MIN_STEP_MS, clampedMsToSegmentEnd));
-      const nextMovement = advanceAlongPolyline(movement, stepMs);
-      movement.segmentIndex = nextMovement.segmentIndex;
-      movement.segmentT = nextMovement.segmentT;
-      movement.position = nextMovement.position;
-      movement.finished = nextMovement.finished;
-      movement.speedPxPerSec = nextMovement.speedPxPerSec;
-      remainingMs -= stepMs;
+      if (clamped > end) {
+        low = mid + 1;
+        continue;
+      }
+      return mid;
     }
-    return movement;
+    return Math.max(0, Math.min(prefix.length - 2, low));
   }
 
-  private computeUnitSegmentSpeedPxPerSec(unit: MovementTestUnit, movement: PolylineAdvanceState): number {
-    const segmentIndex = this.clamp(Math.floor(movement.segmentIndex), 0, Math.max(0, movement.points.length - 2));
-    const segmentLength = this.computeSegmentLength(movement, segmentIndex);
-    if (segmentLength <= 1e-6) {
-      return 1_000_000;
+  private findSegmentIndexByFaces(facePath: number[], fromFace: number | null, toFace: number | null): number {
+    if (!Number.isFinite(fromFace) || !Number.isFinite(toFace)) {
+      return -1;
     }
-    const terrainFactor = Math.max(1e-6, unit.segmentTerrainFactors[segmentIndex] ?? 1);
-    const edgeTravelSeconds = this.movementTestConfig.timePerFaceSeconds * terrainFactor;
-    if (edgeTravelSeconds <= 0) {
-      return 0;
+    for (let i = 0; i < facePath.length - 1; i += 1) {
+      if (facePath[i] === fromFace && facePath[i + 1] === toFace) {
+        return i;
+      }
     }
-    return segmentLength / edgeTravelSeconds;
+    return -1;
   }
 
-  private computeMsToSegmentEnd(movement: PolylineAdvanceState, speedPxPerSec: number): number {
-    const segmentIndex = this.clamp(Math.floor(movement.segmentIndex), 0, Math.max(0, movement.points.length - 2));
-    const segmentLength = this.computeSegmentLength(movement, segmentIndex);
-    if (segmentLength <= 1e-6 || speedPxPerSec <= 1e-6) {
-      return 0;
+  private getFacePoint(faceId: number): Vec2 | null {
+    if (!this.navigationGraph) {
+      return null;
     }
-    const remainingDistance = segmentLength * (1 - this.clamp(movement.segmentT, 0, 1));
-    return (remainingDistance / speedPxPerSec) * 1000;
+    const node = this.navigationGraph.nodes[faceId];
+    if (!node) {
+      return null;
+    }
+    return { x: node.point.x, y: node.point.y };
   }
 
-  private computeSegmentLength(movement: PolylineAdvanceState, segmentIndex: number): number {
-    if (movement.points.length < 2 || segmentIndex < 0 || segmentIndex >= movement.points.length - 1) {
-      return 0;
+  private computeLerp(a: Vec2, b: Vec2, t: number): Vec2 {
+    const clampedT = this.clamp(t, 0, 1);
+    return {
+      x: a.x + (b.x - a.x) * clampedT,
+      y: a.y + (b.y - a.y) * clampedT,
+    };
+  }
+
+  private updateServerClockOffset(serverTimeMs: number, clientReceiveMs: number): void {
+    if (!Number.isFinite(serverTimeMs) || !Number.isFinite(clientReceiveMs)) {
+      return;
     }
-    const pointA = movement.points[segmentIndex];
-    const pointB = movement.points[segmentIndex + 1];
-    return Math.hypot(pointB.x - pointA.x, pointB.y - pointA.y);
+    const observedOffset = serverTimeMs - clientReceiveMs;
+    if (!this.hasServerClockOffset) {
+      this.serverClockOffsetMs = observedOffset;
+      this.hasServerClockOffset = true;
+      return;
+    }
+    const alpha = 0.1;
+    this.serverClockOffsetMs = this.serverClockOffsetMs * (1 - alpha) + observedOffset * alpha;
+  }
+
+  private getEstimatedServerNow(clientNow: number): number {
+    if (!this.hasServerClockOffset) {
+      return clientNow;
+    }
+    return clientNow + this.serverClockOffsetMs;
   }
 
   private ensureMovementPathGraphics(): any {
@@ -1549,7 +1975,7 @@ export class GameEngine {
       return;
     }
     graphics.clear();
-    if (!this.movementTestConfig.showPaths || !this.movementTestConfig.enabled) {
+    if (!this.movementTestConfig.showPaths) {
       return;
     }
 

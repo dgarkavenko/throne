@@ -16,6 +16,7 @@ const COLLIDER_SCALE = 0.9;
 
 type ClientState = {
   playerId: string | null;
+  hostId: string | null;
   currentTyping: string;
   sessionStart: number | null;
   sessionTimerId: number | null;
@@ -24,6 +25,7 @@ type ClientState = {
 
 const state: ClientState = {
   playerId: null,
+  hostId: null,
   currentTyping: '',
   sessionStart: null,
   sessionTimerId: null,
@@ -75,6 +77,24 @@ async function startClient(): Promise<void> {
     elevationGainK: terrainSettings.agentElevationGainK,
     showPaths: terrainSettings.agentDebugPaths,
   });
+
+  const syncSettingsAccess = (): void => {
+    const hasSessionIdentity = Boolean(state.playerId) && Boolean(state.hostId);
+    if (!hasSessionIdentity) {
+      layout.setSettingsVisible(false);
+      layout.setTerrainPublishVisible(false);
+      return;
+    }
+    const isHost = state.playerId === state.hostId;
+    layout.setSettingsVisible(true);
+    layout.setDebugControlsOnly(!isHost);
+    layout.setTerrainPublishVisible(isHost);
+  };
+
+  layout.setSettingsVisible(false);
+  layout.setDebugControlsOnly(false);
+  layout.setTerrainPublishVisible(false);
+  layout.setTerrainSyncStatus('Unsynced');
   layout.onTerrainSettingsChange((nextSettings) => {
     engine.setVoronoiControls(nextSettings);
     engine.setMovementTestConfig({
@@ -85,12 +105,15 @@ async function startClient(): Promise<void> {
       elevationGainK: nextSettings.agentElevationGainK,
       showPaths: nextSettings.agentDebugPaths,
     });
+    layout.setTerrainSyncStatus('Local changes');
   });
 
-  engine.start((deltaMs, now) => {
-    void deltaMs;
-    updateFpsCounter(now, layout.setFps);
-  });
+  const nextActorCommandIdByActor = new Map<string, number>();
+  const nextCommandId = (actorId: string): number => {
+    const next = (nextActorCommandIdByActor.get(actorId) ?? 0) + 1;
+    nextActorCommandIdByActor.set(actorId, next);
+    return next;
+  };
 
   const connection = connectToRoom({
     onStatus: layout.setStatus,
@@ -98,11 +121,15 @@ async function startClient(): Promise<void> {
     onDisconnected: () => layout.setConnected(false),
     onWelcome: (playerId) => {
       state.playerId = playerId;
+      engine.setLocalPlayerId(playerId);
+      syncSettingsAccess();
     },
-    onState: (players, sessionStart) => {
+    onState: (players, sessionStart, hostId) => {
       state.players = players;
       state.sessionStart = sessionStart;
+      state.hostId = hostId;
       engine.renderPlayers(players);
+      syncSettingsAccess();
       updateSessionTimer(layout.setSessionElapsed);
     },
     onHistory: (messages: HistoryEntry[]) => {
@@ -118,6 +145,37 @@ async function startClient(): Promise<void> {
     onLaunch: (message: LaunchMessage) => {
       engine.spawnTextBox(message.text || '', message.color, message.emoji, engine.getTypingPosition(message.id));
     },
+    onTerrainSnapshot: (message) => {
+      engine.applyTerrainSnapshot(message.terrain, message.terrainVersion);
+      layout.setTerrainSyncStatus(`v${message.terrainVersion}`);
+    },
+    onActorCommand: (message) => {
+      engine.applyActorCommand(message);
+    },
+    onWorldSnapshot: (message) => {
+      engine.applyWorldSnapshot(message);
+    },
+    onActorReject: (message) => {
+      layout.setStatus(`Move rejected: ${message.reason}`);
+      layout.setTerrainSyncStatus(`v${message.terrainVersion}`);
+    },
+  });
+
+  engine.onActorMoveCommand((actorId, targetFace) => {
+    const terrainVersion = engine.getTerrainVersion();
+    const commandId = nextCommandId(actorId);
+    connection.sendActorMove(actorId, targetFace, commandId, terrainVersion);
+  });
+
+  layout.onPublishTerrain(() => {
+    const snapshot = engine.getTerrainSnapshotForReplication();
+    connection.publishTerrainSnapshot(snapshot);
+    layout.setTerrainSyncStatus('Publishing...');
+  });
+
+  engine.start((deltaMs, now) => {
+    void deltaMs;
+    updateFpsCounter(now, layout.setFps);
   });
 
   if (!state.sessionTimerId) {
