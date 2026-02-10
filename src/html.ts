@@ -204,8 +204,8 @@ export const html = `<!doctype html>
           <details class="control-group">
             <summary>Sampling</summary>
             <div class="control">
-              <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">32</span></label>
-              <input id="terrain-spacing" type="range" min="16" max="128" step="1" value="32" />
+              <label for="terrain-spacing">Spacing <span id="terrain-spacing-value">16</span></label>
+              <input id="terrain-spacing" type="range" min="16" max="128" step="1" value="16" />
             </div>
             <div class="control">
               <label for="terrain-seed">Seed</label>
@@ -523,6 +523,45 @@ export const html = `<!doctype html>
               <label for="terrain-graph-inserted">
                 <input id="terrain-graph-inserted" type="checkbox" />
                 Inserted Points
+              </label>
+            </div>
+          </details>
+          <details class="control-group">
+            <summary>Agents</summary>
+            <div class="control">
+              <label for="agent-speed-scale">
+                Agent Speed <span id="agent-speed-scale-value">1.00</span>
+              </label>
+              <input id="agent-speed-scale" type="range" min="0" max="1" step="0.01" value="1" />
+            </div>
+            <div class="control">
+              <label for="agent-time-per-province">
+                Time / Province (s) <span id="agent-time-per-province-value">180</span>
+              </label>
+              <input id="agent-time-per-province" type="range" min="10" max="600" step="5" value="180" />
+            </div>
+            <div class="control">
+              <label for="agent-lowland-threshold">
+                Lowland Threshold <span id="agent-lowland-threshold-value">10</span>
+              </label>
+              <input id="agent-lowland-threshold" type="range" min="1" max="31" step="1" value="10" />
+            </div>
+            <div class="control">
+              <label for="agent-impassable-threshold">
+                Impassable Threshold <span id="agent-impassable-threshold-value">28</span>
+              </label>
+              <input id="agent-impassable-threshold" type="range" min="2" max="32" step="1" value="28" />
+            </div>
+            <div class="control">
+              <label for="agent-elevation-power">
+                Elevation Power <span id="agent-elevation-power-value">0.80</span>
+              </label>
+              <input id="agent-elevation-power" type="range" min="0.5" max="2" step="0.05" value="0.8" />
+            </div>
+            <div class="control toggle">
+              <label for="agent-debug-paths">
+                <input id="agent-debug-paths" type="checkbox" />
+                Draw Paths (Debug)
               </label>
             </div>
           </details>

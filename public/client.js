@@ -44,8 +44,24 @@ async function startClient() {
     await engine.init(layout.field);
     const terrainSettings = layout.getTerrainSettings();
     engine.setVoronoiControls(terrainSettings);
+    engine.setMovementTestConfig({
+        speedScale: terrainSettings.agentSpeedScale,
+        timePerProvinceSeconds: terrainSettings.agentTimePerProvinceSeconds,
+        lowlandThreshold: terrainSettings.agentLowlandThreshold,
+        impassableThreshold: terrainSettings.agentImpassableThreshold,
+        elevationPower: terrainSettings.agentElevationPower,
+        showPaths: terrainSettings.agentDebugPaths,
+    });
     layout.onTerrainSettingsChange((nextSettings) => {
         engine.setVoronoiControls(nextSettings);
+        engine.setMovementTestConfig({
+            speedScale: nextSettings.agentSpeedScale,
+            timePerProvinceSeconds: nextSettings.agentTimePerProvinceSeconds,
+            lowlandThreshold: nextSettings.agentLowlandThreshold,
+            impassableThreshold: nextSettings.agentImpassableThreshold,
+            elevationPower: nextSettings.agentElevationPower,
+            showPaths: nextSettings.agentDebugPaths,
+        });
     });
     engine.start((deltaMs, now) => {
         void deltaMs;

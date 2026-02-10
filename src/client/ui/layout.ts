@@ -43,6 +43,12 @@ type TerrainSettings = {
   riverDensity: number;
   riverBranchChance: number;
   riverClimbChance: number;
+  agentSpeedScale: number;
+  agentTimePerProvinceSeconds: number;
+  agentLowlandThreshold: number;
+  agentImpassableThreshold: number;
+  agentElevationPower: number;
+  agentDebugPaths: boolean;
 };
 
 type PageLayout = {
@@ -92,6 +98,12 @@ export function createPageLayout(): PageLayout {
   const terrainGraphCornersInput = document.getElementById('terrain-graph-corners') as HTMLInputElement | null;
   const terrainGraphCentersInput = document.getElementById('terrain-graph-centers') as HTMLInputElement | null;
   const terrainGraphInsertedInput = document.getElementById('terrain-graph-inserted') as HTMLInputElement | null;
+  const agentSpeedScaleInput = document.getElementById('agent-speed-scale') as HTMLInputElement | null;
+  const agentTimePerProvinceInput = document.getElementById('agent-time-per-province') as HTMLInputElement | null;
+  const agentLowlandThresholdInput = document.getElementById('agent-lowland-threshold') as HTMLInputElement | null;
+  const agentImpassableThresholdInput = document.getElementById('agent-impassable-threshold') as HTMLInputElement | null;
+  const agentElevationPowerInput = document.getElementById('agent-elevation-power') as HTMLInputElement | null;
+  const agentDebugPathsInput = document.getElementById('agent-debug-paths') as HTMLInputElement | null;
   const terrainResetButton = document.getElementById('terrain-reset') as HTMLButtonElement | null;
   const terrainProvinceCountInput = document.getElementById('terrain-province-count') as HTMLInputElement | null;
   const terrainProvinceBorderWidthInput = document.getElementById('terrain-province-border-width') as HTMLInputElement | null;
@@ -178,6 +190,11 @@ export function createPageLayout(): PageLayout {
   const terrainOceanPeakClampValue = document.getElementById('terrain-ocean-peak-clamp-value');
   const terrainRidgeOceanClampValue = document.getElementById('terrain-ridge-ocean-clamp-value');
   const terrainRidgeWidthValue = document.getElementById('terrain-ridge-width-value');
+  const agentSpeedScaleValue = document.getElementById('agent-speed-scale-value');
+  const agentTimePerProvinceValue = document.getElementById('agent-time-per-province-value');
+  const agentLowlandThresholdValue = document.getElementById('agent-lowland-threshold-value');
+  const agentImpassableThresholdValue = document.getElementById('agent-impassable-threshold-value');
+  const agentElevationPowerValue = document.getElementById('agent-elevation-power-value');
 
   const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
   const parseIntWithFallback = (value: string | undefined, fallback: number): number => {
@@ -352,6 +369,24 @@ export function createPageLayout(): PageLayout {
     if (terrainGraphInsertedInput) {
       terrainGraphInsertedInput.checked = terrainGraphInsertedInput.defaultChecked;
     }
+    if (agentSpeedScaleInput) {
+      agentSpeedScaleInput.value = agentSpeedScaleInput.defaultValue;
+    }
+    if (agentTimePerProvinceInput) {
+      agentTimePerProvinceInput.value = agentTimePerProvinceInput.defaultValue;
+    }
+    if (agentLowlandThresholdInput) {
+      agentLowlandThresholdInput.value = agentLowlandThresholdInput.defaultValue;
+    }
+    if (agentImpassableThresholdInput) {
+      agentImpassableThresholdInput.value = agentImpassableThresholdInput.defaultValue;
+    }
+    if (agentElevationPowerInput) {
+      agentElevationPowerInput.value = agentElevationPowerInput.defaultValue;
+    }
+    if (agentDebugPathsInput) {
+      agentDebugPathsInput.checked = agentDebugPathsInput.defaultChecked;
+    }
   };
 
   const applyStoredSettings = (settings: Partial<TerrainSettings>): void => {
@@ -487,10 +522,28 @@ export function createPageLayout(): PageLayout {
     if (typeof settings.showInsertedPoints === 'boolean' && terrainGraphInsertedInput) {
       terrainGraphInsertedInput.checked = settings.showInsertedPoints;
     }
+    if (typeof settings.agentSpeedScale === 'number' && agentSpeedScaleInput) {
+      agentSpeedScaleInput.value = settings.agentSpeedScale.toString();
+    }
+    if (typeof settings.agentTimePerProvinceSeconds === 'number' && agentTimePerProvinceInput) {
+      agentTimePerProvinceInput.value = settings.agentTimePerProvinceSeconds.toString();
+    }
+    if (typeof settings.agentLowlandThreshold === 'number' && agentLowlandThresholdInput) {
+      agentLowlandThresholdInput.value = settings.agentLowlandThreshold.toString();
+    }
+    if (typeof settings.agentImpassableThreshold === 'number' && agentImpassableThresholdInput) {
+      agentImpassableThresholdInput.value = settings.agentImpassableThreshold.toString();
+    }
+    if (typeof settings.agentElevationPower === 'number' && agentElevationPowerInput) {
+      agentElevationPowerInput.value = settings.agentElevationPower.toString();
+    }
+    if (typeof settings.agentDebugPaths === 'boolean' && agentDebugPathsInput) {
+      agentDebugPathsInput.checked = settings.agentDebugPaths;
+    }
   };
 
   const readTerrainSettings = (): TerrainSettings => {
-    const spacing = clamp(parseIntWithFallback(terrainSpacingInput?.value, 32), 16, 128);
+    const spacing = clamp(parseIntWithFallback(terrainSpacingInput?.value, 16), 16, 128);
     const seed = clamp(parseIntWithFallback(terrainSeedInput?.value, 1337), 0, 0xffffffff);
     const intermediateSeed = clamp(parseIntWithFallback(terrainIntermediateSeedInput?.value, 1337), 0, 0xffffffff);
     const intermediateMaxIterations = clamp(
@@ -578,6 +631,17 @@ export function createPageLayout(): PageLayout {
     const showCornerNodes = Boolean(terrainGraphCornersInput?.checked);
     const showCenterNodes = Boolean(terrainGraphCentersInput?.checked);
     const showInsertedPoints = Boolean(terrainGraphInsertedInput?.checked);
+    const agentSpeedScale = clamp(parseFloatWithFallback(agentSpeedScaleInput?.value, 1), 0, 1);
+    const agentTimePerProvinceSeconds = clamp(parseIntWithFallback(agentTimePerProvinceInput?.value, 180), 10, 600);
+    const agentLowlandThreshold = clamp(parseIntWithFallback(agentLowlandThresholdInput?.value, 10), 1, 31);
+    const agentImpassableThresholdInputValue = clamp(
+      parseIntWithFallback(agentImpassableThresholdInput?.value, 28),
+      2,
+      32
+    );
+    const agentImpassableThreshold = clamp(Math.max(agentLowlandThreshold + 1, agentImpassableThresholdInputValue), 2, 32);
+    const agentElevationPower = clamp(parseFloatWithFallback(agentElevationPowerInput?.value, 0.8), 0.5, 2);
+    const agentDebugPaths = Boolean(agentDebugPathsInput?.checked);
     return {
       spacing,
       showPolygonGraph,
@@ -623,6 +687,12 @@ export function createPageLayout(): PageLayout {
       riverDensity,
       riverBranchChance,
       riverClimbChance,
+      agentSpeedScale,
+      agentTimePerProvinceSeconds,
+      agentLowlandThreshold,
+      agentImpassableThreshold,
+      agentElevationPower,
+      agentDebugPaths,
     };
   };
 
@@ -739,6 +809,21 @@ export function createPageLayout(): PageLayout {
     if (terrainRidgeWidthValue) {
       terrainRidgeWidthValue.textContent = settings.ridgeWidth.toFixed(2);
     }
+    if (agentSpeedScaleValue) {
+      agentSpeedScaleValue.textContent = settings.agentSpeedScale.toFixed(2);
+    }
+    if (agentTimePerProvinceValue) {
+      agentTimePerProvinceValue.textContent = settings.agentTimePerProvinceSeconds.toString();
+    }
+    if (agentLowlandThresholdValue) {
+      agentLowlandThresholdValue.textContent = settings.agentLowlandThreshold.toString();
+    }
+    if (agentImpassableThresholdValue) {
+      agentImpassableThresholdValue.textContent = settings.agentImpassableThreshold.toString();
+    }
+    if (agentElevationPowerValue) {
+      agentElevationPowerValue.textContent = settings.agentElevationPower.toFixed(2);
+    }
   };
 
   syncTerrainLabels();
@@ -832,9 +917,15 @@ export function createPageLayout(): PageLayout {
     terrainRidgeWidthInput?.addEventListener('input', notify);
     terrainGraphPolygonsInput?.addEventListener('change', notify);
       terrainGraphDualInput?.addEventListener('change', notify);
-      terrainGraphCornersInput?.addEventListener('change', notify);
-      terrainGraphCentersInput?.addEventListener('change', notify);
+    terrainGraphCornersInput?.addEventListener('change', notify);
+    terrainGraphCentersInput?.addEventListener('change', notify);
     terrainGraphInsertedInput?.addEventListener('change', notify);
+    agentSpeedScaleInput?.addEventListener('input', notify);
+    agentTimePerProvinceInput?.addEventListener('input', notify);
+    agentLowlandThresholdInput?.addEventListener('input', notify);
+    agentImpassableThresholdInput?.addEventListener('input', notify);
+    agentElevationPowerInput?.addEventListener('input', notify);
+    agentDebugPathsInput?.addEventListener('change', notify);
     terrainResetButton?.addEventListener('click', reset);
     },
   };
