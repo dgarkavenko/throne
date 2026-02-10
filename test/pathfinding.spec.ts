@@ -315,8 +315,8 @@ describe('pathfinding', () => {
 		expect(graph.nodes[0]?.neighbors).toEqual([]);
 	});
 
-	it('scales movement timing with speed and terrain factor', () => {
-		const timePerProvinceSeconds = 180;
+	it('scales movement timing with face-time baseline and terrain factor', () => {
+		const timePerFaceSeconds = 180;
 		const flatFactor = computeTerrainStepFactor(10, false, {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
@@ -338,13 +338,13 @@ describe('pathfinding', () => {
 			elevationGainK: 1,
 			riverPenalty: 0.8,
 		});
-		const edgeTimeAtSpeed1 = (timePerProvinceSeconds * (flatFactor as number)) / 1;
-		const edgeTimeAtSpeedHalf = (timePerProvinceSeconds * (flatFactor as number)) / 0.5;
-		const pausedEdgeTime = Number.POSITIVE_INFINITY;
+		const flatEdgeTime = timePerFaceSeconds * (flatFactor as number);
+		const riverEdgeTime = timePerFaceSeconds * (riverFactor as number);
+		const steepEdgeTime = timePerFaceSeconds * (steepFactor as number);
 
-		expect(edgeTimeAtSpeed1).toBeCloseTo(180, 8);
-		expect(edgeTimeAtSpeedHalf).toBeCloseTo(360, 8);
-		expect(pausedEdgeTime).toBe(Number.POSITIVE_INFINITY);
+		expect(flatEdgeTime).toBeCloseTo(180, 8);
+		expect(riverEdgeTime).toBeGreaterThan(flatEdgeTime);
+		expect(steepEdgeTime).toBeGreaterThan(flatEdgeTime);
 		expect((riverFactor as number) / (flatFactor as number)).toBeCloseTo(1.8, 8);
 		expect(steepFactor).toBeGreaterThan(flatFactor as number);
 	});

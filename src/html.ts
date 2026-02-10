@@ -529,16 +529,10 @@ export const html = `<!doctype html>
           <details class="control-group">
             <summary>Agents</summary>
             <div class="control">
-              <label for="agent-speed-scale">
-                Agent Speed <span id="agent-speed-scale-value">1.00</span>
+              <label for="agent-time-per-face">
+                Time / Face (s) <span id="agent-time-per-face-value">180</span>
               </label>
-              <input id="agent-speed-scale" type="range" min="0" max="1" step="0.01" value="1" />
-            </div>
-            <div class="control">
-              <label for="agent-time-per-province">
-                Time / Province (s) <span id="agent-time-per-province-value">180</span>
-              </label>
-              <input id="agent-time-per-province" type="range" min="10" max="600" step="5" value="180" />
+              <input id="agent-time-per-face" type="range" min="1" max="600" step="1" value="180" />
             </div>
             <div class="control">
               <label for="agent-lowland-threshold">

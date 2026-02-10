@@ -94,8 +94,7 @@ type MeshOverlay = {
 type MovementTestConfig = {
   enabled: boolean;
   unitCount: number;
-  speedScale: number;
-  timePerProvinceSeconds: number;
+  timePerFaceSeconds: number;
   lowlandThreshold: number;
   impassableThreshold: number;
   elevationPower: number;
@@ -141,8 +140,7 @@ export class GameEngine {
   private movementTestConfig: MovementTestConfig = {
     enabled: true,
     unitCount: 8,
-    speedScale: 1,
-    timePerProvinceSeconds: 180,
+    timePerFaceSeconds: 180,
     lowlandThreshold: 10,
     impassableThreshold: 28,
     elevationPower: 0.8,
@@ -377,12 +375,11 @@ export class GameEngine {
     const sanitized: MovementTestConfig = {
       enabled: typeof nextConfig.enabled === 'boolean' ? nextConfig.enabled : current.enabled,
       unitCount: this.clamp(Math.round(safeValue(nextConfig.unitCount ?? current.unitCount, current.unitCount)), 0, 128),
-      speedScale: this.clamp(safeValue(nextConfig.speedScale ?? current.speedScale, current.speedScale), 0, 1),
-      timePerProvinceSeconds: this.clamp(
+      timePerFaceSeconds: this.clamp(
         Math.round(
-          safeValue(nextConfig.timePerProvinceSeconds ?? current.timePerProvinceSeconds, current.timePerProvinceSeconds)
+          safeValue(nextConfig.timePerFaceSeconds ?? current.timePerFaceSeconds, current.timePerFaceSeconds)
         ),
-        10,
+        1,
         600
       ),
       lowlandThreshold,
@@ -409,8 +406,7 @@ export class GameEngine {
     const changed =
       sanitized.enabled !== current.enabled ||
       sanitized.unitCount !== current.unitCount ||
-      sanitized.speedScale !== current.speedScale ||
-      sanitized.timePerProvinceSeconds !== current.timePerProvinceSeconds ||
+      sanitized.timePerFaceSeconds !== current.timePerFaceSeconds ||
       sanitized.lowlandThreshold !== current.lowlandThreshold ||
       sanitized.impassableThreshold !== current.impassableThreshold ||
       sanitized.elevationPower !== current.elevationPower ||
@@ -1433,11 +1429,7 @@ export class GameEngine {
         continue;
       }
 
-      if (this.movementTestConfig.speedScale <= 0) {
-        unit.movement.speedPxPerSec = 0;
-      } else {
-        unit.movement = this.advanceUnitAlongTerrainAwarePath(unit, deltaMs);
-      }
+      unit.movement = this.advanceUnitAlongTerrainAwarePath(unit, deltaMs);
       unit.sprite.x = unit.movement.position.x;
       unit.sprite.y = unit.movement.position.y;
 
@@ -1508,8 +1500,7 @@ export class GameEngine {
       return 1_000_000;
     }
     const terrainFactor = Math.max(1e-6, unit.segmentTerrainFactors[segmentIndex] ?? 1);
-    const edgeTravelSeconds =
-      (this.movementTestConfig.timePerProvinceSeconds * terrainFactor) / this.movementTestConfig.speedScale;
+    const edgeTravelSeconds = this.movementTestConfig.timePerFaceSeconds * terrainFactor;
     if (edgeTravelSeconds <= 0) {
       return 0;
     }

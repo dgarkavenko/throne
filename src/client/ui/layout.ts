@@ -43,8 +43,7 @@ type TerrainSettings = {
   riverDensity: number;
   riverBranchChance: number;
   riverClimbChance: number;
-  agentSpeedScale: number;
-  agentTimePerProvinceSeconds: number;
+  agentTimePerFaceSeconds: number;
   agentLowlandThreshold: number;
   agentImpassableThreshold: number;
   agentElevationPower: number;
@@ -99,8 +98,7 @@ export function createPageLayout(): PageLayout {
   const terrainGraphCornersInput = document.getElementById('terrain-graph-corners') as HTMLInputElement | null;
   const terrainGraphCentersInput = document.getElementById('terrain-graph-centers') as HTMLInputElement | null;
   const terrainGraphInsertedInput = document.getElementById('terrain-graph-inserted') as HTMLInputElement | null;
-  const agentSpeedScaleInput = document.getElementById('agent-speed-scale') as HTMLInputElement | null;
-  const agentTimePerProvinceInput = document.getElementById('agent-time-per-province') as HTMLInputElement | null;
+  const agentTimePerFaceInput = document.getElementById('agent-time-per-face') as HTMLInputElement | null;
   const agentLowlandThresholdInput = document.getElementById('agent-lowland-threshold') as HTMLInputElement | null;
   const agentImpassableThresholdInput = document.getElementById('agent-impassable-threshold') as HTMLInputElement | null;
   const agentElevationPowerInput = document.getElementById('agent-elevation-power') as HTMLInputElement | null;
@@ -192,8 +190,7 @@ export function createPageLayout(): PageLayout {
   const terrainOceanPeakClampValue = document.getElementById('terrain-ocean-peak-clamp-value');
   const terrainRidgeOceanClampValue = document.getElementById('terrain-ridge-ocean-clamp-value');
   const terrainRidgeWidthValue = document.getElementById('terrain-ridge-width-value');
-  const agentSpeedScaleValue = document.getElementById('agent-speed-scale-value');
-  const agentTimePerProvinceValue = document.getElementById('agent-time-per-province-value');
+  const agentTimePerFaceValue = document.getElementById('agent-time-per-face-value');
   const agentLowlandThresholdValue = document.getElementById('agent-lowland-threshold-value');
   const agentImpassableThresholdValue = document.getElementById('agent-impassable-threshold-value');
   const agentElevationPowerValue = document.getElementById('agent-elevation-power-value');
@@ -372,11 +369,8 @@ export function createPageLayout(): PageLayout {
     if (terrainGraphInsertedInput) {
       terrainGraphInsertedInput.checked = terrainGraphInsertedInput.defaultChecked;
     }
-    if (agentSpeedScaleInput) {
-      agentSpeedScaleInput.value = agentSpeedScaleInput.defaultValue;
-    }
-    if (agentTimePerProvinceInput) {
-      agentTimePerProvinceInput.value = agentTimePerProvinceInput.defaultValue;
+    if (agentTimePerFaceInput) {
+      agentTimePerFaceInput.value = agentTimePerFaceInput.defaultValue;
     }
     if (agentLowlandThresholdInput) {
       agentLowlandThresholdInput.value = agentLowlandThresholdInput.defaultValue;
@@ -528,11 +522,8 @@ export function createPageLayout(): PageLayout {
     if (typeof settings.showInsertedPoints === 'boolean' && terrainGraphInsertedInput) {
       terrainGraphInsertedInput.checked = settings.showInsertedPoints;
     }
-    if (typeof settings.agentSpeedScale === 'number' && agentSpeedScaleInput) {
-      agentSpeedScaleInput.value = settings.agentSpeedScale.toString();
-    }
-    if (typeof settings.agentTimePerProvinceSeconds === 'number' && agentTimePerProvinceInput) {
-      agentTimePerProvinceInput.value = settings.agentTimePerProvinceSeconds.toString();
+    if (typeof settings.agentTimePerFaceSeconds === 'number' && agentTimePerFaceInput) {
+      agentTimePerFaceInput.value = settings.agentTimePerFaceSeconds.toString();
     }
     if (typeof settings.agentLowlandThreshold === 'number' && agentLowlandThresholdInput) {
       agentLowlandThresholdInput.value = settings.agentLowlandThreshold.toString();
@@ -640,8 +631,7 @@ export function createPageLayout(): PageLayout {
     const showCornerNodes = Boolean(terrainGraphCornersInput?.checked);
     const showCenterNodes = Boolean(terrainGraphCentersInput?.checked);
     const showInsertedPoints = Boolean(terrainGraphInsertedInput?.checked);
-    const agentSpeedScale = clamp(parseFloatWithFallback(agentSpeedScaleInput?.value, 1), 0, 1);
-    const agentTimePerProvinceSeconds = clamp(parseIntWithFallback(agentTimePerProvinceInput?.value, 180), 10, 600);
+    const agentTimePerFaceSeconds = clamp(parseIntWithFallback(agentTimePerFaceInput?.value, 180), 1, 600);
     const agentLowlandThreshold = clamp(parseIntWithFallback(agentLowlandThresholdInput?.value, 10), 1, 31);
     const agentImpassableThresholdInputValue = clamp(
       parseIntWithFallback(agentImpassableThresholdInput?.value, 28),
@@ -697,8 +687,7 @@ export function createPageLayout(): PageLayout {
       riverDensity,
       riverBranchChance,
       riverClimbChance,
-      agentSpeedScale,
-      agentTimePerProvinceSeconds,
+      agentTimePerFaceSeconds,
       agentLowlandThreshold,
       agentImpassableThreshold,
       agentElevationPower,
@@ -820,11 +809,8 @@ export function createPageLayout(): PageLayout {
     if (terrainRidgeWidthValue) {
       terrainRidgeWidthValue.textContent = settings.ridgeWidth.toFixed(2);
     }
-    if (agentSpeedScaleValue) {
-      agentSpeedScaleValue.textContent = settings.agentSpeedScale.toFixed(2);
-    }
-    if (agentTimePerProvinceValue) {
-      agentTimePerProvinceValue.textContent = settings.agentTimePerProvinceSeconds.toString();
+    if (agentTimePerFaceValue) {
+      agentTimePerFaceValue.textContent = settings.agentTimePerFaceSeconds.toString();
     }
     if (agentLowlandThresholdValue) {
       agentLowlandThresholdValue.textContent = settings.agentLowlandThreshold.toString();
@@ -934,8 +920,7 @@ export function createPageLayout(): PageLayout {
     terrainGraphCornersInput?.addEventListener('change', notify);
     terrainGraphCentersInput?.addEventListener('change', notify);
     terrainGraphInsertedInput?.addEventListener('change', notify);
-    agentSpeedScaleInput?.addEventListener('input', notify);
-    agentTimePerProvinceInput?.addEventListener('input', notify);
+    agentTimePerFaceInput?.addEventListener('input', notify);
     agentLowlandThresholdInput?.addEventListener('input', notify);
     agentImpassableThresholdInput?.addEventListener('input', notify);
     agentElevationPowerInput?.addEventListener('input', notify);

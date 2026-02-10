@@ -45,8 +45,7 @@ async function startClient() {
     const terrainSettings = layout.getTerrainSettings();
     engine.setVoronoiControls(terrainSettings);
     engine.setMovementTestConfig({
-        speedScale: terrainSettings.agentSpeedScale,
-        timePerProvinceSeconds: terrainSettings.agentTimePerProvinceSeconds,
+        timePerFaceSeconds: terrainSettings.agentTimePerFaceSeconds,
         lowlandThreshold: terrainSettings.agentLowlandThreshold,
         impassableThreshold: terrainSettings.agentImpassableThreshold,
         elevationPower: terrainSettings.agentElevationPower,
@@ -56,8 +55,7 @@ async function startClient() {
     layout.onTerrainSettingsChange((nextSettings) => {
         engine.setVoronoiControls(nextSettings);
         engine.setMovementTestConfig({
-            speedScale: nextSettings.agentSpeedScale,
-            timePerProvinceSeconds: nextSettings.agentTimePerProvinceSeconds,
+            timePerFaceSeconds: nextSettings.agentTimePerFaceSeconds,
             lowlandThreshold: nextSettings.agentLowlandThreshold,
             impassableThreshold: nextSettings.agentImpassableThreshold,
             elevationPower: nextSettings.agentElevationPower,
