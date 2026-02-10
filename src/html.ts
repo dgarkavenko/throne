@@ -558,6 +558,12 @@ export const html = `<!doctype html>
               </label>
               <input id="agent-elevation-power" type="range" min="0.5" max="2" step="0.05" value="0.8" />
             </div>
+            <div class="control">
+              <label for="agent-elevation-gain-k">
+                Elevation Gain k <span id="agent-elevation-gain-k-value">1.00</span>
+              </label>
+              <input id="agent-elevation-gain-k" type="range" min="0" max="4" step="0.05" value="1" />
+            </div>
             <div class="control toggle">
               <label for="agent-debug-paths">
                 <input id="agent-debug-paths" type="checkbox" />

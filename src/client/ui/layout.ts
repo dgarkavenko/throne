@@ -48,6 +48,7 @@ type TerrainSettings = {
   agentLowlandThreshold: number;
   agentImpassableThreshold: number;
   agentElevationPower: number;
+  agentElevationGainK: number;
   agentDebugPaths: boolean;
 };
 
@@ -103,6 +104,7 @@ export function createPageLayout(): PageLayout {
   const agentLowlandThresholdInput = document.getElementById('agent-lowland-threshold') as HTMLInputElement | null;
   const agentImpassableThresholdInput = document.getElementById('agent-impassable-threshold') as HTMLInputElement | null;
   const agentElevationPowerInput = document.getElementById('agent-elevation-power') as HTMLInputElement | null;
+  const agentElevationGainKInput = document.getElementById('agent-elevation-gain-k') as HTMLInputElement | null;
   const agentDebugPathsInput = document.getElementById('agent-debug-paths') as HTMLInputElement | null;
   const terrainResetButton = document.getElementById('terrain-reset') as HTMLButtonElement | null;
   const terrainProvinceCountInput = document.getElementById('terrain-province-count') as HTMLInputElement | null;
@@ -195,6 +197,7 @@ export function createPageLayout(): PageLayout {
   const agentLowlandThresholdValue = document.getElementById('agent-lowland-threshold-value');
   const agentImpassableThresholdValue = document.getElementById('agent-impassable-threshold-value');
   const agentElevationPowerValue = document.getElementById('agent-elevation-power-value');
+  const agentElevationGainKValue = document.getElementById('agent-elevation-gain-k-value');
 
   const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
   const parseIntWithFallback = (value: string | undefined, fallback: number): number => {
@@ -384,6 +387,9 @@ export function createPageLayout(): PageLayout {
     if (agentElevationPowerInput) {
       agentElevationPowerInput.value = agentElevationPowerInput.defaultValue;
     }
+    if (agentElevationGainKInput) {
+      agentElevationGainKInput.value = agentElevationGainKInput.defaultValue;
+    }
     if (agentDebugPathsInput) {
       agentDebugPathsInput.checked = agentDebugPathsInput.defaultChecked;
     }
@@ -537,6 +543,9 @@ export function createPageLayout(): PageLayout {
     if (typeof settings.agentElevationPower === 'number' && agentElevationPowerInput) {
       agentElevationPowerInput.value = settings.agentElevationPower.toString();
     }
+    if (typeof settings.agentElevationGainK === 'number' && agentElevationGainKInput) {
+      agentElevationGainKInput.value = settings.agentElevationGainK.toString();
+    }
     if (typeof settings.agentDebugPaths === 'boolean' && agentDebugPathsInput) {
       agentDebugPathsInput.checked = settings.agentDebugPaths;
     }
@@ -641,6 +650,7 @@ export function createPageLayout(): PageLayout {
     );
     const agentImpassableThreshold = clamp(Math.max(agentLowlandThreshold + 1, agentImpassableThresholdInputValue), 2, 32);
     const agentElevationPower = clamp(parseFloatWithFallback(agentElevationPowerInput?.value, 0.8), 0.5, 2);
+    const agentElevationGainK = clamp(parseFloatWithFallback(agentElevationGainKInput?.value, 1), 0, 4);
     const agentDebugPaths = Boolean(agentDebugPathsInput?.checked);
     return {
       spacing,
@@ -692,6 +702,7 @@ export function createPageLayout(): PageLayout {
       agentLowlandThreshold,
       agentImpassableThreshold,
       agentElevationPower,
+      agentElevationGainK,
       agentDebugPaths,
     };
   };
@@ -824,6 +835,9 @@ export function createPageLayout(): PageLayout {
     if (agentElevationPowerValue) {
       agentElevationPowerValue.textContent = settings.agentElevationPower.toFixed(2);
     }
+    if (agentElevationGainKValue) {
+      agentElevationGainKValue.textContent = settings.agentElevationGainK.toFixed(2);
+    }
   };
 
   syncTerrainLabels();
@@ -925,6 +939,7 @@ export function createPageLayout(): PageLayout {
     agentLowlandThresholdInput?.addEventListener('input', notify);
     agentImpassableThresholdInput?.addEventListener('input', notify);
     agentElevationPowerInput?.addEventListener('input', notify);
+    agentElevationGainKInput?.addEventListener('input', notify);
     agentDebugPathsInput?.addEventListener('change', notify);
     terrainResetButton?.addEventListener('click', reset);
     },

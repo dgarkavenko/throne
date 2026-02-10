@@ -4,6 +4,7 @@ export type PathfindingCostParams = {
 	lowlandThreshold: number;
 	impassableThreshold: number;
 	elevationPower: number;
+	elevationGainK: number;
 	riverPenalty: number;
 };
 
@@ -97,7 +98,8 @@ export function buildNavigationGraph(
 				face.elevation,
 				clampedParams.lowlandThreshold,
 				clampedParams.impassableThreshold,
-				clampedParams.elevationPower
+				clampedParams.elevationPower,
+				clampedParams.elevationGainK
 			) === null
 		) {
 			continue;
@@ -351,6 +353,7 @@ function sanitizePathfindingCostParams(params: PathfindingCostParams): Pathfindi
 		lowlandThreshold,
 		impassableThreshold: clamp(adjustedImpassableThreshold, 2, 32),
 		elevationPower: clamp(params.elevationPower, 0.5, 2),
+		elevationGainK: clamp(params.elevationGainK, 0, 4),
 		riverPenalty: clamp(params.riverPenalty, 0, 8),
 	};
 }
@@ -359,13 +362,15 @@ export function computeElevationFactor(
 	elevation: number,
 	lowlandThreshold: number,
 	impassableThreshold: number,
-	elevationPower: number
+	elevationPower: number,
+	elevationGainK: number
 ): number | null {
 	const safeElevation = Math.round(elevation);
 	const safeLowlandThreshold = clamp(Math.round(lowlandThreshold), 1, 31);
 	const safeImpassableThreshold = clamp(Math.round(impassableThreshold), 2, 32);
 	const adjustedImpassableThreshold = Math.max(safeLowlandThreshold + 1, safeImpassableThreshold);
 	const safePower = clamp(elevationPower, 0.5, 2);
+	const safeGain = clamp(elevationGainK, 0, 4);
 	if (safeElevation >= adjustedImpassableThreshold) {
 		return null;
 	}
@@ -377,7 +382,7 @@ export function computeElevationFactor(
 		0,
 		1
 	);
-	return 1 + Math.pow(t, safePower);
+	return 1 + safeGain * Math.pow(t, safePower);
 }
 
 export function computeTerrainStepFactor(
@@ -390,7 +395,8 @@ export function computeTerrainStepFactor(
 		elevation,
 		clamped.lowlandThreshold,
 		clamped.impassableThreshold,
-		clamped.elevationPower
+		clamped.elevationPower,
+		clamped.elevationGainK
 	);
 	if (elevationFactor === null) {
 		return null;

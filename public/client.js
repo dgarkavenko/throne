@@ -50,6 +50,7 @@ async function startClient() {
         lowlandThreshold: terrainSettings.agentLowlandThreshold,
         impassableThreshold: terrainSettings.agentImpassableThreshold,
         elevationPower: terrainSettings.agentElevationPower,
+        elevationGainK: terrainSettings.agentElevationGainK,
         showPaths: terrainSettings.agentDebugPaths,
     });
     layout.onTerrainSettingsChange((nextSettings) => {
@@ -60,6 +61,7 @@ async function startClient() {
             lowlandThreshold: nextSettings.agentLowlandThreshold,
             impassableThreshold: nextSettings.agentImpassableThreshold,
             elevationPower: nextSettings.agentElevationPower,
+            elevationGainK: nextSettings.agentElevationGainK,
             showPaths: nextSettings.agentDebugPaths,
         });
     });

@@ -80,8 +80,8 @@ function dijkstra(graph: NavigationGraph, startFace: number, targetFace: number)
 
 describe('pathfinding', () => {
 	it('returns factor 1 for lowlands', () => {
-		expect(computeElevationFactor(1, 10, 28, 0.8)).toBe(1);
-		expect(computeElevationFactor(10, 10, 28, 0.8)).toBe(1);
+		expect(computeElevationFactor(1, 10, 28, 0.8, 1)).toBe(1);
+		expect(computeElevationFactor(10, 10, 28, 0.8, 1)).toBe(1);
 	});
 
 	it('treats elevations at or above the impassable threshold as blocked', () => {
@@ -99,6 +99,7 @@ describe('pathfinding', () => {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 0.8,
+			elevationGainK: 1,
 			riverPenalty: 0.8,
 		});
 
@@ -111,9 +112,18 @@ describe('pathfinding', () => {
 		const low = 10;
 		const imp = 28;
 		const t = (elevation - low) / (imp - low);
-		expect(computeElevationFactor(elevation, low, imp, 0.5)).toBeCloseTo(1 + Math.pow(t, 0.5), 10);
-		expect(computeElevationFactor(elevation, low, imp, 1)).toBeCloseTo(1 + t, 10);
-		expect(computeElevationFactor(elevation, low, imp, 2)).toBeCloseTo(1 + Math.pow(t, 2), 10);
+		expect(computeElevationFactor(elevation, low, imp, 0.5, 1)).toBeCloseTo(1 + Math.pow(t, 0.5), 10);
+		expect(computeElevationFactor(elevation, low, imp, 1, 1)).toBeCloseTo(1 + t, 10);
+		expect(computeElevationFactor(elevation, low, imp, 2, 1)).toBeCloseTo(1 + Math.pow(t, 2), 10);
+	});
+
+	it('applies gain k in elevation factor and supports k=0', () => {
+		const elevation = 20;
+		const low = 10;
+		const imp = 26;
+		const t = (elevation - low) / (imp - low);
+		expect(computeElevationFactor(elevation, low, imp, 1, 0)).toBeCloseTo(1, 10);
+		expect(computeElevationFactor(elevation, low, imp, 1, 2.5)).toBeCloseTo(1 + 2.5 * t, 10);
 	});
 
 	it('multiplies river factor onto elevation factor', () => {
@@ -121,12 +131,14 @@ describe('pathfinding', () => {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 0.8,
+			elevationGainK: 1,
 			riverPenalty: 0.8,
 		});
 		const withRiver = computeTerrainStepFactor(19, true, {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 0.8,
+			elevationGainK: 1,
 			riverPenalty: 0.8,
 		});
 		expect(noRiver).not.toBeNull();
@@ -163,6 +175,7 @@ describe('pathfinding', () => {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 0.8,
+			elevationGainK: 1,
 			riverPenalty: 0.8,
 		});
 
@@ -199,6 +212,7 @@ describe('pathfinding', () => {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 1,
+			elevationGainK: 1,
 			riverPenalty: 2,
 		});
 
@@ -222,6 +236,7 @@ describe('pathfinding', () => {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 1,
+			elevationGainK: 1,
 			riverPenalty: 1,
 		});
 
@@ -268,6 +283,7 @@ describe('pathfinding', () => {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 1.2,
+			elevationGainK: 1,
 			riverPenalty: 0.8,
 		});
 
@@ -290,6 +306,7 @@ describe('pathfinding', () => {
 			lowlandThreshold: 31,
 			impassableThreshold: 31,
 			elevationPower: 1,
+			elevationGainK: 1,
 			riverPenalty: 0,
 		});
 
@@ -304,18 +321,21 @@ describe('pathfinding', () => {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 0.8,
+			elevationGainK: 1,
 			riverPenalty: 0.8,
 		});
 		const riverFactor = computeTerrainStepFactor(10, true, {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 0.8,
+			elevationGainK: 1,
 			riverPenalty: 0.8,
 		});
 		const steepFactor = computeTerrainStepFactor(24, false, {
 			lowlandThreshold: 10,
 			impassableThreshold: 28,
 			elevationPower: 0.8,
+			elevationGainK: 1,
 			riverPenalty: 0.8,
 		});
 		const edgeTimeAtSpeed1 = (timePerProvinceSeconds * (flatFactor as number)) / 1;
@@ -327,6 +347,51 @@ describe('pathfinding', () => {
 		expect(pausedEdgeTime).toBe(Number.POSITIVE_INFINITY);
 		expect((riverFactor as number) / (flatFactor as number)).toBeCloseTo(1.8, 8);
 		expect(steepFactor).toBeGreaterThan(flatFactor as number);
+	});
+
+	it('changes route preference when k increases', () => {
+		const points = [
+			{ x: 0, y: 0 }, // 0 start
+			{ x: 1, y: 0 }, // 1 steep short
+			{ x: 2, y: 0 }, // 2 target
+			{ x: 0, y: 1 }, // 3 lowland detour
+			{ x: 1, y: 1 }, // 4 lowland detour
+		];
+		const elevations = [1, 25, 1, 2, 2];
+		const adjacency = [
+			[1, 3],
+			[0, 2],
+			[1, 4],
+			[0, 4],
+			[3, 2],
+		];
+		const edges: Array<[number, number]> = [
+			[0, 1],
+			[1, 2],
+			[0, 3],
+			[3, 4],
+			[4, 2],
+		];
+		const mesh = makeMesh(points, elevations, adjacency, edges);
+		const isLand = new Array<boolean>(points.length).fill(true);
+		const riverEdgeMask = new Array<boolean>(edges.length).fill(false);
+		const lowKGraph = buildNavigationGraph(mesh, isLand, riverEdgeMask, {
+			lowlandThreshold: 10,
+			impassableThreshold: 26,
+			elevationPower: 1,
+			elevationGainK: 0.2,
+			riverPenalty: 0,
+		});
+		const highKGraph = buildNavigationGraph(mesh, isLand, riverEdgeMask, {
+			lowlandThreshold: 10,
+			impassableThreshold: 26,
+			elevationPower: 1,
+			elevationGainK: 4,
+			riverPenalty: 0,
+		});
+
+		expect(findFacePathAStar(lowKGraph, 0, 2).facePath).toEqual([0, 1, 2]);
+		expect(findFacePathAStar(highKGraph, 0, 2).facePath).toEqual([0, 3, 4, 2]);
 	});
 
 	it('advances along polyline smoothly without overshoot', () => {

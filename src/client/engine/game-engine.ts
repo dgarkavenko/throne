@@ -99,6 +99,7 @@ type MovementTestConfig = {
   lowlandThreshold: number;
   impassableThreshold: number;
   elevationPower: number;
+  elevationGainK: number;
   riverPenalty: number;
   showPaths: boolean;
   spacingTarget: number;
@@ -145,6 +146,7 @@ export class GameEngine {
     lowlandThreshold: 10,
     impassableThreshold: 28,
     elevationPower: 0.8,
+    elevationGainK: 1,
     riverPenalty: 0.8,
     showPaths: false,
     spacingTarget: 16,
@@ -390,6 +392,11 @@ export class GameEngine {
         0.5,
         2
       ),
+      elevationGainK: this.clamp(
+        safeValue(nextConfig.elevationGainK ?? current.elevationGainK, current.elevationGainK),
+        0,
+        4
+      ),
       riverPenalty: this.clamp(safeValue(nextConfig.riverPenalty ?? current.riverPenalty, current.riverPenalty), 0, 8),
       showPaths: typeof nextConfig.showPaths === 'boolean' ? nextConfig.showPaths : current.showPaths,
       spacingTarget: this.clamp(
@@ -407,6 +414,7 @@ export class GameEngine {
       sanitized.lowlandThreshold !== current.lowlandThreshold ||
       sanitized.impassableThreshold !== current.impassableThreshold ||
       sanitized.elevationPower !== current.elevationPower ||
+      sanitized.elevationGainK !== current.elevationGainK ||
       sanitized.riverPenalty !== current.riverPenalty ||
       sanitized.showPaths !== current.showPaths ||
       sanitized.spacingTarget !== current.spacingTarget;
@@ -421,6 +429,7 @@ export class GameEngine {
       sanitized.lowlandThreshold !== current.lowlandThreshold ||
       sanitized.impassableThreshold !== current.impassableThreshold ||
       sanitized.elevationPower !== current.elevationPower ||
+      sanitized.elevationGainK !== current.elevationGainK ||
       sanitized.riverPenalty !== current.riverPenalty;
     this.movementTestConfig = sanitized;
     if (unitPopulationChanged) {
@@ -1190,6 +1199,7 @@ export class GameEngine {
         lowlandThreshold: this.movementTestConfig.lowlandThreshold,
         impassableThreshold: this.movementTestConfig.impassableThreshold,
         elevationPower: this.movementTestConfig.elevationPower,
+        elevationGainK: this.movementTestConfig.elevationGainK,
         riverPenalty: this.movementTestConfig.riverPenalty,
       }
     );
