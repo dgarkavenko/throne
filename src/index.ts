@@ -15,8 +15,10 @@ export default {
       });
     }
 
-    if (url.pathname === '/client.js' || url.pathname.startsWith('/client/')) {
-      if (url.pathname.startsWith('/client/')) {
+    const isClientAsset = url.pathname === '/client.js' || url.pathname.startsWith('/client/');
+    const isTerrainAsset = url.pathname.startsWith('/terrain/');
+    if (isClientAsset || isTerrainAsset) {
+      if (url.pathname.startsWith('/client/') || url.pathname.startsWith('/terrain/')) {
         const lastSegment = url.pathname.split('/').at(-1) ?? '';
         if (lastSegment && !lastSegment.includes('.')) {
           const assetUrl = new URL(request.url);

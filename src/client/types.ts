@@ -1,3 +1,5 @@
+import type { TerrainGenerationControls } from '../terrain/controls';
+
 export interface PlayerState {
   id: string;
   emoji: string;
@@ -11,10 +13,8 @@ export interface HistoryEntry {
   emoji: string;
 }
 
-export type TerrainControlValue = number | boolean;
-
 export interface TerrainSnapshot {
-  controls: Record<string, TerrainControlValue>;
+  controls: TerrainGenerationControls;
   movement: {
     timePerFaceSeconds: number;
     lowlandThreshold: number;

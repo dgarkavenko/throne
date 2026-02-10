@@ -67,15 +67,18 @@ async function startClient(): Promise<void> {
   });
 
   await engine.init(layout.field);
-  const terrainSettings = layout.getTerrainSettings();
-  engine.setVoronoiControls(terrainSettings);
+  const generationSettings = layout.getTerrainGenerationSettings();
+  const renderSettings = layout.getTerrainRenderSettings();
+  const movementSettings = layout.getMovementSettings();
+  engine.setTerrainGenerationControls(generationSettings);
+  engine.setTerrainRenderControls(renderSettings);
   engine.setMovementTestConfig({
-    timePerFaceSeconds: terrainSettings.agentTimePerFaceSeconds,
-    lowlandThreshold: terrainSettings.agentLowlandThreshold,
-    impassableThreshold: terrainSettings.agentImpassableThreshold,
-    elevationPower: terrainSettings.agentElevationPower,
-    elevationGainK: terrainSettings.agentElevationGainK,
-    showPaths: terrainSettings.agentDebugPaths,
+    timePerFaceSeconds: movementSettings.timePerFaceSeconds,
+    lowlandThreshold: movementSettings.lowlandThreshold,
+    impassableThreshold: movementSettings.impassableThreshold,
+    elevationPower: movementSettings.elevationPower,
+    elevationGainK: movementSettings.elevationGainK,
+    showPaths: movementSettings.debugPaths,
   });
 
   const syncSettingsAccess = (): void => {
@@ -96,14 +99,15 @@ async function startClient(): Promise<void> {
   layout.setTerrainPublishVisible(false);
   layout.setTerrainSyncStatus('Unsynced');
   layout.onTerrainSettingsChange((nextSettings) => {
-    engine.setVoronoiControls(nextSettings);
+    engine.setTerrainGenerationControls(nextSettings.generation);
+    engine.setTerrainRenderControls(nextSettings.render);
     engine.setMovementTestConfig({
-      timePerFaceSeconds: nextSettings.agentTimePerFaceSeconds,
-      lowlandThreshold: nextSettings.agentLowlandThreshold,
-      impassableThreshold: nextSettings.agentImpassableThreshold,
-      elevationPower: nextSettings.agentElevationPower,
-      elevationGainK: nextSettings.agentElevationGainK,
-      showPaths: nextSettings.agentDebugPaths,
+      timePerFaceSeconds: nextSettings.movement.timePerFaceSeconds,
+      lowlandThreshold: nextSettings.movement.lowlandThreshold,
+      impassableThreshold: nextSettings.movement.impassableThreshold,
+      elevationPower: nextSettings.movement.elevationPower,
+      elevationGainK: nextSettings.movement.elevationGainK,
+      showPaths: nextSettings.movement.debugPaths,
     });
     layout.setTerrainSyncStatus('Local changes');
   });

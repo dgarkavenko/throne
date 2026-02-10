@@ -1,18 +1,13 @@
 import {
-  applyMountains,
-  buildRiverTraces,
-  createStepRng,
-  generateMesh,
-  generateWater,
-  STEP_SEEDS,
-  type TerrainControls,
-} from './client/engine/terrain';
+  normalizeTerrainGenerationControls,
+  type TerrainGenerationControls,
+} from './terrain/controls';
+import { buildTerrainGeneration } from './terrain/pipeline';
 import { buildNavigationGraph, findFacePathAStar, type NavigationGraph } from './client/engine/pathfinding';
 import type {
   ActorSnapshot,
   ActorMoveClientMessage,
   ClientMessage,
-  TerrainControlValue,
   TerrainSnapshot,
   TerrainPublishClientMessage,
 } from './client/types';
@@ -60,53 +55,6 @@ const MAX_HISTORY = 100;
 const DEFAULT_MAP_WIDTH = 1560;
 const DEFAULT_MAP_HEIGHT = 844;
 
-const DEFAULT_TERRAIN_CONTROLS: TerrainControls = {
-  spacing: 16,
-  showPolygonGraph: false,
-  showDualGraph: false,
-  showCornerNodes: false,
-  showCenterNodes: false,
-  showInsertedPoints: false,
-  provinceCount: 8,
-  provinceBorderWidth: 6.5,
-  provinceSizeVariance: 0.4,
-  provincePassageElevation: 6,
-  provinceRiverPenalty: 0.6,
-  provinceSmallIslandMultiplier: 0.35,
-  provinceArchipelagoMultiplier: 0.2,
-  provinceIslandSingleMultiplier: 1.6,
-  provinceArchipelagoRadiusMultiplier: 3,
-  showLandBorders: true,
-  showShoreBorders: true,
-  landRelief: 0.95,
-  ridgeStrength: 0.85,
-  ridgeCount: 9,
-  plateauStrength: 0.8,
-  ridgeDistribution: 0.8,
-  ridgeSeparation: 0.95,
-  ridgeContinuity: 0.25,
-  ridgeContinuityThreshold: 0,
-  oceanPeakClamp: 0.05,
-  ridgeOceanClamp: 0.5,
-  ridgeWidth: 1,
-  seed: 1337,
-  intermediateSeed: 1337,
-  intermediateMaxIterations: 8,
-  intermediateThreshold: 5,
-  intermediateRelMagnitude: 0,
-  intermediateAbsMagnitude: 2,
-  waterLevel: -10,
-  waterRoughness: 60,
-  waterNoiseScale: 2,
-  waterNoiseStrength: 0,
-  waterNoiseOctaves: 1,
-  waterWarpScale: 2,
-  waterWarpStrength: 0.7,
-  riverDensity: 1,
-  riverBranchChance: 0.25,
-  riverClimbChance: 0.35,
-};
-
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -115,118 +63,10 @@ function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function readBool(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback;
-}
-
-function normalizeTerrainControls(controlsRaw: Record<string, TerrainControlValue> | null | undefined): TerrainControls {
-  const controls = controlsRaw ?? {};
-  return {
-    spacing: clamp(Math.round(readNumber(controls.spacing, DEFAULT_TERRAIN_CONTROLS.spacing)), 16, 128),
-    showPolygonGraph: readBool(controls.showPolygonGraph, DEFAULT_TERRAIN_CONTROLS.showPolygonGraph),
-    showDualGraph: readBool(controls.showDualGraph, DEFAULT_TERRAIN_CONTROLS.showDualGraph),
-    showCornerNodes: readBool(controls.showCornerNodes, DEFAULT_TERRAIN_CONTROLS.showCornerNodes),
-    showCenterNodes: readBool(controls.showCenterNodes, DEFAULT_TERRAIN_CONTROLS.showCenterNodes),
-    showInsertedPoints: readBool(controls.showInsertedPoints, DEFAULT_TERRAIN_CONTROLS.showInsertedPoints),
-    provinceCount: clamp(Math.round(readNumber(controls.provinceCount, DEFAULT_TERRAIN_CONTROLS.provinceCount)), 1, 32),
-    provinceBorderWidth: clamp(readNumber(controls.provinceBorderWidth, DEFAULT_TERRAIN_CONTROLS.provinceBorderWidth), 1, 24),
-    provinceSizeVariance: clamp(readNumber(controls.provinceSizeVariance, DEFAULT_TERRAIN_CONTROLS.provinceSizeVariance), 0, 0.75),
-    provincePassageElevation: clamp(
-      Math.round(readNumber(controls.provincePassageElevation, DEFAULT_TERRAIN_CONTROLS.provincePassageElevation)),
-      0,
-      32
-    ),
-    provinceRiverPenalty: clamp(readNumber(controls.provinceRiverPenalty, DEFAULT_TERRAIN_CONTROLS.provinceRiverPenalty), 0, 2),
-    provinceSmallIslandMultiplier: clamp(
-      readNumber(controls.provinceSmallIslandMultiplier, DEFAULT_TERRAIN_CONTROLS.provinceSmallIslandMultiplier),
-      0,
-      1
-    ),
-    provinceArchipelagoMultiplier: clamp(
-      readNumber(controls.provinceArchipelagoMultiplier, DEFAULT_TERRAIN_CONTROLS.provinceArchipelagoMultiplier),
-      0,
-      1
-    ),
-    provinceIslandSingleMultiplier: clamp(
-      readNumber(controls.provinceIslandSingleMultiplier, DEFAULT_TERRAIN_CONTROLS.provinceIslandSingleMultiplier),
-      1,
-      3
-    ),
-    provinceArchipelagoRadiusMultiplier: clamp(
-      readNumber(controls.provinceArchipelagoRadiusMultiplier, DEFAULT_TERRAIN_CONTROLS.provinceArchipelagoRadiusMultiplier),
-      1,
-      6
-    ),
-    showLandBorders: readBool(controls.showLandBorders, DEFAULT_TERRAIN_CONTROLS.showLandBorders),
-    showShoreBorders: readBool(controls.showShoreBorders, DEFAULT_TERRAIN_CONTROLS.showShoreBorders),
-    landRelief: clamp(readNumber(controls.landRelief, DEFAULT_TERRAIN_CONTROLS.landRelief), 0, 1),
-    ridgeStrength: clamp(readNumber(controls.ridgeStrength, DEFAULT_TERRAIN_CONTROLS.ridgeStrength), 0, 1),
-    ridgeCount: clamp(Math.round(readNumber(controls.ridgeCount, DEFAULT_TERRAIN_CONTROLS.ridgeCount)), 1, 10),
-    plateauStrength: clamp(readNumber(controls.plateauStrength, DEFAULT_TERRAIN_CONTROLS.plateauStrength), 0, 1),
-    ridgeDistribution: clamp(readNumber(controls.ridgeDistribution, DEFAULT_TERRAIN_CONTROLS.ridgeDistribution), 0, 1),
-    ridgeSeparation: clamp(readNumber(controls.ridgeSeparation, DEFAULT_TERRAIN_CONTROLS.ridgeSeparation), 0, 1),
-    ridgeContinuity: clamp(readNumber(controls.ridgeContinuity, DEFAULT_TERRAIN_CONTROLS.ridgeContinuity), 0, 1),
-    ridgeContinuityThreshold: clamp(
-      readNumber(controls.ridgeContinuityThreshold, DEFAULT_TERRAIN_CONTROLS.ridgeContinuityThreshold),
-      0,
-      1
-    ),
-    oceanPeakClamp: clamp(readNumber(controls.oceanPeakClamp, DEFAULT_TERRAIN_CONTROLS.oceanPeakClamp), 0, 1),
-    ridgeOceanClamp: clamp(readNumber(controls.ridgeOceanClamp, DEFAULT_TERRAIN_CONTROLS.ridgeOceanClamp), 0, 1),
-    ridgeWidth: clamp(readNumber(controls.ridgeWidth, DEFAULT_TERRAIN_CONTROLS.ridgeWidth), 0, 1),
-    seed: clamp(Math.floor(readNumber(controls.seed, DEFAULT_TERRAIN_CONTROLS.seed)), 0, 0xffffffff),
-    intermediateSeed: clamp(
-      Math.floor(readNumber(controls.intermediateSeed, DEFAULT_TERRAIN_CONTROLS.intermediateSeed)),
-      0,
-      0xffffffff
-    ),
-    intermediateMaxIterations: clamp(
-      Math.round(readNumber(controls.intermediateMaxIterations, DEFAULT_TERRAIN_CONTROLS.intermediateMaxIterations)),
-      0,
-      12
-    ),
-    intermediateThreshold: clamp(
-      Math.round(readNumber(controls.intermediateThreshold, DEFAULT_TERRAIN_CONTROLS.intermediateThreshold)),
-      2,
-      20
-    ),
-    intermediateRelMagnitude: clamp(
-      readNumber(controls.intermediateRelMagnitude, DEFAULT_TERRAIN_CONTROLS.intermediateRelMagnitude),
-      0,
-      2
-    ),
-    intermediateAbsMagnitude: clamp(
-      readNumber(controls.intermediateAbsMagnitude, DEFAULT_TERRAIN_CONTROLS.intermediateAbsMagnitude),
-      0,
-      10
-    ),
-    waterLevel: clamp(Math.round(readNumber(controls.waterLevel, DEFAULT_TERRAIN_CONTROLS.waterLevel)), -40, 40),
-    waterRoughness: clamp(
-      Math.round(readNumber(controls.waterRoughness, DEFAULT_TERRAIN_CONTROLS.waterRoughness)),
-      0,
-      100
-    ),
-    waterNoiseScale: clamp(
-      Math.round(readNumber(controls.waterNoiseScale, DEFAULT_TERRAIN_CONTROLS.waterNoiseScale)),
-      2,
-      60
-    ),
-    waterNoiseStrength: clamp(readNumber(controls.waterNoiseStrength, DEFAULT_TERRAIN_CONTROLS.waterNoiseStrength), 0, 1),
-    waterNoiseOctaves: clamp(
-      Math.round(readNumber(controls.waterNoiseOctaves, DEFAULT_TERRAIN_CONTROLS.waterNoiseOctaves)),
-      1,
-      6
-    ),
-    waterWarpScale: clamp(
-      Math.round(readNumber(controls.waterWarpScale, DEFAULT_TERRAIN_CONTROLS.waterWarpScale)),
-      2,
-      40
-    ),
-    waterWarpStrength: clamp(readNumber(controls.waterWarpStrength, DEFAULT_TERRAIN_CONTROLS.waterWarpStrength), 0, 0.8),
-    riverDensity: clamp(readNumber(controls.riverDensity, DEFAULT_TERRAIN_CONTROLS.riverDensity), 0, 2),
-    riverBranchChance: clamp(readNumber(controls.riverBranchChance, DEFAULT_TERRAIN_CONTROLS.riverBranchChance), 0, 1),
-    riverClimbChance: clamp(readNumber(controls.riverClimbChance, DEFAULT_TERRAIN_CONTROLS.riverClimbChance), 0, 1),
-  };
+function normalizeTerrainControls(
+  controlsRaw: Partial<TerrainGenerationControls> | null | undefined
+): TerrainGenerationControls {
+  return normalizeTerrainGenerationControls(controlsRaw);
 }
 
 function normalizeMovementConfig(movementRaw: TerrainSnapshot['movement'] | null | undefined): TerrainSnapshot['movement'] {
@@ -619,18 +459,16 @@ export class RoomDurableObject implements DurableObject {
     };
 
     const config = { width: normalizedSnapshot.mapWidth, height: normalizedSnapshot.mapHeight };
-    const seed = controls.seed >>> 0;
-    const meshRandom = createStepRng(seed, STEP_SEEDS.mesh);
-    const waterRandom = createStepRng(seed, STEP_SEEDS.water);
-    const mountainRandom = createStepRng(seed, STEP_SEEDS.mountain);
-    const riverRandom = createStepRng(seed, STEP_SEEDS.river);
+    const generation = buildTerrainGeneration({
+      config,
+      controls,
+      stopAfter: 'rivers',
+    });
+    if (!generation.mesh || !generation.water || !generation.rivers) {
+      throw new Error('Failed to build terrain generation state');
+    }
 
-    const mesh = generateMesh(config, controls, meshRandom);
-    const water = generateWater(config, mesh.mesh, mesh.baseCells, controls, waterRandom);
-    applyMountains(mesh.mesh, water, controls, mountainRandom);
-    const traces = buildRiverTraces(mesh.mesh, controls, riverRandom, water.isLand, water.oceanWater);
-
-    const navigationGraph = buildNavigationGraph(mesh.mesh, water.isLand, traces.riverEdgeMask, {
+    const navigationGraph = buildNavigationGraph(generation.mesh.mesh, generation.water.isLand, generation.rivers.riverEdgeMask, {
       lowlandThreshold: normalizedSnapshot.movement.lowlandThreshold,
       impassableThreshold: normalizedSnapshot.movement.impassableThreshold,
       elevationPower: normalizedSnapshot.movement.elevationPower,

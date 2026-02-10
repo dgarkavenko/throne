@@ -1,3 +1,6 @@
+import type { TerrainGenerationControls } from '../../terrain/controls';
+import type { TerrainRenderControls } from '../terrain/render-controls';
+
 type TerrainSettings = {
   spacing: number;
   showPolygonGraph: boolean;
@@ -51,6 +54,21 @@ type TerrainSettings = {
   agentDebugPaths: boolean;
 };
 
+export type MovementSettings = {
+  timePerFaceSeconds: number;
+  lowlandThreshold: number;
+  impassableThreshold: number;
+  elevationPower: number;
+  elevationGainK: number;
+  debugPaths: boolean;
+};
+
+export type TerrainSettingsPayload = {
+  generation: TerrainGenerationControls;
+  render: TerrainRenderControls;
+  movement: MovementSettings;
+};
+
 type PageLayout = {
   field: HTMLElement | null;
   setStatus: (message: string) => void;
@@ -61,8 +79,10 @@ type PageLayout = {
   setDebugControlsOnly: (onlyDebug: boolean) => void;
   setTerrainSyncStatus: (message: string) => void;
   setTerrainPublishVisible: (visible: boolean) => void;
-  getTerrainSettings: () => TerrainSettings;
-  onTerrainSettingsChange: (onChange: (settings: TerrainSettings) => void) => void;
+  getTerrainGenerationSettings: () => TerrainGenerationControls;
+  getTerrainRenderSettings: () => TerrainRenderControls;
+  getMovementSettings: () => MovementSettings;
+  onTerrainSettingsChange: (onChange: (settings: TerrainSettingsPayload) => void) => void;
   onPublishTerrain: (onPublish: () => void) => void;
 };
 
@@ -714,6 +734,74 @@ export function createPageLayout(): PageLayout {
     };
   };
 
+  const toGenerationSettings = (settings: TerrainSettings): TerrainGenerationControls => ({
+    spacing: settings.spacing,
+    provinceCount: settings.provinceCount,
+    provinceSizeVariance: settings.provinceSizeVariance,
+    provincePassageElevation: settings.provincePassageElevation,
+    provinceRiverPenalty: settings.provinceRiverPenalty,
+    provinceSmallIslandMultiplier: settings.provinceSmallIslandMultiplier,
+    provinceArchipelagoMultiplier: settings.provinceArchipelagoMultiplier,
+    provinceIslandSingleMultiplier: settings.provinceIslandSingleMultiplier,
+    provinceArchipelagoRadiusMultiplier: settings.provinceArchipelagoRadiusMultiplier,
+    seed: settings.seed,
+    waterLevel: settings.waterLevel,
+    waterRoughness: settings.waterRoughness,
+    waterNoiseScale: settings.waterNoiseScale,
+    waterNoiseStrength: settings.waterNoiseStrength,
+    waterNoiseOctaves: settings.waterNoiseOctaves,
+    waterWarpScale: settings.waterWarpScale,
+    waterWarpStrength: settings.waterWarpStrength,
+    riverDensity: settings.riverDensity,
+    riverBranchChance: settings.riverBranchChance,
+    riverClimbChance: settings.riverClimbChance,
+    landRelief: settings.landRelief,
+    ridgeStrength: settings.ridgeStrength,
+    ridgeCount: settings.ridgeCount,
+    plateauStrength: settings.plateauStrength,
+    ridgeDistribution: settings.ridgeDistribution,
+    ridgeSeparation: settings.ridgeSeparation,
+    ridgeContinuity: settings.ridgeContinuity,
+    ridgeContinuityThreshold: settings.ridgeContinuityThreshold,
+    oceanPeakClamp: settings.oceanPeakClamp,
+    ridgeOceanClamp: settings.ridgeOceanClamp,
+    ridgeWidth: settings.ridgeWidth,
+  });
+
+  const toRenderSettings = (settings: TerrainSettings): TerrainRenderControls => ({
+    showPolygonGraph: settings.showPolygonGraph,
+    showDualGraph: settings.showDualGraph,
+    showCornerNodes: settings.showCornerNodes,
+    showCenterNodes: settings.showCenterNodes,
+    showInsertedPoints: settings.showInsertedPoints,
+    provinceBorderWidth: settings.provinceBorderWidth,
+    showLandBorders: settings.showLandBorders,
+    showShoreBorders: settings.showShoreBorders,
+    intermediateSeed: settings.intermediateSeed,
+    intermediateMaxIterations: settings.intermediateMaxIterations,
+    intermediateThreshold: settings.intermediateThreshold,
+    intermediateRelMagnitude: settings.intermediateRelMagnitude,
+    intermediateAbsMagnitude: settings.intermediateAbsMagnitude,
+  });
+
+  const toMovementSettings = (settings: TerrainSettings): MovementSettings => ({
+    timePerFaceSeconds: settings.agentTimePerFaceSeconds,
+    lowlandThreshold: settings.agentLowlandThreshold,
+    impassableThreshold: settings.agentImpassableThreshold,
+    elevationPower: settings.agentElevationPower,
+    elevationGainK: settings.agentElevationGainK,
+    debugPaths: settings.agentDebugPaths,
+  });
+
+  const readTerrainSettingsPayload = (): TerrainSettingsPayload => {
+    const settings = readTerrainSettings();
+    return {
+      generation: toGenerationSettings(settings),
+      render: toRenderSettings(settings),
+      movement: toMovementSettings(settings),
+    };
+  };
+
   const storedSettings = loadStoredTerrainSettings();
   if (storedSettings) {
     applyStoredSettings(storedSettings);
@@ -951,22 +1039,36 @@ export function createPageLayout(): PageLayout {
       terrainPublishVisible = visible;
       applyTerrainPublishVisibility();
     },
-    getTerrainSettings() {
-      return readTerrainSettings();
+    getTerrainGenerationSettings() {
+      return readTerrainSettingsPayload().generation;
+    },
+    getTerrainRenderSettings() {
+      return readTerrainSettingsPayload().render;
+    },
+    getMovementSettings() {
+      return readTerrainSettingsPayload().movement;
     },
     onTerrainSettingsChange(onChange) {
     const notify = () => {
       syncTerrainLabels();
       const settings = readTerrainSettings();
       storeTerrainSettings(settings);
-      onChange(settings);
+      onChange({
+        generation: toGenerationSettings(settings),
+        render: toRenderSettings(settings),
+        movement: toMovementSettings(settings),
+      });
     };
     const reset = () => {
       applyDefaultSettings();
       syncTerrainLabels();
       const settings = readTerrainSettings();
       storeTerrainSettings(settings);
-      onChange(settings);
+      onChange({
+        generation: toGenerationSettings(settings),
+        render: toRenderSettings(settings),
+        movement: toMovementSettings(settings),
+      });
     };
     terrainSpacingInput?.addEventListener('input', notify);
     terrainSeedInput?.addEventListener('change', notify);

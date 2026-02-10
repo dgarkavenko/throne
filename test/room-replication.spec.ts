@@ -1,16 +1,12 @@
 import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import {
-  applyMountains,
-  buildRiverTraces,
-  createStepRng,
-  generateMesh,
-  generateWater,
-  STEP_SEEDS,
-  type TerrainControls,
-} from '../src/client/engine/terrain';
 import { buildNavigationGraph, findFacePathAStar } from '../src/client/engine/pathfinding';
 import type { TerrainSnapshot } from '../src/client/types';
+import { buildTerrainGeneration } from '../src/terrain/pipeline';
+import {
+  DEFAULT_TERRAIN_GENERATION_CONTROLS,
+  type TerrainGenerationControls,
+} from '../src/terrain/controls';
 
 type AnyMessage = Record<string, unknown>;
 
@@ -125,51 +121,9 @@ class MessageSocket {
   }
 }
 
-const DEFAULT_CONTROLS: TerrainControls = {
+const DEFAULT_CONTROLS: TerrainGenerationControls = {
+  ...DEFAULT_TERRAIN_GENERATION_CONTROLS,
   spacing: 64,
-  showPolygonGraph: false,
-  showDualGraph: false,
-  showCornerNodes: false,
-  showCenterNodes: false,
-  showInsertedPoints: false,
-  provinceCount: 8,
-  provinceBorderWidth: 6.5,
-  provinceSizeVariance: 0.4,
-  provincePassageElevation: 6,
-  provinceRiverPenalty: 0.6,
-  provinceSmallIslandMultiplier: 0.35,
-  provinceArchipelagoMultiplier: 0.2,
-  provinceIslandSingleMultiplier: 1.6,
-  provinceArchipelagoRadiusMultiplier: 3,
-  showLandBorders: true,
-  showShoreBorders: true,
-  seed: 1337,
-  intermediateSeed: 1337,
-  intermediateMaxIterations: 8,
-  intermediateThreshold: 5,
-  intermediateRelMagnitude: 0,
-  intermediateAbsMagnitude: 2,
-  waterLevel: -10,
-  waterRoughness: 60,
-  waterNoiseScale: 2,
-  waterNoiseStrength: 0,
-  waterNoiseOctaves: 1,
-  waterWarpScale: 2,
-  waterWarpStrength: 0.7,
-  riverDensity: 1,
-  riverBranchChance: 0.25,
-  riverClimbChance: 0.35,
-  landRelief: 0.95,
-  ridgeStrength: 0.85,
-  ridgeCount: 9,
-  plateauStrength: 0.8,
-  ridgeDistribution: 0.8,
-  ridgeSeparation: 0.95,
-  ridgeContinuity: 0.25,
-  ridgeContinuityThreshold: 0,
-  oceanPeakClamp: 0.05,
-  ridgeWidth: 1,
-  ridgeOceanClamp: 0.5,
 };
 
 const DEFAULT_SNAPSHOT: TerrainSnapshot = {
@@ -199,18 +153,15 @@ async function openRoom(roomId: string): Promise<MessageSocket> {
 
 function pickReachableTarget(startFace: number): number | null {
   const config = { width: DEFAULT_SNAPSHOT.mapWidth, height: DEFAULT_SNAPSHOT.mapHeight };
-  const controls = DEFAULT_CONTROLS;
-  const seed = controls.seed >>> 0;
-  const meshRandom = createStepRng(seed, STEP_SEEDS.mesh);
-  const waterRandom = createStepRng(seed, STEP_SEEDS.water);
-  const mountainRandom = createStepRng(seed, STEP_SEEDS.mountain);
-  const riverRandom = createStepRng(seed, STEP_SEEDS.river);
-
-  const mesh = generateMesh(config, controls, meshRandom);
-  const water = generateWater(config, mesh.mesh, mesh.baseCells, controls, waterRandom);
-  applyMountains(mesh.mesh, water, controls, mountainRandom);
-  const traces = buildRiverTraces(mesh.mesh, controls, riverRandom, water.isLand, water.oceanWater);
-  const graph = buildNavigationGraph(mesh.mesh, water.isLand, traces.riverEdgeMask, {
+  const generation = buildTerrainGeneration({
+    config,
+    controls: DEFAULT_CONTROLS,
+    stopAfter: 'rivers',
+  });
+  if (!generation.mesh || !generation.water || !generation.rivers) {
+    return null;
+  }
+  const graph = buildNavigationGraph(generation.mesh.mesh, generation.water.isLand, generation.rivers.riverEdgeMask, {
     lowlandThreshold: DEFAULT_SNAPSHOT.movement.lowlandThreshold,
     impassableThreshold: DEFAULT_SNAPSHOT.movement.impassableThreshold,
     elevationPower: DEFAULT_SNAPSHOT.movement.elevationPower,
