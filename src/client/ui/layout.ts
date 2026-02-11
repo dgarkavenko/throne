@@ -76,6 +76,7 @@ type PageLayout = {
   setFps: (fps: number | null) => void;
   setConnected: (isConnected: boolean) => void;
   setSettingsVisible: (visible: boolean) => void;
+  setTerrainControlsEnabled: (enabled: boolean) => void;
   setDebugControlsOnly: (onlyDebug: boolean) => void;
   setTerrainSyncStatus: (message: string) => void;
   setTerrainPublishVisible: (visible: boolean) => void;
@@ -99,6 +100,9 @@ function formatDuration(ms: number): string {
 export function createPageLayout(): PageLayout {
   const field = document.getElementById('field');
   const settingsPanel = document.getElementById('settings-panel');
+  const settingsInputs = settingsPanel
+    ? (Array.from(settingsPanel.querySelectorAll('input, button')) as Array<HTMLInputElement | HTMLButtonElement>)
+    : [];
   const settingsOverlayGroup = document.getElementById('settings-overlay-group') as HTMLDetailsElement | null;
   const settingsAgentsGroup = document.getElementById('settings-agents-group') as HTMLDetailsElement | null;
   const statusEl = document.getElementById('status');
@@ -1024,6 +1028,15 @@ export function createPageLayout(): PageLayout {
         return;
       }
       settingsPanel.toggleAttribute('hidden', !visible);
+    },
+    setTerrainControlsEnabled(enabled) {
+      for (let i = 0; i < settingsInputs.length; i += 1) {
+        const input = settingsInputs[i];
+        if (input === terrainPublishButton) {
+          continue;
+        }
+        input.disabled = !enabled;
+      }
     },
     setDebugControlsOnly(onlyDebug) {
       debugControlsOnly = onlyDebug;

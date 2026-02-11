@@ -7,18 +7,24 @@ import worker from '../src/index';
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
 describe('worker root route', () => {
-	it('serves app html (unit style)', async () => {
+	it('redirects root to /game (unit style)', async () => {
 		const request = new IncomingRequest('http://example.com');
 		const ctx = createExecutionContext();
 		const response = await worker.fetch(request, env, ctx);
 		await waitOnExecutionContext(ctx);
+		expect(response.status).toBe(302);
+		expect(response.headers.get('location')).toBe('http://example.com/game');
+	});
+
+	it('serves editor html (integration style)', async () => {
+		const response = await SELF.fetch('https://example.com/editor');
 		expect(response.status).toBe(200);
 		expect(await response.text()).toContain('<title>Throne</title>');
 	});
 
-	it('serves app html (integration style)', async () => {
-		const response = await SELF.fetch('https://example.com');
+	it('serves game html (integration style)', async () => {
+		const response = await SELF.fetch('https://example.com/game');
 		expect(response.status).toBe(200);
-		expect(await response.text()).toContain('<title>Throne</title>');
+		expect(await response.text()).toContain('<title>Throne Game</title>');
 	});
 });

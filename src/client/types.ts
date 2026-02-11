@@ -3,14 +3,7 @@ import type { TerrainGenerationControls } from '../terrain/controls';
 export interface PlayerState {
   id: string;
   emoji: string;
-  typing: string;
   color: string;
-}
-
-export interface HistoryEntry {
-  text: string;
-  color: string;
-  emoji: string;
 }
 
 export interface TerrainSnapshot {
@@ -56,19 +49,6 @@ export interface StateMessage {
   sessionStart: number | null;
 }
 
-export interface HistoryMessage {
-  type: 'history';
-  messages: HistoryEntry[];
-}
-
-export interface LaunchMessage {
-  type: 'launch';
-  text: string;
-  id: string;
-  color: string;
-  emoji: string;
-}
-
 export interface TerrainSnapshotMessage {
   type: 'terrain_snapshot';
   terrainVersion: number;
@@ -108,8 +88,6 @@ export interface ActorRejectMessage {
 export type ServerMessage =
   | WelcomeMessage
   | StateMessage
-  | HistoryMessage
-  | LaunchMessage
   | TerrainSnapshotMessage
   | ActorCommandMessage
   | WorldSnapshotMessage
@@ -117,16 +95,6 @@ export type ServerMessage =
 
 export interface JoinClientMessage {
   type: 'join';
-}
-
-export interface TypingClientMessage {
-  type: 'typing';
-  text: string;
-}
-
-export interface LaunchClientMessage {
-  type: 'launch';
-  text: string;
 }
 
 export interface TerrainPublishClientMessage {
@@ -145,7 +113,5 @@ export interface ActorMoveClientMessage {
 
 export type ClientMessage =
   | JoinClientMessage
-  | TypingClientMessage
-  | LaunchClientMessage
   | TerrainPublishClientMessage
   | ActorMoveClientMessage;

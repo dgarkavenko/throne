@@ -1,4 +1,4 @@
-import { html } from './html';
+import { editorHtml, gameHtml } from './html';
 import { RoomDurableObject } from './room';
 
 export { RoomDurableObject };
@@ -8,14 +8,32 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/') {
-      return new Response(html, {
+      const redirectUrl = new URL(request.url);
+      redirectUrl.pathname = '/game';
+      return Response.redirect(redirectUrl.toString(), 302);
+    }
+
+    if (url.pathname === '/editor') {
+      return new Response(editorHtml, {
         headers: {
           'content-type': 'text/html; charset=utf-8',
         },
       });
     }
 
-    const isClientAsset = url.pathname === '/client.js' || url.pathname.startsWith('/client/');
+    if (url.pathname === '/game') {
+      return new Response(gameHtml, {
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+        },
+      });
+    }
+
+    const isClientAsset =
+      url.pathname === '/client.js' ||
+      url.pathname === '/client-editor.js' ||
+      url.pathname === '/client-game.js' ||
+      url.pathname.startsWith('/client/');
     const isTerrainAsset = url.pathname.startsWith('/terrain/');
     if (isClientAsset || isTerrainAsset) {
       if (url.pathname.startsWith('/client/') || url.pathname.startsWith('/terrain/')) {

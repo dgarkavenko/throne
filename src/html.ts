@@ -184,7 +184,7 @@ main {
 }
 `;
 
-export const html = `<!doctype html>
+export const editorHtml = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -198,6 +198,7 @@ export const html = `<!doctype html>
     <main>
       <div class="session" id="session">Session: --:--</div>
       <div class="fps" id="fps">FPS: --</div>
+      <div class="status"><a id="game-link" href="/game">Open Game</a></div>
       <div class="layout">
         <div class="controls" id="settings-panel">
           <button class="control-button" id="terrain-reset" type="button">Reset Settings</button>
@@ -564,15 +565,15 @@ export const html = `<!doctype html>
                 Draw Paths (Debug)
               </label>
             </div>
-            <div class="control" id="terrain-publish-wrap" hidden>
-              <button class="control-button" id="terrain-publish" type="button">Publish Terrain To Server</button>
-            </div>
             <div class="control" id="terrain-sync-status-control">
               <label>
                 Terrain Sync <span id="terrain-sync-status">Unsynced</span>
               </label>
             </div>
           </details>
+          <div class="control" id="terrain-publish-wrap" hidden>
+            <button class="control-button" id="terrain-publish" type="button">Publish Terrain To Server</button>
+          </div>
         </div>
         <div id="field"></div>
       </div>
@@ -580,7 +581,99 @@ export const html = `<!doctype html>
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
-    <script type="module" src="/client.js"></script>
+    <script type="module" src="/client-editor.js"></script>
+  </body>
+</html>`;
+
+const gameStyles = `
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #050607;
+  color: #f5f5f5;
+}
+main {
+  display: grid;
+  gap: 1rem;
+  justify-items: center;
+  padding: 1rem 0;
+}
+.session {
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  opacity: 0.85;
+  text-transform: uppercase;
+}
+.fps {
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+.toolbar {
+  width: 1560px;
+  max-width: calc(100vw - 2rem);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.toolbar a {
+  color: #a7c28f;
+  text-decoration: none;
+}
+#field {
+  width: 1560px;
+  height: 844px;
+  background: linear-gradient(145deg, #101a2c 0%, #1a1f3a 48%, #2f1824 100%);
+  border-radius: 28px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+#field canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.status {
+  font-size: 0.9rem;
+  opacity: 0.75;
+}
+@media (max-width: 480px) {
+  #field {
+    width: min(100vw, 1560px);
+    height: min(100vh, 844px);
+    border-radius: 20px;
+  }
+}
+`;
+
+export const gameHtml = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Throne Game</title>
+    <style>
+      ${gameStyles}
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="session" id="session">Session: --:--</div>
+      <div class="fps" id="fps">FPS: --</div>
+      <div class="toolbar">
+        <span>Runtime view</span>
+        <a id="editor-link" href="/editor">Open Editor</a>
+      </div>
+      <div id="field"></div>
+      <div class="status" id="status">Connecting...</div>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>
+    <script type="module" src="/client-game.js"></script>
   </body>
 </html>`;

@@ -1,8 +1,6 @@
 import type {
   ActorCommandMessage,
   ActorRejectMessage,
-  HistoryEntry,
-  LaunchMessage,
   PlayerState,
   ServerMessage,
   TerrainSnapshot,
@@ -16,8 +14,6 @@ type ConnectionEvents = {
   onDisconnected?: () => void;
   onWelcome?: (playerId: string) => void;
   onState?: (players: PlayerState[], sessionStart: number | null, hostId: string | null) => void;
-  onHistory?: (messages: HistoryEntry[]) => void;
-  onLaunch?: (message: LaunchMessage) => void;
   onTerrainSnapshot?: (message: TerrainSnapshotMessage) => void;
   onActorCommand?: (message: ActorCommandMessage) => void;
   onWorldSnapshot?: (message: WorldSnapshotMessage) => void;
@@ -25,8 +21,6 @@ type ConnectionEvents = {
 };
 
 type Connection = {
-  sendTyping: (text: string) => void;
-  sendLaunch: (text: string) => void;
   publishTerrainSnapshot: (terrain: TerrainSnapshot, clientVersion?: number) => void;
   sendActorMove: (actorId: string, targetFace: number, commandId: number, terrainVersion: number) => void;
 };
@@ -65,14 +59,6 @@ export function connectToRoom(events: ConnectionEvents = {}): Connection {
       );
       return;
     }
-    if (payload.type === 'history' && Array.isArray(payload.messages)) {
-      events.onHistory?.(payload.messages);
-      return;
-    }
-    if (payload.type === 'launch') {
-      events.onLaunch?.(payload);
-      return;
-    }
     if (payload.type === 'terrain_snapshot') {
       events.onTerrainSnapshot?.(payload);
       return;
@@ -107,18 +93,6 @@ export function connectToRoom(events: ConnectionEvents = {}): Connection {
   };
 
   return {
-    sendTyping(text) {
-      send({
-        type: 'typing',
-        text,
-      });
-    },
-    sendLaunch(text) {
-      send({
-        type: 'launch',
-        text,
-      });
-    },
     publishTerrainSnapshot(terrain, clientVersion = Date.now()) {
       send({
         type: 'terrain_publish',

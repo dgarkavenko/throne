@@ -15,14 +15,7 @@ import type {
 type PlayerState = {
   id: string;
   emoji: string;
-  typing: string;
   color: string;
-};
-
-type RoomHistoryEntry = {
-  text: string;
-  color: string;
-  emoji: string;
 };
 
 type ServerActorState = {
@@ -51,7 +44,6 @@ type TerrainRuntimeState = {
 };
 
 const SNAPSHOT_INTERVAL_MS = 500;
-const MAX_HISTORY = 100;
 const DEFAULT_MAP_WIDTH = 1560;
 const DEFAULT_MAP_HEIGHT = 844;
 
@@ -117,7 +109,6 @@ export class RoomDurableObject implements DurableObject {
   private connections = new Map<WebSocket, PlayerState>();
   private hostId: string | null = null;
   private sessionStart: number | null = null;
-  private history: RoomHistoryEntry[] = [];
   private terrain: TerrainRuntimeState | null = null;
   private actorsByPlayerId = new Map<string, ServerActorState>();
   private lastSnapshotAt = 0;
@@ -190,7 +181,6 @@ export class RoomDurableObject implements DurableObject {
     const player: PlayerState = {
       id: crypto.randomUUID(),
       emoji: this.pickEmoji(),
-      typing: '',
       color: this.pickColor(),
     };
 
@@ -221,31 +211,10 @@ export class RoomDurableObject implements DurableObject {
 
       if (message.type === 'join') {
         this.broadcastState();
-        this.sendHistory(socket);
         if (this.terrain) {
           this.sendTerrainSnapshot(socket);
           this.sendWorldSnapshot(socket);
         }
-        return;
-      }
-
-      if (message.type === 'typing') {
-        const entry = this.connections.get(socket);
-        if (entry && entry.typing !== message.text) {
-          entry.typing = message.text;
-          this.connections.set(socket, entry);
-          this.broadcastState();
-        }
-        return;
-      }
-
-      if (message.type === 'launch') {
-        const entry = this.connections.get(socket);
-        const text = message.text.trim();
-        if (!entry || !text) {
-          return;
-        }
-        this.broadcastLaunch(text, entry);
         return;
       }
 
@@ -783,18 +752,6 @@ export class RoomDurableObject implements DurableObject {
       if (message.type === 'join') {
         return { type: 'join' };
       }
-      if (message.type === 'typing') {
-        return {
-          type: 'typing',
-          text: typeof message.text === 'string' ? message.text : '',
-        };
-      }
-      if (message.type === 'launch') {
-        return {
-          type: 'launch',
-          text: typeof message.text === 'string' ? message.text : '',
-        };
-      }
       if (message.type === 'terrain_publish') {
         const terrain = message.terrain;
         if (!terrain || typeof terrain !== 'object') {
@@ -839,31 +796,6 @@ export class RoomDurableObject implements DurableObject {
       sessionStart: this.sessionStart,
     };
     this.broadcastJson(payload);
-  }
-
-  private broadcastLaunch(text: string, player: PlayerState): void {
-    this.history.push({ text, color: player.color, emoji: player.emoji });
-    if (this.history.length > MAX_HISTORY) {
-      this.history = this.history.slice(-MAX_HISTORY);
-    }
-
-    this.broadcastJson({
-      type: 'launch',
-      text,
-      id: player.id,
-      color: player.color,
-      emoji: player.emoji,
-    });
-  }
-
-  private sendHistory(socket: WebSocket): void {
-    if (this.history.length === 0) {
-      return;
-    }
-    this.sendJson(socket, {
-      type: 'history',
-      messages: this.history,
-    });
   }
 
   private sendActorReject(
