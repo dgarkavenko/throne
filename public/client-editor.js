@@ -89,6 +89,7 @@ async function startClientEditor() {
         nextActorCommandIdByActor.set(actorId, next);
         return next;
     };
+    layout.setStatus("hell");
     const connection = connectToRoom({
         onStatus: layout.setStatus,
         onConnected: () => layout.setConnected(true),

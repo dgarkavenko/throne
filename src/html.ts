@@ -547,7 +547,14 @@ export const editorHtml = `<!doctype html>
       <div class="status" id="status">Connecting...</div>
     </main>
 
-    <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>
+	<script type="importmap">
+	{
+		"imports": {
+			"pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.16.0/dist/pixi.min.mjs"
+		}
+	}
+	</script>
+
     <script type="module" src="/client-editor.js"></script>
   </body>
 </html>`;
@@ -862,7 +869,13 @@ export const gameHtml = `<!doctype html>
       </div>
       <div class="status" id="status">Connecting...</div>
     </main>
-    <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>
+	<script type="importmap">
+	{
+		"imports": {
+			"pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.16.0/dist/pixi.min.mjs"
+		}
+	}
+	</script>
     <script type="module" src="/client-game.js"></script>
   </body>
 </html>`;

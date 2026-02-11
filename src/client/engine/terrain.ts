@@ -12,6 +12,7 @@ import {
 	vec2Sub,
 	type Vec2,
 } from './throne-math';
+import { Graphics, Container } from "pixi.js";
 
 export type TerrainControls = {
 	spacing: number;
@@ -658,9 +659,11 @@ export function renderTerrain(
 	provinceGraph: ProvinceGraph,
 	refined: TerrainRefineResult
 ): void {
-	if (!terrainLayer || !window.PIXI) {
+	if (!terrainLayer)
+	{
 		return;
 	}
+
 	const baseLayer = ensureBaseLayer(terrainLayer);
 	const riverLayer = ensureRiverLayer(terrainLayer);
 	const provinceLayer = ensureProvinceLayer(terrainLayer);
@@ -668,7 +671,7 @@ export function renderTerrain(
 	clearLayerChildren(riverLayer);
 	clearLayerChildren(provinceLayer);
 
-	const waterTint = new window.PIXI.Graphics();
+	const waterTint = new Graphics();
 	waterTint.rect(0, 0, config.width, config.height);
 	waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
 	baseLayer.addChild(waterTint);
@@ -701,7 +704,7 @@ export function renderTerrain(
 			fillAlpha = 0.86;
 		}
 
-		const terrain = new window.PIXI.Graphics();
+		const terrain = new Graphics();
 		terrain.poly(flattenPolygon(cell), true);
 		terrain.fill({ color: fillColor, alpha: fillAlpha });
 		baseLayer.addChild(terrain);
@@ -710,8 +713,8 @@ export function renderTerrain(
 			!isLandFace &&
 			face.adjacentFaces.some((neighborIndex) => provinceGraph.isLand[neighborIndex]);
 		if (isShoreWater) {
-			const strokes = new window.PIXI.Graphics();
-			const strokeMask = new window.PIXI.Graphics();
+			const strokes = new Graphics();
+			const strokeMask = new Graphics();
 			strokeMask.poly(flattenPolygon(cell), true);
 			strokeMask.fill({ color: 0xffffff, alpha: 0.001 });
 			strokeMask.visible = true;
@@ -763,7 +766,8 @@ export function drawVoronoiTerrain(
 	controls: TerrainControls,
 	terrainLayer: any
 ): void {
-	if (!terrainLayer || !window.PIXI) {
+	if (!terrainLayer)
+	{
 		return;
 	}
 	const seed = controls.seed >>> 0;
@@ -2022,7 +2026,7 @@ function renderRivers(riverLayer: any, rivers: RiverPath[], controls: TerrainCon
 	if (!riverLayer || rivers.length === 0) {
 		return;
 	}
-	const graphics = new window.PIXI.Graphics();
+	const graphics = new Graphics();
 	const riverColor = 0x2b6db3;
 	const riverAlpha = 0.85;
 	const strokeCaps = { cap: 'round', join: 'round' } as const;
@@ -3373,7 +3377,7 @@ function ensureBaseLayer(terrainLayer: any): any {
 		terrainLayer.addChildAt(existing, 0);
 		return existing;
 	}
-	const baseLayer = new window.PIXI.Container();
+	const baseLayer = new Container();
 	terrainLayer[BASE_LAYER_KEY] = baseLayer;
 	terrainLayer.addChildAt(baseLayer, 0);
 	return baseLayer;
@@ -3388,7 +3392,7 @@ function ensureRiverLayer(terrainLayer: any): any {
 		}
 		return existing;
 	}
-	const riverLayer = new window.PIXI.Container();
+	const riverLayer = new Container();
 	terrainLayer[RIVER_LAYER_KEY] = riverLayer;
 	terrainLayer.addChildAt(riverLayer, targetIndex);
 	return riverLayer;
@@ -3403,7 +3407,7 @@ function ensureProvinceLayer(terrainLayer: any): any {
 		}
 		return existing;
 	}
-	const provinceLayer = new window.PIXI.Container();
+	const provinceLayer = new Container();
 	terrainLayer[PROVINCE_LAYER_KEY] = provinceLayer;
 	const insertIndex = Math.min(terrainLayer[RIVER_LAYER_KEY] ? 2 : 1, terrainLayer.children.length);
 	terrainLayer.addChildAt(provinceLayer, insertIndex);
@@ -3518,14 +3522,14 @@ function renderProvinceBorders(
 		if (paths.length === 0) {
 			continue;
 		}
-		const provinceLines = new window.PIXI.Graphics();
+		const provinceLines = new Graphics();
 		const color = provinceColors[p] ?? PROVINCE_BORDER_PALETTE[0];
 		for (let i = 0; i < paths.length; i += 1) {
 			drawPath(provinceLines, paths[i]);
 		}
 		provinceLines.stroke({ width: lineWidth, color, alpha: lineAlpha, ...strokeCaps });
 
-		const mask = new window.PIXI.Graphics();
+		const mask = new Graphics();
 		const provinceFaces = provinceAssignment.faces[p]?.faces ?? [];
 		for (let i = 0; i < provinceFaces.length; i += 1) {
 			const faceIndex = provinceFaces[i];

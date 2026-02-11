@@ -3,12 +3,6 @@ import { connectToRoom } from './client/net/connection';
 import { createPageLayout } from './client/ui/layout';
 import type { PlayerState } from './client/types';
 
-declare global {
-  interface Window {
-    PIXI?: any;
-  }
-}
-
 const GAME_WIDTH = 1560;
 const GAME_HEIGHT = 844;
 
