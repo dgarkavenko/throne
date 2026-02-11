@@ -194,7 +194,9 @@ export class GameEngine {
   setTerrainRenderControls(nextControls: TerrainRenderControls): void {
     const result = this.mapSystem.setTerrainRenderControls(nextControls);
     if (!this.hasTerrain) {
-      this.regenerateTerrain();
+      if (this.autoGenerateTerrain) {
+        this.regenerateTerrain();
+      }
       return;
     }
     if (result.changed && this.terrainState) {

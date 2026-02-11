@@ -51,6 +51,7 @@ type TerrainSettings = {
   agentImpassableThreshold: number;
   agentElevationPower: number;
   agentElevationGainK: number;
+  agentRiverPenalty: number;
   agentDebugPaths: boolean;
 };
 
@@ -60,6 +61,7 @@ export type MovementSettings = {
   impassableThreshold: number;
   elevationPower: number;
   elevationGainK: number;
+  riverPenalty: number;
   debugPaths: boolean;
 };
 
@@ -77,17 +79,18 @@ type PageLayout = {
   setConnected: (isConnected: boolean) => void;
   setSettingsVisible: (visible: boolean) => void;
   setTerrainControlsEnabled: (enabled: boolean) => void;
+  setAgentControlsEnabled: (enabled: boolean) => void;
   setDebugControlsOnly: (onlyDebug: boolean) => void;
   setTerrainSyncStatus: (message: string) => void;
   setTerrainPublishVisible: (visible: boolean) => void;
+  setTerrainGenerationSettings: (settings: TerrainGenerationControls) => void;
+  setAgentSettings: (settings: Partial<MovementSettings>) => void;
   getTerrainGenerationSettings: () => TerrainGenerationControls;
   getTerrainRenderSettings: () => TerrainRenderControls;
   getMovementSettings: () => MovementSettings;
   onTerrainSettingsChange: (onChange: (settings: TerrainSettingsPayload) => void) => void;
   onPublishTerrain: (onPublish: () => void) => void;
 };
-
-const TERRAIN_SETTINGS_STORAGE_KEY = 'throne.terrainSettings.v1';
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -100,9 +103,6 @@ function formatDuration(ms: number): string {
 export function createPageLayout(): PageLayout {
   const field = document.getElementById('field');
   const settingsPanel = document.getElementById('settings-panel');
-  const settingsInputs = settingsPanel
-    ? (Array.from(settingsPanel.querySelectorAll('input, button')) as Array<HTMLInputElement | HTMLButtonElement>)
-    : [];
   const settingsOverlayGroup = document.getElementById('settings-overlay-group') as HTMLDetailsElement | null;
   const settingsAgentsGroup = document.getElementById('settings-agents-group') as HTMLDetailsElement | null;
   const statusEl = document.getElementById('status');
@@ -135,12 +135,14 @@ export function createPageLayout(): PageLayout {
   const agentImpassableThresholdInput = document.getElementById('agent-impassable-threshold') as HTMLInputElement | null;
   const agentElevationPowerInput = document.getElementById('agent-elevation-power') as HTMLInputElement | null;
   const agentElevationGainKInput = document.getElementById('agent-elevation-gain-k') as HTMLInputElement | null;
+  const agentRiverPenaltyInput = document.getElementById('agent-river-penalty') as HTMLInputElement | null;
   const agentDebugPathsInput = document.getElementById('agent-debug-paths') as HTMLInputElement | null;
   const agentTimePerFaceControl = document.getElementById('agent-time-per-face-control') as HTMLElement | null;
   const agentLowlandThresholdControl = document.getElementById('agent-lowland-threshold-control') as HTMLElement | null;
   const agentImpassableThresholdControl = document.getElementById('agent-impassable-threshold-control') as HTMLElement | null;
   const agentElevationPowerControl = document.getElementById('agent-elevation-power-control') as HTMLElement | null;
   const agentElevationGainKControl = document.getElementById('agent-elevation-gain-k-control') as HTMLElement | null;
+  const agentRiverPenaltyControl = document.getElementById('agent-river-penalty-control') as HTMLElement | null;
   const agentDebugPathsControl = document.getElementById('agent-debug-paths-control') as HTMLElement | null;
   const terrainResetButton = document.getElementById('terrain-reset') as HTMLButtonElement | null;
   const terrainPublishButton = document.getElementById('terrain-publish') as HTMLButtonElement | null;
@@ -237,6 +239,7 @@ export function createPageLayout(): PageLayout {
   const agentImpassableThresholdValue = document.getElementById('agent-impassable-threshold-value');
   const agentElevationPowerValue = document.getElementById('agent-elevation-power-value');
   const agentElevationGainKValue = document.getElementById('agent-elevation-gain-k-value');
+  const agentRiverPenaltyValue = document.getElementById('agent-river-penalty-value');
 
   const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
   const parseIntWithFallback = (value: string | undefined, fallback: number): number => {
@@ -246,36 +249,6 @@ export function createPageLayout(): PageLayout {
   const parseFloatWithFallback = (value: string | undefined, fallback: number): number => {
     const parsed = Number.parseFloat(value || '');
     return Number.isFinite(parsed) ? parsed : fallback;
-  };
-
-  const loadStoredTerrainSettings = (): Partial<TerrainSettings> | null => {
-    if (!window.localStorage) {
-      return null;
-    }
-    try {
-      const raw = window.localStorage.getItem(TERRAIN_SETTINGS_STORAGE_KEY);
-      if (!raw) {
-        return null;
-      }
-      const parsed = JSON.parse(raw) as Partial<TerrainSettings> | null;
-      if (!parsed || typeof parsed !== 'object') {
-        return null;
-      }
-      return parsed;
-    } catch {
-      return null;
-    }
-  };
-
-  const storeTerrainSettings = (settings: TerrainSettings): void => {
-    if (!window.localStorage) {
-      return;
-    }
-    try {
-      window.localStorage.setItem(TERRAIN_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-    } catch {
-      // Ignore storage failures (e.g., quota exceeded).
-    }
   };
 
   const applyDefaultSettings = (): void => {
@@ -426,161 +399,11 @@ export function createPageLayout(): PageLayout {
     if (agentElevationGainKInput) {
       agentElevationGainKInput.value = agentElevationGainKInput.defaultValue;
     }
+    if (agentRiverPenaltyInput) {
+      agentRiverPenaltyInput.value = agentRiverPenaltyInput.defaultValue;
+    }
     if (agentDebugPathsInput) {
       agentDebugPathsInput.checked = agentDebugPathsInput.defaultChecked;
-    }
-  };
-
-  const applyStoredSettings = (settings: Partial<TerrainSettings>): void => {
-    if (typeof settings.spacing === 'number' && terrainSpacingInput) {
-      terrainSpacingInput.value = settings.spacing.toString();
-    }
-    if (typeof settings.seed === 'number' && terrainSeedInput) {
-      terrainSeedInput.value = settings.seed.toString();
-    }
-    if (typeof settings.intermediateSeed === 'number' && terrainIntermediateSeedInput) {
-      terrainIntermediateSeedInput.value = settings.intermediateSeed.toString();
-    }
-    if (typeof settings.intermediateMaxIterations === 'number' && terrainIntermediateIterationsInput) {
-      terrainIntermediateIterationsInput.value = settings.intermediateMaxIterations.toString();
-    }
-    if (typeof settings.intermediateThreshold === 'number' && terrainIntermediateDistanceInput) {
-      terrainIntermediateDistanceInput.value = settings.intermediateThreshold.toString();
-    }
-    if (typeof settings.intermediateRelMagnitude === 'number' && terrainIntermediateRelMagnitudeInput) {
-      terrainIntermediateRelMagnitudeInput.value = settings.intermediateRelMagnitude.toString();
-    }
-    if (typeof settings.intermediateAbsMagnitude === 'number' && terrainIntermediateAbsMagnitudeInput) {
-      terrainIntermediateAbsMagnitudeInput.value = settings.intermediateAbsMagnitude.toString();
-    }
-    if (typeof settings.waterLevel === 'number' && terrainWaterLevelInput) {
-      terrainWaterLevelInput.value = settings.waterLevel.toString();
-    }
-    if (typeof settings.waterRoughness === 'number' && terrainWaterRoughnessInput) {
-      terrainWaterRoughnessInput.value = settings.waterRoughness.toString();
-    }
-    if (typeof settings.waterNoiseScale === 'number' && terrainWaterNoiseScaleInput) {
-      terrainWaterNoiseScaleInput.value = settings.waterNoiseScale.toString();
-    }
-    if (typeof settings.waterNoiseStrength === 'number' && terrainWaterNoiseStrengthInput) {
-      terrainWaterNoiseStrengthInput.value = settings.waterNoiseStrength.toString();
-    }
-    if (typeof settings.waterNoiseOctaves === 'number' && terrainWaterNoiseOctavesInput) {
-      terrainWaterNoiseOctavesInput.value = settings.waterNoiseOctaves.toString();
-    }
-    if (typeof settings.waterWarpScale === 'number' && terrainWaterWarpScaleInput) {
-      terrainWaterWarpScaleInput.value = settings.waterWarpScale.toString();
-    }
-    if (typeof settings.waterWarpStrength === 'number' && terrainWaterWarpStrengthInput) {
-      terrainWaterWarpStrengthInput.value = settings.waterWarpStrength.toString();
-    }
-    if (typeof settings.riverDensity === 'number' && terrainRiverDensityInput) {
-      terrainRiverDensityInput.value = settings.riverDensity.toString();
-    }
-    if (typeof settings.riverBranchChance === 'number' && terrainRiverBranchChanceInput) {
-      terrainRiverBranchChanceInput.value = settings.riverBranchChance.toString();
-    }
-    if (typeof settings.riverClimbChance === 'number' && terrainRiverClimbChanceInput) {
-      terrainRiverClimbChanceInput.value = settings.riverClimbChance.toString();
-    }
-    if (typeof settings.provinceCount === 'number' && terrainProvinceCountInput) {
-      terrainProvinceCountInput.value = settings.provinceCount.toString();
-    }
-    if (typeof settings.provinceBorderWidth === 'number' && terrainProvinceBorderWidthInput) {
-      terrainProvinceBorderWidthInput.value = settings.provinceBorderWidth.toString();
-    }
-    if (typeof settings.provinceSizeVariance === 'number' && terrainProvinceSizeVarianceInput) {
-      terrainProvinceSizeVarianceInput.value = settings.provinceSizeVariance.toString();
-    }
-    if (typeof settings.provincePassageElevation === 'number' && terrainProvincePassageElevationInput) {
-      terrainProvincePassageElevationInput.value = settings.provincePassageElevation.toString();
-    }
-    if (typeof settings.provinceRiverPenalty === 'number' && terrainProvinceRiverPenaltyInput) {
-      terrainProvinceRiverPenaltyInput.value = settings.provinceRiverPenalty.toString();
-    }
-    if (typeof settings.provinceSmallIslandMultiplier === 'number' && terrainProvinceSmallIslandMultiplierInput) {
-      terrainProvinceSmallIslandMultiplierInput.value = settings.provinceSmallIslandMultiplier.toString();
-    }
-    if (typeof settings.provinceArchipelagoMultiplier === 'number' && terrainProvinceArchipelagoMultiplierInput) {
-      terrainProvinceArchipelagoMultiplierInput.value = settings.provinceArchipelagoMultiplier.toString();
-    }
-    if (typeof settings.provinceIslandSingleMultiplier === 'number' && terrainProvinceIslandSingleMultiplierInput) {
-      terrainProvinceIslandSingleMultiplierInput.value = settings.provinceIslandSingleMultiplier.toString();
-    }
-    if (typeof settings.provinceArchipelagoRadiusMultiplier === 'number' && terrainProvinceArchipelagoRadiusInput) {
-      terrainProvinceArchipelagoRadiusInput.value = settings.provinceArchipelagoRadiusMultiplier.toString();
-    }
-    if (typeof settings.showLandBorders === 'boolean' && terrainProvinceLandBordersInput) {
-      terrainProvinceLandBordersInput.checked = settings.showLandBorders;
-    }
-    if (typeof settings.showShoreBorders === 'boolean' && terrainProvinceShoreBordersInput) {
-      terrainProvinceShoreBordersInput.checked = settings.showShoreBorders;
-    }
-    if (typeof settings.landRelief === 'number' && terrainLandReliefInput) {
-      terrainLandReliefInput.value = settings.landRelief.toString();
-    }
-    if (typeof settings.ridgeStrength === 'number' && terrainRidgeStrengthInput) {
-      terrainRidgeStrengthInput.value = settings.ridgeStrength.toString();
-    }
-    if (typeof settings.ridgeCount === 'number' && terrainRidgeCountInput) {
-      terrainRidgeCountInput.value = settings.ridgeCount.toString();
-    }
-    if (typeof settings.plateauStrength === 'number' && terrainPlateauStrengthInput) {
-      terrainPlateauStrengthInput.value = settings.plateauStrength.toString();
-    }
-    if (typeof settings.ridgeDistribution === 'number' && terrainRidgeDistributionInput) {
-      terrainRidgeDistributionInput.value = settings.ridgeDistribution.toString();
-    }
-    if (typeof settings.ridgeSeparation === 'number' && terrainRidgeSeparationInput) {
-      terrainRidgeSeparationInput.value = settings.ridgeSeparation.toString();
-    }
-    if (typeof settings.ridgeContinuity === 'number' && terrainRidgeContinuityInput) {
-      terrainRidgeContinuityInput.value = settings.ridgeContinuity.toString();
-    }
-    if (typeof settings.ridgeContinuityThreshold === 'number' && terrainRidgeContinuityThresholdInput) {
-      terrainRidgeContinuityThresholdInput.value = settings.ridgeContinuityThreshold.toString();
-    }
-    if (typeof settings.oceanPeakClamp === 'number' && terrainOceanPeakClampInput) {
-      terrainOceanPeakClampInput.value = settings.oceanPeakClamp.toString();
-    }
-    if (typeof settings.ridgeOceanClamp === 'number' && terrainRidgeOceanClampInput) {
-      terrainRidgeOceanClampInput.value = settings.ridgeOceanClamp.toString();
-    }
-    if (typeof settings.ridgeWidth === 'number' && terrainRidgeWidthInput) {
-      terrainRidgeWidthInput.value = settings.ridgeWidth.toString();
-    }
-    if (typeof settings.showPolygonGraph === 'boolean' && terrainGraphPolygonsInput) {
-      terrainGraphPolygonsInput.checked = settings.showPolygonGraph;
-    }
-    if (typeof settings.showDualGraph === 'boolean' && terrainGraphDualInput) {
-      terrainGraphDualInput.checked = settings.showDualGraph;
-    }
-    if (typeof settings.showCornerNodes === 'boolean' && terrainGraphCornersInput) {
-      terrainGraphCornersInput.checked = settings.showCornerNodes;
-    }
-    if (typeof settings.showCenterNodes === 'boolean' && terrainGraphCentersInput) {
-      terrainGraphCentersInput.checked = settings.showCenterNodes;
-    }
-    if (typeof settings.showInsertedPoints === 'boolean' && terrainGraphInsertedInput) {
-      terrainGraphInsertedInput.checked = settings.showInsertedPoints;
-    }
-    if (typeof settings.agentTimePerFaceSeconds === 'number' && agentTimePerFaceInput) {
-      agentTimePerFaceInput.value = settings.agentTimePerFaceSeconds.toString();
-    }
-    if (typeof settings.agentLowlandThreshold === 'number' && agentLowlandThresholdInput) {
-      agentLowlandThresholdInput.value = settings.agentLowlandThreshold.toString();
-    }
-    if (typeof settings.agentImpassableThreshold === 'number' && agentImpassableThresholdInput) {
-      agentImpassableThresholdInput.value = settings.agentImpassableThreshold.toString();
-    }
-    if (typeof settings.agentElevationPower === 'number' && agentElevationPowerInput) {
-      agentElevationPowerInput.value = settings.agentElevationPower.toString();
-    }
-    if (typeof settings.agentElevationGainK === 'number' && agentElevationGainKInput) {
-      agentElevationGainKInput.value = settings.agentElevationGainK.toString();
-    }
-    if (typeof settings.agentDebugPaths === 'boolean' && agentDebugPathsInput) {
-      agentDebugPathsInput.checked = settings.agentDebugPaths;
     }
   };
 
@@ -683,6 +506,7 @@ export function createPageLayout(): PageLayout {
     const agentImpassableThreshold = clamp(Math.max(agentLowlandThreshold + 1, agentImpassableThresholdInputValue), 2, 32);
     const agentElevationPower = clamp(parseFloatWithFallback(agentElevationPowerInput?.value, 0.8), 0.5, 2);
     const agentElevationGainK = clamp(parseFloatWithFallback(agentElevationGainKInput?.value, 1), 0, 4);
+    const agentRiverPenalty = clamp(parseFloatWithFallback(agentRiverPenaltyInput?.value, 0.8), 0, 8);
     const agentDebugPaths = Boolean(agentDebugPathsInput?.checked);
     return {
       spacing,
@@ -734,6 +558,7 @@ export function createPageLayout(): PageLayout {
       agentImpassableThreshold,
       agentElevationPower,
       agentElevationGainK,
+      agentRiverPenalty,
       agentDebugPaths,
     };
   };
@@ -794,6 +619,7 @@ export function createPageLayout(): PageLayout {
     impassableThreshold: settings.agentImpassableThreshold,
     elevationPower: settings.agentElevationPower,
     elevationGainK: settings.agentElevationGainK,
+    riverPenalty: settings.agentRiverPenalty,
     debugPaths: settings.agentDebugPaths,
   });
 
@@ -806,11 +632,6 @@ export function createPageLayout(): PageLayout {
     };
   };
 
-  const storedSettings = loadStoredTerrainSettings();
-  if (storedSettings) {
-    applyStoredSettings(storedSettings);
-  }
-
   let terrainPublishVisible = false;
   let debugControlsOnly = false;
   const allControlGroups = settingsPanel
@@ -822,7 +643,50 @@ export function createPageLayout(): PageLayout {
     agentImpassableThresholdControl,
     agentElevationPowerControl,
     agentElevationGainKControl,
+    agentRiverPenaltyControl,
     terrainSyncStatusControl,
+  ];
+  const authoritativeTerrainInputs = [
+    terrainSpacingInput,
+    terrainSeedInput,
+    terrainWaterLevelInput,
+    terrainWaterRoughnessInput,
+    terrainWaterNoiseScaleInput,
+    terrainWaterNoiseStrengthInput,
+    terrainWaterNoiseOctavesInput,
+    terrainWaterWarpScaleInput,
+    terrainWaterWarpStrengthInput,
+    terrainRiverDensityInput,
+    terrainRiverBranchChanceInput,
+    terrainRiverClimbChanceInput,
+    terrainProvinceCountInput,
+    terrainProvinceSizeVarianceInput,
+    terrainProvincePassageElevationInput,
+    terrainProvinceRiverPenaltyInput,
+    terrainProvinceSmallIslandMultiplierInput,
+    terrainProvinceArchipelagoMultiplierInput,
+    terrainProvinceIslandSingleMultiplierInput,
+    terrainProvinceArchipelagoRadiusInput,
+    terrainLandReliefInput,
+    terrainRidgeStrengthInput,
+    terrainRidgeCountInput,
+    terrainPlateauStrengthInput,
+    terrainRidgeDistributionInput,
+    terrainRidgeSeparationInput,
+    terrainRidgeContinuityInput,
+    terrainRidgeContinuityThresholdInput,
+    terrainOceanPeakClampInput,
+    terrainRidgeOceanClampInput,
+    terrainRidgeWidthInput,
+    terrainResetButton,
+  ];
+  const authoritativeAgentInputs = [
+    agentTimePerFaceInput,
+    agentLowlandThresholdInput,
+    agentImpassableThresholdInput,
+    agentElevationPowerInput,
+    agentElevationGainKInput,
+    agentRiverPenaltyInput,
   ];
 
   const applyTerrainPublishVisibility = (): void => {
@@ -987,6 +851,131 @@ export function createPageLayout(): PageLayout {
     if (agentElevationGainKValue) {
       agentElevationGainKValue.textContent = settings.agentElevationGainK.toFixed(2);
     }
+    if (agentRiverPenaltyValue) {
+      agentRiverPenaltyValue.textContent = settings.agentRiverPenalty.toFixed(2);
+    }
+  };
+
+  const setTerrainGenerationSettingsInternal = (settings: TerrainGenerationControls): void => {
+    if (terrainSpacingInput) {
+      terrainSpacingInput.value = settings.spacing.toString();
+    }
+    if (terrainSeedInput) {
+      terrainSeedInput.value = settings.seed.toString();
+    }
+    if (terrainWaterLevelInput) {
+      terrainWaterLevelInput.value = settings.waterLevel.toString();
+    }
+    if (terrainWaterRoughnessInput) {
+      terrainWaterRoughnessInput.value = settings.waterRoughness.toString();
+    }
+    if (terrainWaterNoiseScaleInput) {
+      terrainWaterNoiseScaleInput.value = settings.waterNoiseScale.toString();
+    }
+    if (terrainWaterNoiseStrengthInput) {
+      terrainWaterNoiseStrengthInput.value = settings.waterNoiseStrength.toString();
+    }
+    if (terrainWaterNoiseOctavesInput) {
+      terrainWaterNoiseOctavesInput.value = settings.waterNoiseOctaves.toString();
+    }
+    if (terrainWaterWarpScaleInput) {
+      terrainWaterWarpScaleInput.value = settings.waterWarpScale.toString();
+    }
+    if (terrainWaterWarpStrengthInput) {
+      terrainWaterWarpStrengthInput.value = settings.waterWarpStrength.toString();
+    }
+    if (terrainRiverDensityInput) {
+      terrainRiverDensityInput.value = settings.riverDensity.toString();
+    }
+    if (terrainRiverBranchChanceInput) {
+      terrainRiverBranchChanceInput.value = settings.riverBranchChance.toString();
+    }
+    if (terrainRiverClimbChanceInput) {
+      terrainRiverClimbChanceInput.value = settings.riverClimbChance.toString();
+    }
+    if (terrainProvinceCountInput) {
+      terrainProvinceCountInput.value = settings.provinceCount.toString();
+    }
+    if (terrainProvinceSizeVarianceInput) {
+      terrainProvinceSizeVarianceInput.value = settings.provinceSizeVariance.toString();
+    }
+    if (terrainProvincePassageElevationInput) {
+      terrainProvincePassageElevationInput.value = settings.provincePassageElevation.toString();
+    }
+    if (terrainProvinceRiverPenaltyInput) {
+      terrainProvinceRiverPenaltyInput.value = settings.provinceRiverPenalty.toString();
+    }
+    if (terrainProvinceSmallIslandMultiplierInput) {
+      terrainProvinceSmallIslandMultiplierInput.value = settings.provinceSmallIslandMultiplier.toString();
+    }
+    if (terrainProvinceArchipelagoMultiplierInput) {
+      terrainProvinceArchipelagoMultiplierInput.value = settings.provinceArchipelagoMultiplier.toString();
+    }
+    if (terrainProvinceIslandSingleMultiplierInput) {
+      terrainProvinceIslandSingleMultiplierInput.value = settings.provinceIslandSingleMultiplier.toString();
+    }
+    if (terrainProvinceArchipelagoRadiusInput) {
+      terrainProvinceArchipelagoRadiusInput.value = settings.provinceArchipelagoRadiusMultiplier.toString();
+    }
+    if (terrainLandReliefInput) {
+      terrainLandReliefInput.value = settings.landRelief.toString();
+    }
+    if (terrainRidgeStrengthInput) {
+      terrainRidgeStrengthInput.value = settings.ridgeStrength.toString();
+    }
+    if (terrainRidgeCountInput) {
+      terrainRidgeCountInput.value = settings.ridgeCount.toString();
+    }
+    if (terrainPlateauStrengthInput) {
+      terrainPlateauStrengthInput.value = settings.plateauStrength.toString();
+    }
+    if (terrainRidgeDistributionInput) {
+      terrainRidgeDistributionInput.value = settings.ridgeDistribution.toString();
+    }
+    if (terrainRidgeSeparationInput) {
+      terrainRidgeSeparationInput.value = settings.ridgeSeparation.toString();
+    }
+    if (terrainRidgeContinuityInput) {
+      terrainRidgeContinuityInput.value = settings.ridgeContinuity.toString();
+    }
+    if (terrainRidgeContinuityThresholdInput) {
+      terrainRidgeContinuityThresholdInput.value = settings.ridgeContinuityThreshold.toString();
+    }
+    if (terrainOceanPeakClampInput) {
+      terrainOceanPeakClampInput.value = settings.oceanPeakClamp.toString();
+    }
+    if (terrainRidgeOceanClampInput) {
+      terrainRidgeOceanClampInput.value = settings.ridgeOceanClamp.toString();
+    }
+    if (terrainRidgeWidthInput) {
+      terrainRidgeWidthInput.value = settings.ridgeWidth.toString();
+    }
+    syncTerrainLabels();
+  };
+
+  const setAgentSettingsInternal = (settings: Partial<MovementSettings>): void => {
+    if (typeof settings.timePerFaceSeconds === 'number' && agentTimePerFaceInput) {
+      agentTimePerFaceInput.value = settings.timePerFaceSeconds.toString();
+    }
+    if (typeof settings.lowlandThreshold === 'number' && agentLowlandThresholdInput) {
+      agentLowlandThresholdInput.value = settings.lowlandThreshold.toString();
+    }
+    if (typeof settings.impassableThreshold === 'number' && agentImpassableThresholdInput) {
+      agentImpassableThresholdInput.value = settings.impassableThreshold.toString();
+    }
+    if (typeof settings.elevationPower === 'number' && agentElevationPowerInput) {
+      agentElevationPowerInput.value = settings.elevationPower.toString();
+    }
+    if (typeof settings.elevationGainK === 'number' && agentElevationGainKInput) {
+      agentElevationGainKInput.value = settings.elevationGainK.toString();
+    }
+    if (typeof settings.riverPenalty === 'number' && agentRiverPenaltyInput) {
+      agentRiverPenaltyInput.value = settings.riverPenalty.toString();
+    }
+    if (typeof settings.debugPaths === 'boolean' && agentDebugPathsInput) {
+      agentDebugPathsInput.checked = settings.debugPaths;
+    }
+    syncTerrainLabels();
   };
 
   syncTerrainLabels();
@@ -1030,12 +1019,19 @@ export function createPageLayout(): PageLayout {
       settingsPanel.toggleAttribute('hidden', !visible);
     },
     setTerrainControlsEnabled(enabled) {
-      for (let i = 0; i < settingsInputs.length; i += 1) {
-        const input = settingsInputs[i];
-        if (input === terrainPublishButton) {
-          continue;
+      for (let i = 0; i < authoritativeTerrainInputs.length; i += 1) {
+        const input = authoritativeTerrainInputs[i];
+        if (input) {
+          input.disabled = !enabled;
         }
-        input.disabled = !enabled;
+      }
+    },
+    setAgentControlsEnabled(enabled) {
+      for (let i = 0; i < authoritativeAgentInputs.length; i += 1) {
+        const input = authoritativeAgentInputs[i];
+        if (input) {
+          input.disabled = !enabled;
+        }
       }
     },
     setDebugControlsOnly(onlyDebug) {
@@ -1052,6 +1048,12 @@ export function createPageLayout(): PageLayout {
       terrainPublishVisible = visible;
       applyTerrainPublishVisibility();
     },
+    setTerrainGenerationSettings(settings) {
+      setTerrainGenerationSettingsInternal(settings);
+    },
+    setAgentSettings(settings) {
+      setAgentSettingsInternal(settings);
+    },
     getTerrainGenerationSettings() {
       return readTerrainSettingsPayload().generation;
     },
@@ -1065,7 +1067,6 @@ export function createPageLayout(): PageLayout {
     const notify = () => {
       syncTerrainLabels();
       const settings = readTerrainSettings();
-      storeTerrainSettings(settings);
       onChange({
         generation: toGenerationSettings(settings),
         render: toRenderSettings(settings),
@@ -1076,7 +1077,6 @@ export function createPageLayout(): PageLayout {
       applyDefaultSettings();
       syncTerrainLabels();
       const settings = readTerrainSettings();
-      storeTerrainSettings(settings);
       onChange({
         generation: toGenerationSettings(settings),
         render: toRenderSettings(settings),
@@ -1132,6 +1132,7 @@ export function createPageLayout(): PageLayout {
     agentImpassableThresholdInput?.addEventListener('input', notify);
     agentElevationPowerInput?.addEventListener('input', notify);
     agentElevationGainKInput?.addEventListener('input', notify);
+    agentRiverPenaltyInput?.addEventListener('input', notify);
     agentDebugPathsInput?.addEventListener('change', notify);
     terrainResetButton?.addEventListener('click', reset);
     },

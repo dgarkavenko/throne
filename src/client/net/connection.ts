@@ -1,9 +1,11 @@
 import type {
   ActorCommandMessage,
   ActorRejectMessage,
+  AgentsConfig,
+  AgentsPublishClientMessage,
   PlayerState,
   ServerMessage,
-  TerrainSnapshot,
+  TerrainConfig,
   TerrainSnapshotMessage,
   WorldSnapshotMessage,
 } from '../types';
@@ -21,7 +23,8 @@ type ConnectionEvents = {
 };
 
 type Connection = {
-  publishTerrainSnapshot: (terrain: TerrainSnapshot, clientVersion?: number) => void;
+  publishTerrainConfig: (terrain: TerrainConfig, clientVersion?: number) => void;
+  publishAgentsConfig: (agents: AgentsConfig, clientVersion?: number) => void;
   sendActorMove: (actorId: string, targetFace: number, commandId: number, terrainVersion: number) => void;
 };
 
@@ -93,12 +96,20 @@ export function connectToRoom(events: ConnectionEvents = {}): Connection {
   };
 
   return {
-    publishTerrainSnapshot(terrain, clientVersion = Date.now()) {
+    publishTerrainConfig(terrain, clientVersion = Date.now()) {
       send({
         type: 'terrain_publish',
         terrain,
         clientVersion,
       });
+    },
+    publishAgentsConfig(agents, clientVersion = Date.now()) {
+      const payload: AgentsPublishClientMessage = {
+        type: 'agents_publish',
+        agents,
+        clientVersion,
+      };
+      send(payload);
     },
     sendActorMove(actorId, targetFace, commandId, terrainVersion) {
       send({

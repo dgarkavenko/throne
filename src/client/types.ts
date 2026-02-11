@@ -1,5 +1,20 @@
 import type { TerrainGenerationControls } from '../terrain/controls';
 
+export interface AgentsConfig {
+  timePerFaceSeconds: number;
+  lowlandThreshold: number;
+  impassableThreshold: number;
+  elevationPower: number;
+  elevationGainK: number;
+  riverPenalty: number;
+}
+
+export interface TerrainConfig {
+  controls: TerrainGenerationControls;
+  mapWidth: number;
+  mapHeight: number;
+}
+
 export interface PlayerState {
   id: string;
   emoji: string;
@@ -8,14 +23,7 @@ export interface PlayerState {
 
 export interface TerrainSnapshot {
   controls: TerrainGenerationControls;
-  movement: {
-    timePerFaceSeconds: number;
-    lowlandThreshold: number;
-    impassableThreshold: number;
-    elevationPower: number;
-    elevationGainK: number;
-    riverPenalty: number;
-  };
+  movement: AgentsConfig;
   mapWidth: number;
   mapHeight: number;
 }
@@ -99,7 +107,13 @@ export interface JoinClientMessage {
 
 export interface TerrainPublishClientMessage {
   type: 'terrain_publish';
-  terrain: TerrainSnapshot;
+  terrain: TerrainConfig;
+  clientVersion: number;
+}
+
+export interface AgentsPublishClientMessage {
+  type: 'agents_publish';
+  agents: AgentsConfig;
   clientVersion: number;
 }
 
@@ -114,4 +128,5 @@ export interface ActorMoveClientMessage {
 export type ClientMessage =
   | JoinClientMessage
   | TerrainPublishClientMessage
+  | AgentsPublishClientMessage
   | ActorMoveClientMessage;

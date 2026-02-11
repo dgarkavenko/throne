@@ -1,16 +1,14 @@
-import {
-  normalizeTerrainGenerationControls,
-  type TerrainGenerationControls,
-} from './terrain/controls';
 import { buildTerrainGeneration } from './terrain/pipeline';
 import { buildNavigationGraph, findFacePathAStar, type NavigationGraph } from './client/engine/pathfinding';
 import type {
   ActorSnapshot,
   ActorMoveClientMessage,
+  AgentsPublishClientMessage,
   ClientMessage,
   TerrainSnapshot,
   TerrainPublishClientMessage,
 } from './client/types';
+import { normalizeRoomConfig, type RoomConfig } from './room-config';
 
 type PlayerState = {
   id: string;
@@ -44,8 +42,7 @@ type TerrainRuntimeState = {
 };
 
 const SNAPSHOT_INTERVAL_MS = 500;
-const DEFAULT_MAP_WIDTH = 1560;
-const DEFAULT_MAP_HEIGHT = 844;
+const ROOM_CONFIG_STORAGE_KEY = 'room_config_v1';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -53,47 +50,6 @@ function clamp(value: number, min: number, max: number): number {
 
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function normalizeTerrainControls(
-  controlsRaw: Partial<TerrainGenerationControls> | null | undefined
-): TerrainGenerationControls {
-  return normalizeTerrainGenerationControls(controlsRaw);
-}
-
-function normalizeMovementConfig(movementRaw: TerrainSnapshot['movement'] | null | undefined): TerrainSnapshot['movement'] {
-  const movement = movementRaw ?? {
-    timePerFaceSeconds: 180,
-    lowlandThreshold: 10,
-    impassableThreshold: 28,
-    elevationPower: 0.8,
-    elevationGainK: 1,
-    riverPenalty: 0.8,
-  };
-  const lowlandThreshold = clamp(Math.round(readNumber(movement.lowlandThreshold, 10)), 1, 31);
-  const impassableThresholdInput = clamp(Math.round(readNumber(movement.impassableThreshold, 28)), 2, 32);
-  const impassableThreshold = clamp(Math.max(lowlandThreshold + 1, impassableThresholdInput), 2, 32);
-  return {
-    timePerFaceSeconds: clamp(Math.round(readNumber(movement.timePerFaceSeconds, 180)), 1, 600),
-    lowlandThreshold,
-    impassableThreshold,
-    elevationPower: clamp(readNumber(movement.elevationPower, 0.8), 0.5, 2),
-    elevationGainK: clamp(readNumber(movement.elevationGainK, 1), 0, 4),
-    riverPenalty: clamp(readNumber(movement.riverPenalty, 0.8), 0, 8),
-  };
-}
-
-function normalizeTerrainSnapshot(snapshotRaw: TerrainSnapshot): TerrainSnapshot {
-  const controls = normalizeTerrainControls(snapshotRaw.controls);
-  const movement = normalizeMovementConfig(snapshotRaw.movement);
-  const mapWidth = clamp(Math.round(readNumber(snapshotRaw.mapWidth, DEFAULT_MAP_WIDTH)), 256, 4096);
-  const mapHeight = clamp(Math.round(readNumber(snapshotRaw.mapHeight, DEFAULT_MAP_HEIGHT)), 256, 4096);
-  return {
-    controls,
-    movement,
-    mapWidth,
-    mapHeight,
-  };
 }
 
 function fnv1aHash32(text: string): number {
@@ -109,6 +65,9 @@ export class RoomDurableObject implements DurableObject {
   private connections = new Map<WebSocket, PlayerState>();
   private hostId: string | null = null;
   private sessionStart: number | null = null;
+  private roomConfig: RoomConfig = normalizeRoomConfig(null);
+  private initialized = false;
+  private initializePromise: Promise<void> | null = null;
   private terrain: TerrainRuntimeState | null = null;
   private actorsByPlayerId = new Map<string, ServerActorState>();
   private lastSnapshotAt = 0;
@@ -152,6 +111,8 @@ export class RoomDurableObject implements DurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
+    await this.ensureInitialized();
+
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected WebSocket', { status: 426 });
     }
@@ -166,6 +127,8 @@ export class RoomDurableObject implements DurableObject {
   }
 
   async alarm(): Promise<void> {
+    await this.ensureInitialized();
+
     const now = Date.now();
     const changedActorIds = this.advanceAllActors(now);
     const snapshotDue = now - this.lastSnapshotAt >= SNAPSHOT_INTERVAL_MS;
@@ -173,6 +136,34 @@ export class RoomDurableObject implements DurableObject {
       this.broadcastWorldSnapshot();
     }
     await this.scheduleNextAlarm(now);
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+    if (!this.initializePromise) {
+      this.initializePromise = this.state.blockConcurrencyWhile(async () => {
+        if (this.initialized) {
+          return;
+        }
+        const stored = await this.state.storage.get(ROOM_CONFIG_STORAGE_KEY);
+        this.roomConfig = normalizeRoomConfig(stored);
+        await this.state.storage.put(ROOM_CONFIG_STORAGE_KEY, this.roomConfig);
+        this.terrain = this.buildTerrainRuntime(this.roomConfig);
+        this.reseedActorsForTerrain();
+        this.initialized = true;
+      });
+      this.initializePromise = this.initializePromise.finally(() => {
+        this.initializePromise = null;
+      });
+    }
+    await this.initializePromise;
+  }
+
+  private async saveRoomConfig(config: RoomConfig): Promise<void> {
+    this.roomConfig = normalizeRoomConfig(config);
+    await this.state.storage.put(ROOM_CONFIG_STORAGE_KEY, this.roomConfig);
   }
 
   private handleSession(socket: WebSocket): void {
@@ -219,7 +210,12 @@ export class RoomDurableObject implements DurableObject {
       }
 
       if (message.type === 'terrain_publish') {
-        this.handleTerrainPublish(socket, player, message);
+        void this.handleTerrainPublish(socket, player, message);
+        return;
+      }
+
+      if (message.type === 'agents_publish') {
+        void this.handleAgentsPublish(socket, player, message);
         return;
       }
 
@@ -251,33 +247,60 @@ export class RoomDurableObject implements DurableObject {
     socket.addEventListener('error', cleanup);
   }
 
-  private handleTerrainPublish(socket: WebSocket, player: PlayerState, message: TerrainPublishClientMessage): void {
+  private async handleTerrainPublish(
+    socket: WebSocket,
+    player: PlayerState,
+    message: TerrainPublishClientMessage
+  ): Promise<void> {
     if (!this.hostId || player.id !== this.hostId) {
       this.sendActorReject(socket, player.id, 0, 'terrain_publish_forbidden', this.terrain?.terrainVersion ?? 0);
       return;
     }
 
-    let runtime: TerrainRuntimeState;
     try {
-      const normalizedSnapshot = normalizeTerrainSnapshot(message.terrain);
-      runtime = this.buildTerrainRuntime(normalizedSnapshot);
+      const nextConfig = normalizeRoomConfig({
+        version: 1,
+        terrain: message.terrain,
+        agents: this.roomConfig.agents,
+      });
+      await this.saveRoomConfig(nextConfig);
+      this.terrain = this.buildTerrainRuntime(this.roomConfig);
     } catch {
       this.sendActorReject(socket, player.id, 0, 'terrain_publish_invalid', this.terrain?.terrainVersion ?? 0);
       return;
     }
 
-    this.terrain = runtime;
     this.reseedActorsForTerrain();
-
-    this.broadcastJson({
-      type: 'terrain_snapshot',
-      terrainVersion: runtime.terrainVersion,
-      terrain: runtime.snapshot,
-      publishedBy: player.id,
-      serverTime: Date.now(),
-    });
+    this.broadcastTerrainSnapshot(player.id);
     this.broadcastWorldSnapshot();
     void this.scheduleNextAlarm();
+  }
+
+  private async handleAgentsPublish(socket: WebSocket, player: PlayerState, message: AgentsPublishClientMessage): Promise<void> {
+    if (!this.hostId || player.id !== this.hostId) {
+      this.sendActorReject(socket, player.id, 0, 'agents_publish_forbidden', this.terrain?.terrainVersion ?? 0);
+      return;
+    }
+
+    const now = Date.now();
+    this.advanceAllActors(now);
+    try {
+      const nextConfig = normalizeRoomConfig({
+        version: 1,
+        terrain: this.roomConfig.terrain,
+        agents: message.agents,
+      });
+      await this.saveRoomConfig(nextConfig);
+      this.terrain = this.buildTerrainRuntime(this.roomConfig);
+    } catch {
+      this.sendActorReject(socket, player.id, 0, 'agents_publish_invalid', this.terrain?.terrainVersion ?? 0);
+      return;
+    }
+
+    this.recomputeActiveRoutes(now);
+    this.broadcastTerrainSnapshot(player.id);
+    this.broadcastWorldSnapshot();
+    void this.scheduleNextAlarm(now);
   }
 
   private handleActorMove(socket: WebSocket, player: PlayerState, message: ActorMoveClientMessage): void {
@@ -344,7 +367,8 @@ export class RoomDurableObject implements DurableObject {
     actor: ServerActorState,
     commandId: number,
     targetFace: number,
-    startedAtServerMs: number
+    startedAtServerMs: number,
+    broadcastCommand: boolean = true
   ): boolean {
     if (!this.terrain) {
       return false;
@@ -367,17 +391,19 @@ export class RoomDurableObject implements DurableObject {
       actor.moving = false;
       actor.stateSeq += 1;
 
-      this.broadcastJson({
-        type: 'actor_command',
-        actorId: actor.actorId,
-        ownerId: actor.ownerId,
-        commandId: actor.commandId,
-        startFace,
-        targetFace,
-        startedAt: startedAtServerMs,
-        routeStartedAtServerMs: startedAtServerMs,
-        terrainVersion: this.terrain.terrainVersion,
-      });
+      if (broadcastCommand) {
+        this.broadcastJson({
+          type: 'actor_command',
+          actorId: actor.actorId,
+          ownerId: actor.ownerId,
+          commandId: actor.commandId,
+          startFace,
+          targetFace,
+          startedAt: startedAtServerMs,
+          routeStartedAtServerMs: startedAtServerMs,
+          terrainVersion: this.terrain.terrainVersion,
+        });
+      }
       return true;
     }
 
@@ -403,34 +429,36 @@ export class RoomDurableObject implements DurableObject {
     actor.segmentStartedAtServerMs = startedAtServerMs;
     actor.moving = true;
 
-    this.broadcastJson({
-      type: 'actor_command',
-      actorId: actor.actorId,
-      ownerId: actor.ownerId,
-      commandId: actor.commandId,
-      startFace,
-      targetFace,
-      startedAt: startedAtServerMs,
-      routeStartedAtServerMs: startedAtServerMs,
-      terrainVersion: this.terrain.terrainVersion,
-    });
+    if (broadcastCommand) {
+      this.broadcastJson({
+        type: 'actor_command',
+        actorId: actor.actorId,
+        ownerId: actor.ownerId,
+        commandId: actor.commandId,
+        startFace,
+        targetFace,
+        startedAt: startedAtServerMs,
+        routeStartedAtServerMs: startedAtServerMs,
+        terrainVersion: this.terrain.terrainVersion,
+      });
+    }
     return true;
   }
 
-  private buildTerrainRuntime(snapshot: TerrainSnapshot): TerrainRuntimeState {
+  private buildTerrainRuntime(configSnapshot: RoomConfig): TerrainRuntimeState {
     const terrainVersion = (this.terrain?.terrainVersion ?? 0) + 1;
-    const controls = normalizeTerrainControls(snapshot.controls);
+    const normalizedConfig = normalizeRoomConfig(configSnapshot);
     const normalizedSnapshot: TerrainSnapshot = {
-      controls,
-      movement: normalizeMovementConfig(snapshot.movement),
-      mapWidth: snapshot.mapWidth,
-      mapHeight: snapshot.mapHeight,
+      controls: normalizedConfig.terrain.controls,
+      movement: normalizedConfig.agents,
+      mapWidth: normalizedConfig.terrain.mapWidth,
+      mapHeight: normalizedConfig.terrain.mapHeight,
     };
 
     const config = { width: normalizedSnapshot.mapWidth, height: normalizedSnapshot.mapHeight };
     const generation = buildTerrainGeneration({
       config,
-      controls,
+      controls: normalizedSnapshot.controls,
       stopAfter: 'rivers',
     });
     if (!generation.mesh || !generation.water || !generation.rivers) {
@@ -450,6 +478,28 @@ export class RoomDurableObject implements DurableObject {
       snapshot: normalizedSnapshot,
       navigationGraph,
     };
+  }
+
+  private recomputeActiveRoutes(now: number): void {
+    if (!this.terrain) {
+      return;
+    }
+    for (const actor of this.actorsByPlayerId.values()) {
+      const routeTarget = actor.pendingTargetFace ?? actor.routeTargetFace ?? actor.targetFace;
+      const commandId = Math.max(actor.commandId, actor.pendingCommandId ?? 0);
+      actor.pendingCommandId = null;
+      actor.pendingTargetFace = null;
+
+      if (!Number.isFinite(routeTarget as number)) {
+        this.finishActorMovement(actor, now);
+        continue;
+      }
+
+      const started = this.startActorRoute(actor, commandId, routeTarget as number, now, false);
+      if (!started) {
+        this.finishActorMovement(actor, now);
+      }
+    }
   }
 
   private ensureActorForPlayer(playerId: string): void {
@@ -680,6 +730,19 @@ export class RoomDurableObject implements DurableObject {
     });
   }
 
+  private broadcastTerrainSnapshot(publishedBy: string): void {
+    if (!this.terrain) {
+      return;
+    }
+    this.broadcastJson({
+      type: 'terrain_snapshot',
+      terrainVersion: this.terrain.terrainVersion,
+      terrain: this.terrain.snapshot,
+      publishedBy,
+      serverTime: Date.now(),
+    });
+  }
+
   private sendWorldSnapshot(socket: WebSocket): void {
     const now = Date.now();
     this.advanceAllActors(now);
@@ -760,7 +823,19 @@ export class RoomDurableObject implements DurableObject {
         const clientVersion = Math.round(readNumber(message.clientVersion, 0));
         return {
           type: 'terrain_publish',
-          terrain: terrain as TerrainSnapshot,
+          terrain: terrain as RoomConfig['terrain'],
+          clientVersion,
+        };
+      }
+      if (message.type === 'agents_publish') {
+        const agents = message.agents;
+        if (!agents || typeof agents !== 'object') {
+          return null;
+        }
+        const clientVersion = Math.round(readNumber(message.clientVersion, 0));
+        return {
+          type: 'agents_publish',
+          agents: agents as RoomConfig['agents'],
           clientVersion,
         };
       }

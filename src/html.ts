@@ -526,39 +526,6 @@ export const editorHtml = `<!doctype html>
                 Inserted Points
               </label>
             </div>
-          </details>
-          <details class="control-group" id="settings-agents-group">
-            <summary>Agents</summary>
-            <div class="control" id="agent-time-per-face-control">
-              <label for="agent-time-per-face">
-                Time / Face (s) <span id="agent-time-per-face-value">180</span>
-              </label>
-              <input id="agent-time-per-face" type="range" min="1" max="600" step="1" value="180" />
-            </div>
-            <div class="control" id="agent-lowland-threshold-control">
-              <label for="agent-lowland-threshold">
-                Lowland Threshold <span id="agent-lowland-threshold-value">10</span>
-              </label>
-              <input id="agent-lowland-threshold" type="range" min="1" max="31" step="1" value="10" />
-            </div>
-            <div class="control" id="agent-impassable-threshold-control">
-              <label for="agent-impassable-threshold">
-                Impassable Threshold <span id="agent-impassable-threshold-value">28</span>
-              </label>
-              <input id="agent-impassable-threshold" type="range" min="2" max="32" step="1" value="28" />
-            </div>
-            <div class="control" id="agent-elevation-power-control">
-              <label for="agent-elevation-power">
-                Elevation Power <span id="agent-elevation-power-value">0.80</span>
-              </label>
-              <input id="agent-elevation-power" type="range" min="0.5" max="2" step="0.05" value="0.8" />
-            </div>
-            <div class="control" id="agent-elevation-gain-k-control">
-              <label for="agent-elevation-gain-k">
-                Elevation Gain k <span id="agent-elevation-gain-k-value">1.00</span>
-              </label>
-              <input id="agent-elevation-gain-k" type="range" min="0" max="4" step="0.05" value="1" />
-            </div>
             <div class="control toggle" id="agent-debug-paths-control">
               <label for="agent-debug-paths">
                 <input id="agent-debug-paths" type="checkbox" checked />
@@ -572,7 +539,7 @@ export const editorHtml = `<!doctype html>
             </div>
           </details>
           <div class="control" id="terrain-publish-wrap" hidden>
-            <button class="control-button" id="terrain-publish" type="button">Publish Terrain To Server</button>
+            <button class="control-button" id="terrain-publish" type="button">Save Terrain Config</button>
           </div>
         </div>
         <div id="field"></div>
@@ -626,6 +593,93 @@ main {
   color: #a7c28f;
   text-decoration: none;
 }
+.layout {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+.controls {
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  align-items: stretch;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+.control-group {
+  min-width: 0;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem 0.7rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid #253149;
+  background: rgba(10, 14, 22, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+.control-group > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  opacity: 0.8;
+}
+.control-group > summary::-webkit-details-marker {
+  display: none;
+}
+.control-group > summary::after {
+  content: '+';
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+.control-group[open] > summary::after {
+  content: 'â€“';
+}
+.control {
+  min-width: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.control label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.control input[type="range"] {
+  width: 100%;
+  accent-color: #a7c28f;
+}
+.control input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #3f4e6a;
+  border-radius: 6px;
+  background: #0d1422;
+  color: #f5f5f5;
+  font-size: 0.82rem;
+}
+.control.toggle {
+  min-width: 0;
+  align-items: center;
+}
+.control.toggle label {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.5rem;
+}
+.control.toggle input[type="checkbox"] {
+  accent-color: #a7c28f;
+  width: 1rem;
+  height: 1rem;
+}
 #field {
   width: 1560px;
   height: 844px;
@@ -644,6 +698,23 @@ main {
   opacity: 0.75;
 }
 @media (max-width: 480px) {
+  body {
+    align-items: flex-start;
+    padding: 1rem 0;
+  }
+  .layout {
+    flex-direction: column;
+    align-items: center;
+  }
+  .controls {
+    width: min(100%, 1560px);
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .control-group {
+    min-width: 200px;
+  }
   #field {
     width: min(100vw, 1560px);
     height: min(100vh, 844px);
@@ -670,7 +741,125 @@ export const gameHtml = `<!doctype html>
         <span>Runtime view</span>
         <a id="editor-link" href="/editor">Open Editor</a>
       </div>
-      <div id="field"></div>
+      <div class="layout">
+        <div class="controls" id="settings-panel">
+          <details class="control-group">
+            <summary>Intermediate</summary>
+            <div class="control">
+              <label for="terrain-intermediate-seed">Intermediate Seed</label>
+              <input id="terrain-intermediate-seed" type="number" min="0" max="4294967295" step="1" value="1337" />
+            </div>
+            <div class="control">
+              <label for="terrain-intermediate-iterations">
+                Intermediate Iterations <span id="terrain-intermediate-iterations-value">6</span>
+              </label>
+              <input id="terrain-intermediate-iterations" type="range" min="0" max="12" step="1" value="6" />
+            </div>
+            <div class="control">
+              <label for="terrain-intermediate-distance">
+                Threshold Distance <span id="terrain-intermediate-distance-value">5</span>
+              </label>
+              <input id="terrain-intermediate-distance" type="range" min="2" max="20" step="1" value="5" />
+            </div>
+            <div class="control">
+              <label for="terrain-intermediate-rel-magnitude">
+                Relative Magnitude <span id="terrain-intermediate-rel-magnitude-value">0.1</span>
+              </label>
+              <input id="terrain-intermediate-rel-magnitude" type="range" min="0" max="2" step="0.1" value="0.1" />
+            </div>
+            <div class="control">
+              <label for="terrain-intermediate-abs-magnitude">
+                Absolute Magnitude <span id="terrain-intermediate-abs-magnitude-value">2</span>
+              </label>
+              <input id="terrain-intermediate-abs-magnitude" type="range" min="0" max="10" step="0.1" value="2" />
+            </div>
+          </details>
+          <details class="control-group" id="settings-overlay-group" open>
+            <summary>Overlay</summary>
+            <div class="control toggle">
+              <label for="terrain-graph-polygons">
+                <input id="terrain-graph-polygons" type="checkbox" />
+                Mesh Polygons
+              </label>
+            </div>
+            <div class="control toggle">
+              <label for="terrain-graph-dual">
+                <input id="terrain-graph-dual" type="checkbox" />
+                Mesh Dual
+              </label>
+            </div>
+            <div class="control toggle">
+              <label for="terrain-graph-corners">
+                <input id="terrain-graph-corners" type="checkbox" />
+                Mesh Vertices
+              </label>
+            </div>
+            <div class="control toggle">
+              <label for="terrain-graph-centers">
+                <input id="terrain-graph-centers" type="checkbox" />
+                Mesh Faces
+              </label>
+            </div>
+            <div class="control toggle">
+              <label for="terrain-graph-inserted">
+                <input id="terrain-graph-inserted" type="checkbox" />
+                Inserted Points
+              </label>
+            </div>
+            <div class="control toggle" id="agent-debug-paths-control">
+              <label for="agent-debug-paths">
+                <input id="agent-debug-paths" type="checkbox" checked />
+                Draw Paths (Debug)
+              </label>
+            </div>
+            <div class="control" id="terrain-sync-status-control">
+              <label>
+                Terrain Sync <span id="terrain-sync-status">Unsynced</span>
+              </label>
+            </div>
+          </details>
+          <details class="control-group" id="settings-agents-group">
+            <summary>Agents</summary>
+            <div class="control" id="agent-time-per-face-control">
+              <label for="agent-time-per-face">
+                Time / Face (s) <span id="agent-time-per-face-value">180</span>
+              </label>
+              <input id="agent-time-per-face" type="range" min="1" max="600" step="1" value="180" />
+            </div>
+            <div class="control" id="agent-lowland-threshold-control">
+              <label for="agent-lowland-threshold">
+                Lowland Threshold <span id="agent-lowland-threshold-value">10</span>
+              </label>
+              <input id="agent-lowland-threshold" type="range" min="1" max="31" step="1" value="10" />
+            </div>
+            <div class="control" id="agent-impassable-threshold-control">
+              <label for="agent-impassable-threshold">
+                Impassable Threshold <span id="agent-impassable-threshold-value">28</span>
+              </label>
+              <input id="agent-impassable-threshold" type="range" min="2" max="32" step="1" value="28" />
+            </div>
+            <div class="control" id="agent-elevation-power-control">
+              <label for="agent-elevation-power">
+                Elevation Power <span id="agent-elevation-power-value">0.80</span>
+              </label>
+              <input id="agent-elevation-power" type="range" min="0.5" max="2" step="0.05" value="0.8" />
+            </div>
+            <div class="control" id="agent-elevation-gain-k-control">
+              <label for="agent-elevation-gain-k">
+                Elevation Gain k <span id="agent-elevation-gain-k-value">1.00</span>
+              </label>
+              <input id="agent-elevation-gain-k" type="range" min="0" max="4" step="0.05" value="1" />
+            </div>
+            <div class="control" id="agent-river-penalty-control">
+              <label for="agent-river-penalty">
+                River Penalty <span id="agent-river-penalty-value">0.80</span>
+              </label>
+              <input id="agent-river-penalty" type="range" min="0" max="8" step="0.1" value="0.8" />
+            </div>
+          </details>
+        </div>
+        <div id="field"></div>
+      </div>
       <div class="status" id="status">Connecting...</div>
     </main>
     <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>

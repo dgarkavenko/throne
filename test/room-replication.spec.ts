@@ -195,7 +195,11 @@ describe.skip('room replication v2 (requires non-isolated DO websocket integrati
 
       socket.send({
         type: 'terrain_publish',
-        terrain: DEFAULT_SNAPSHOT,
+        terrain: {
+          controls: DEFAULT_SNAPSHOT.controls,
+          mapWidth: DEFAULT_SNAPSHOT.mapWidth,
+          mapHeight: DEFAULT_SNAPSHOT.mapHeight,
+        },
         clientVersion: 1,
       });
 
@@ -228,7 +232,11 @@ describe.skip('room replication v2 (requires non-isolated DO websocket integrati
 
       socket.send({
         type: 'terrain_publish',
-        terrain: DEFAULT_SNAPSHOT,
+        terrain: {
+          controls: DEFAULT_SNAPSHOT.controls,
+          mapWidth: DEFAULT_SNAPSHOT.mapWidth,
+          mapHeight: DEFAULT_SNAPSHOT.mapHeight,
+        },
         clientVersion: 1,
       });
       await socket.next((message) => message.type === 'terrain_snapshot');
@@ -278,6 +286,46 @@ describe.skip('room replication v2 (requires non-isolated DO websocket integrati
       const nextActor = (nextSnapshot.actors as AnyMessage[]).find((actor) => String(actor.actorId) === playerId);
       expect(Number(nextSnapshot.snapshotSeq)).toBeGreaterThan(seqA);
       expect(Number(nextActor?.stateSeq)).toBeGreaterThanOrEqual(stateSeqA);
+    } finally {
+      await socket.close();
+    }
+  }, 15000);
+
+  it('accepts agents_publish and rebroadcasts movement config', async () => {
+    const roomId = `rep-v2-${Date.now()}-agents`;
+    const socket = await openRoom(roomId);
+    try {
+      socket.send({ type: 'join' });
+      await socket.next((message) => message.type === 'welcome');
+
+      socket.send({
+        type: 'terrain_publish',
+        terrain: {
+          controls: DEFAULT_SNAPSHOT.controls,
+          mapWidth: DEFAULT_SNAPSHOT.mapWidth,
+          mapHeight: DEFAULT_SNAPSHOT.mapHeight,
+        },
+        clientVersion: 1,
+      });
+      await socket.next((message) => message.type === 'terrain_snapshot');
+
+      socket.send({
+        type: 'agents_publish',
+        agents: {
+          timePerFaceSeconds: 240,
+          lowlandThreshold: 8,
+          impassableThreshold: 20,
+          elevationPower: 1.1,
+          elevationGainK: 1.3,
+          riverPenalty: 1.2,
+        },
+        clientVersion: 2,
+      });
+
+      const terrainSnapshot = await socket.next((message) => message.type === 'terrain_snapshot');
+      const movement = terrainSnapshot.terrain?.movement as Record<string, number> | undefined;
+      expect(movement?.timePerFaceSeconds).toBe(240);
+      expect(movement?.riverPenalty).toBe(1.2);
     } finally {
       await socket.close();
     }

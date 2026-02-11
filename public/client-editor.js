@@ -54,11 +54,6 @@ async function startClientEditor() {
     engine.setTerrainGenerationControls(generationSettings);
     engine.setTerrainRenderControls(renderSettings);
     engine.setMovementTestConfig({
-        timePerFaceSeconds: movementSettings.timePerFaceSeconds,
-        lowlandThreshold: movementSettings.lowlandThreshold,
-        impassableThreshold: movementSettings.impassableThreshold,
-        elevationPower: movementSettings.elevationPower,
-        elevationGainK: movementSettings.elevationGainK,
         showPaths: movementSettings.debugPaths,
     });
     const syncSettingsAccess = () => {
@@ -72,6 +67,7 @@ async function startClientEditor() {
         layout.setSettingsVisible(true);
         layout.setDebugControlsOnly(false);
         layout.setTerrainControlsEnabled(isHost);
+        layout.setAgentControlsEnabled(false);
         layout.setTerrainPublishVisible(isHost);
     };
     layout.setSettingsVisible(false);
@@ -83,11 +79,6 @@ async function startClientEditor() {
         engine.setTerrainGenerationControls(nextSettings.generation);
         engine.setTerrainRenderControls(nextSettings.render);
         engine.setMovementTestConfig({
-            timePerFaceSeconds: nextSettings.movement.timePerFaceSeconds,
-            lowlandThreshold: nextSettings.movement.lowlandThreshold,
-            impassableThreshold: nextSettings.movement.impassableThreshold,
-            elevationPower: nextSettings.movement.elevationPower,
-            elevationGainK: nextSettings.movement.elevationGainK,
             showPaths: nextSettings.movement.debugPaths,
         });
         layout.setTerrainSyncStatus('Local changes');
@@ -116,7 +107,20 @@ async function startClientEditor() {
             updateSessionTimer(layout.setSessionElapsed);
         },
         onTerrainSnapshot: (message) => {
+            layout.setTerrainGenerationSettings(message.terrain.controls);
+            layout.setAgentSettings({
+                timePerFaceSeconds: message.terrain.movement.timePerFaceSeconds,
+                lowlandThreshold: message.terrain.movement.lowlandThreshold,
+                impassableThreshold: message.terrain.movement.impassableThreshold,
+                elevationPower: message.terrain.movement.elevationPower,
+                elevationGainK: message.terrain.movement.elevationGainK,
+                riverPenalty: message.terrain.movement.riverPenalty,
+            });
             engine.applyTerrainSnapshot(message.terrain, message.terrainVersion);
+            engine.setTerrainRenderControls(layout.getTerrainRenderSettings());
+            engine.setMovementTestConfig({
+                showPaths: layout.getMovementSettings().debugPaths,
+            });
             layout.setTerrainSyncStatus(`v${message.terrainVersion}`);
         },
         onActorCommand: (message) => {
@@ -140,7 +144,11 @@ async function startClientEditor() {
             return;
         }
         const snapshot = engine.getTerrainSnapshotForReplication();
-        connection.publishTerrainSnapshot(snapshot);
+        connection.publishTerrainConfig({
+            controls: snapshot.controls,
+            mapWidth: snapshot.mapWidth,
+            mapHeight: snapshot.mapHeight,
+        });
         layout.setTerrainSyncStatus('Publishing...');
     });
     engine.start((deltaMs, now) => {
