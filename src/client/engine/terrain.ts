@@ -708,7 +708,6 @@ export function renderTerrain(
 
 		const isShoreWater =
 			!isLandFace &&
-			base.oceanWater[face.index] &&
 			face.adjacentFaces.some((neighborIndex) => provinceGraph.isLand[neighborIndex]);
 		if (isShoreWater) {
 			const strokes = new window.PIXI.Graphics();
