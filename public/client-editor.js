@@ -83,13 +83,6 @@ async function startClientEditor() {
         });
         layout.setTerrainSyncStatus('Local changes');
     });
-    const nextActorCommandIdByActor = new Map();
-    const nextCommandId = (actorId) => {
-        const next = (nextActorCommandIdByActor.get(actorId) ?? 0) + 1;
-        nextActorCommandIdByActor.set(actorId, next);
-        return next;
-    };
-    layout.setStatus("hell");
     const connection = connectToRoom({
         onStatus: layout.setStatus,
         onConnected: () => layout.setConnected(true),
@@ -103,7 +96,6 @@ async function startClientEditor() {
             state.players = players;
             state.sessionStart = sessionStart;
             state.hostId = hostId;
-            engine.renderPlayers(players);
             syncSettingsAccess();
             updateSessionTimer(layout.setSessionElapsed);
         },
@@ -124,21 +116,9 @@ async function startClientEditor() {
             });
             layout.setTerrainSyncStatus(`v${message.terrainVersion}`);
         },
-        onActorCommand: (message) => {
-            engine.applyActorCommand(message);
-        },
         onWorldSnapshot: (message) => {
             engine.applyWorldSnapshot(message);
-        },
-        onActorReject: (message) => {
-            layout.setStatus(`Move rejected: ${message.reason}`);
-            layout.setTerrainSyncStatus(`v${message.terrainVersion}`);
-        },
-    });
-    engine.onActorMoveCommand((actorId, targetFace) => {
-        const terrainVersion = engine.getTerrainVersion();
-        const commandId = nextCommandId(actorId);
-        connection.sendActorMove(actorId, targetFace, commandId, terrainVersion);
+        }
     });
     layout.onPublishTerrain(() => {
         if (!state.playerId || !state.hostId || state.playerId !== state.hostId) {
@@ -152,15 +132,5 @@ async function startClientEditor() {
         });
         layout.setTerrainSyncStatus('Publishing...');
     });
-    engine.start((deltaMs, now) => {
-        void deltaMs;
-        updateFpsCounter(now, layout.setFps);
-    });
-    if (!state.sessionTimerId) {
-        state.sessionTimerId = window.setInterval(() => {
-            updateSessionTimer(layout.setSessionElapsed);
-        }, 1000);
-    }
-    updateSessionTimer(layout.setSessionElapsed);
 }
 void startClientEditor();

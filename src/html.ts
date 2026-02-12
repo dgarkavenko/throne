@@ -550,7 +550,10 @@ export const editorHtml = `<!doctype html>
 	<script type="importmap">
 	{
 		"imports": {
-			"pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.16.0/dist/pixi.min.mjs"
+			"pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.16.0/dist/pixi.min.mjs",
+			"bitecs": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/core/index.min.mjs",
+			"bitecs/serialization": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/serialization/index.min.mjs",
+			"bitecs/legacy": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/legacy/index.min.mjs"
 		}
 	}
 	</script>
@@ -872,7 +875,10 @@ export const gameHtml = `<!doctype html>
 	<script type="importmap">
 	{
 		"imports": {
-			"pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.16.0/dist/pixi.min.mjs"
+			"pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.16.0/dist/pixi.min.mjs",
+			"bitecs": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/core/index.min.mjs",
+			"bitecs/serialization": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/serialization/index.min.mjs",
+			"bitecs/legacy": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/legacy/index.min.mjs"
 		}
 	}
 	</script>

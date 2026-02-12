@@ -99,19 +99,22 @@ async function startClientGame() {
         onConnected: () => layout.setConnected(true),
         onDisconnected: () => layout.setConnected(false),
         onWelcome: (playerId) => {
+            console.log("client:onWelcome");
             state.playerId = playerId;
             engine.setLocalPlayerId(playerId);
             syncHostAccess();
         },
         onState: (players, sessionStart, hostId) => {
+            console.log("client:onState");
             state.players = players;
             state.sessionStart = sessionStart;
             state.hostId = hostId;
-            engine.renderPlayers(players);
             syncHostAccess();
             updateSessionTimer(layout.setSessionElapsed);
         },
         onTerrainSnapshot: (message) => {
+            //TODO::split terrain snapshot and render controls and game settings (setMovementTestConfig)
+            console.log("client:onTerrainSnapshot");
             const authoritativeAgents = message.terrain.movement;
             layout.setAgentSettings({
                 timePerFaceSeconds: authoritativeAgents.timePerFaceSeconds,
@@ -133,7 +136,9 @@ async function startClientGame() {
             engine.applyActorCommand(message);
         },
         onWorldSnapshot: (message) => {
+            console.log("client:onWorldSnapshot");
             engine.applyWorldSnapshot(message);
+            layout.setSessionElapsed(message.serverTime);
         },
         onActorReject: (message) => {
             layout.setStatus(`Move rejected: ${message.reason}`);
@@ -155,20 +160,21 @@ async function startClientGame() {
         lastPublishedAgentsKey = nextKey;
         connection.publishAgentsConfig(authoritative);
     });
-    engine.onActorMoveCommand((actorId, targetFace) => {
+    let unbind = engine.bindActorMoveCommandReplication((actorId, targetFace) => {
         const terrainVersion = engine.getTerrainVersion();
         const commandId = nextCommandId(actorId);
         connection.sendActorMove(actorId, targetFace, commandId, terrainVersion);
     });
-    engine.start((deltaMs, now) => {
+    engine.bindAndStart((deltaMs, now) => {
         void deltaMs;
-        updateFpsCounter(now, layout.setFps);
+        fpsTracker.frames += 1;
+        const elapsed = now - fpsTracker.lastSample;
+        if (elapsed >= 500) {
+            const fps = Math.round((fpsTracker.frames * 1000) / elapsed);
+            layout.setFps(fps);
+            fpsTracker.frames = 0;
+            fpsTracker.lastSample = now;
+        }
     });
-    if (!state.sessionTimerId) {
-        state.sessionTimerId = window.setInterval(() => {
-            updateSessionTimer(layout.setSessionElapsed);
-        }, 1000);
-    }
-    updateSessionTimer(layout.setSessionElapsed);
 }
 void startClientGame();
