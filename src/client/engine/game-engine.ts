@@ -14,6 +14,10 @@ import
 } from './pathfinding';
 import type { ActorCommandMessage, ActorSnapshot, PlayerState, TerrainSnapshot, WorldSnapshotMessage } from '../types';
 import { Application, Assets, Container, Graphics, Sprite, Text, TextStyle, Texture } from 'pixi.js';
+import { TRenderer as TRenderer } from '../../ecs/renderer';
+import { createGame, TGame } from '../../ecs/game';
+import { addComponent, addComponents, addEntity, observe, onSet, query, set, setComponent } from 'bitecs';
+import { ActorComponent, Dirty, RenderableComponent, TerrainLocationComponent, TerrainRouteComponent } from '../../ecs/components';
 
 type GameConfig = {
 	width: number;
@@ -88,12 +92,6 @@ type MovementTestUnit = {
 
 export class GameEngine
 {
-	private app: Application | null = null;
-	private layers = {
-		terrain: null as any,
-		units: null as any,
-		ui: null as any,
-	};
 	private readonly config: GameConfig;
 	private terrainState: TerrainGenerationState | null = null;
 	private meshOverlay: MeshOverlay | null = null;
@@ -102,8 +100,6 @@ export class GameEngine
 	private hoveredProvinceId: number | null = null;
 	private selectedProvinceId: number | null = null;
 	private selectionListeners = new Set<(provinceId: number | null) => void>();
-
-	private canvasHandlers = new Map<string, EventListener>();
 
 	private localPlayerId: string | null = null;
 	private selectedActorId: string | null = null;
@@ -135,76 +131,42 @@ export class GameEngine
 	private readonly autoGenerateTerrain: boolean;
 	private hasTerrain = false;
 
+	private r: TRenderer;
+	private game: TGame;
+
 	constructor(config: GameConfig)
 	{
 		this.config = config;
 		this.mapSystem = new MapSystem({ width: config.width, height: config.height });
 		this.autoGenerateTerrain = config.autoGenerateTerrain !== false;
+		this.r = new TRenderer();
+		this.game = createGame();
 	}
 
 	async init(field: HTMLElement | null): Promise<void>
 	{
-		if (this.app)
-		{
-			return;
-		}
+		await this.r.init(this.config.width, this.config.height, window.devicePixelRatio || 1, field);
+		await this.r.hook(this.game);
 
-		const appInstance = new Application();
-		await appInstance.init({
-			width: this.config.width,
-			height: this.config.height,
-			backgroundAlpha: 0,
-			antialias: true,
-			resolution: window.devicePixelRatio || 1,
-			autoDensity: true,
+		observe(this.game.world, onSet(TerrainLocationComponent), (eid, params) =>
+		{
+			const currentFacePoint = this.getFacePoint(params.faceId);
+			if (currentFacePoint)
+			{
+				RenderableComponent.x[eid] = currentFacePoint?.x;
+				RenderableComponent.y[eid] = currentFacePoint?.y;
+			}
+			return params;
 		});
 
-		await Assets.load({ alias: "unit_cb_02", src: "/assets/units/unit_cb_02.png" });
-		await Assets.load({ alias: "unit_cav_02", src: "/assets/units/unit_cav_01.png" });
-		await Assets.load({ alias: "unit_levy_01", src: "/assets/units/unit_levy_01.png" });
-
-		this.app = appInstance;
-		if (field)
-		{
-			field.appendChild(appInstance.canvas ?? appInstance.view);
-		}
-
-		const terrainLayer = new Container();
-		const unitsLayer = new Container();
-		const hudLayer = new Container();
-		appInstance.stage.addChild(terrainLayer);
-		appInstance.stage.addChild(unitsLayer);
-		appInstance.stage.addChild(hudLayer);
-		this.layers.terrain = terrainLayer;
-		this.layers.units = unitsLayer;
-		this.layers.ui = hudLayer;
+		this.r.bindCanvasEvent('pointermove', this.pointerMove);
+		this.r.bindCanvasEvent('pointerleave', this.pointerLeave);
+		this.r.bindCanvasEvent('pointerdown', this.pointerDown);
+		this.r.bindCanvasEvent('contextmenu', this.contextMenu);
 
 		if (this.autoGenerateTerrain)
 		{
 			this.regenerateTerrain();
-		}
-
-		this.bindCanvasEvent('pointermove', this.pointerMove);
-		this.bindCanvasEvent('pointerleave', this.pointerLeave);
-		this.bindCanvasEvent('pointerdown', this.pointerDown);
-		this.bindCanvasEvent('contextmenu', this.contextMenu);		
-	}
-
-	
-	private bindCanvasEvent(type: string, handler: (ev: any) => void): void
-	{
-		if (this.app?.canvas?.addEventListener)
-		{
-			const canvas = this.app.canvas;
-
-			const prev = this.canvasHandlers.get(type);
-			if (prev)
-			{
-				canvas.removeEventListener(type, prev);
-			}
-
-			canvas.addEventListener(type, handler);
-			this.canvasHandlers.set(type, handler);
 		}
 	}
 
@@ -221,7 +183,7 @@ export class GameEngine
 			this.regenerateTerrainPartial(result.dirty);
 			return;
 		}
-		if (this.layers.terrain)
+		if (this.r.terrainLayer)
 		{
 			this.renderTerrainState(this.mapSystem.ensureGenerationState());
 			this.renderProvinceInteractionOverlay();
@@ -337,12 +299,12 @@ export class GameEngine
 
 	bindAndStart(onFrame?: (deltaMs: number, now: number) => void): void
 	{
-		if (this.app)
+		if (this.r.app)
 		{
-			this.app.ticker.add((ticker: { deltaMS: number }) =>
+			this.r.app.ticker.add((ticker: { deltaMS: number }) =>
 			{
-				this.simulation(ticker.deltaMS)
-				this.render(ticker.deltaMS)
+				this.game.tick(ticker.deltaMS);
+				this.r.sync(this.game);
 
 				if (onFrame)
 				{
@@ -379,7 +341,6 @@ export class GameEngine
 		{
 			this.selectedActorId = null;
 		}
-		this.refreshAllActorVisuals();
 	}
 
 	setSelectedActor(actorId: string | null): void
@@ -393,7 +354,6 @@ export class GameEngine
 			return;
 		}
 		this.selectedActorId = actorId;
-		this.refreshAllActorVisuals();
 	}
 
 	getSelectedActorId(): string | null
@@ -404,7 +364,7 @@ export class GameEngine
 	bindActorMoveCommandReplication(listener: (actorId: string, targetFace: number) => void): () => void
 	{
 		this.actorMoveListeners.add(listener);
-		return () => this.actorMoveListeners.delete(listener);		
+		return () => this.actorMoveListeners.delete(listener);
 	}
 
 	getTerrainSnapshotForReplication(): TerrainSnapshot
@@ -447,24 +407,24 @@ export class GameEngine
 		{
 			return;
 		}
-		const actor = this.ensureReplicatedActor(command.actorId, command.ownerId);
-		if (command.commandId < actor.commandId)
-		{
-			return;
-		}
-		actor.commandId = command.commandId;
-		actor.routeStartFace = command.startFace;
-		actor.routeTargetFace = command.targetFace;
-		actor.routeStartedAtServerMs = command.routeStartedAtServerMs;
-		actor.currentFace = command.startFace;
-		actor.targetFace = command.targetFace;
-		actor.correctionOffset = null;
-		this.assignPathFromFaceToTarget(actor, command.startFace, command.targetFace);
-		const clientNow = Date.now();
-		const estimatedServerNow = this.getEstimatedServerNow(clientNow);
-		this.updateUnitPoseFromTimeline(actor, estimatedServerNow, clientNow);
-		this.refreshActorVisual(actor);
-		this.renderMovementPathDebug();
+		//const actor = this.ensureReplicatedActor(command.actorId, command.ownerId);
+		// if (command.commandId < actor.commandId)
+		// {
+		// 	return;
+		// }
+		// actor.commandId = command.commandId;
+		// actor.routeStartFace = command.startFace;
+		// actor.routeTargetFace = command.targetFace;
+		// actor.routeStartedAtServerMs = command.routeStartedAtServerMs;
+		// actor.currentFace = command.startFace;
+		// actor.targetFace = command.targetFace;
+		// actor.correctionOffset = null;
+		// this.assignPathFromFaceToTarget(actor, command.startFace, command.targetFace);
+		// const clientNow = Date.now();
+		// const estimatedServerNow = this.getEstimatedServerNow(clientNow);
+		// this.updateUnitPoseFromTimeline(actor, estimatedServerNow, clientNow);
+		// this.refreshActorVisual(actor);
+		// this.renderMovementPathDebug();
 	}
 
 	applyWorldSnapshot(snapshot: WorldSnapshotMessage): void
@@ -490,12 +450,16 @@ export class GameEngine
 				continue;
 			}
 			liveActorIds.add(actorSnapshot.actorId);
-			const actor = this.ensureReplicatedActor(actorSnapshot.actorId, actorSnapshot.ownerId);
-			if (actorSnapshot.commandId < actor.commandId || actorSnapshot.stateSeq < actor.lastStateSeq)
-			{
-				continue;
-			}
-			this.syncActorFromSnapshot(actor, actorSnapshot, estimatedServerNow, clientReceiveMs);
+			const actorEntity = this.ensureNetUnit(actorSnapshot.actorId, actorSnapshot.ownerId);
+			this.syncUnitFromSnapshot(actorEntity, actorSnapshot, estimatedServerNow, clientReceiveMs);
+
+			
+			//const actor = this.ensureReplicatedActor(actorSnapshot.actorId, actorSnapshot.ownerId);
+			// if (actorSnapshot.commandId < actor.commandId || actorSnapshot.stateSeq < actor.lastStateSeq)
+			// {
+			// 	continue;
+			// }
+			//this.syncActorFromSnapshot(actor, actorSnapshot, estimatedServerNow, clientReceiveMs);
 		}
 		const staleActorIds: string[] = [];
 		this.actorById.forEach((_, actorId) =>
@@ -527,7 +491,7 @@ export class GameEngine
 
 	private regenerateTerrainPartial(flags: TerrainGenerationDirtyFlags): void
 	{
-		if (!this.layers.terrain)
+		if (!this.r.terrainLayer)
 		{
 			return;
 		}
@@ -542,19 +506,19 @@ export class GameEngine
 
 	private renderTerrainState(state: TerrainGenerationState): void
 	{
-		if (!this.layers.terrain)
+		if (!this.r.terrainLayer)
 		{
 			return;
 		}
-		this.terrainRenderState = this.mapSystem.render(this.layers.terrain);
-		const overlay = this.ensureMeshOverlay(this.layers.terrain);
+		this.terrainRenderState = this.mapSystem.render(this.r.terrainLayer);
+		const overlay = this.ensureMeshOverlay(this.r.terrainLayer);
 		this.renderMeshOverlay(state.mesh.mesh, this.terrainRenderState?.refinedGeometry.insertedPoints ?? [], overlay);
 		this.setGraphOverlayVisibility(this.mapSystem.getRenderControls());
 	}
 
 	private regenerateTerrain(): void
 	{
-		if (!this.layers.terrain)
+		if (!this.r.terrainLayer)
 		{
 			return;
 		}
@@ -569,7 +533,7 @@ export class GameEngine
 
 	private pointerMove = (event: PointerEvent) => 
 	{
-		const position = this.getPointerWorldPosition(event);
+		const position = this.r.getPointerWorldPosition(event);
 		if (!position)
 		{
 			return;
@@ -578,7 +542,6 @@ export class GameEngine
 		if (this.hoveredActorId !== hoveredActorId)
 		{
 			this.hoveredActorId = hoveredActorId;
-			this.refreshAllActorVisuals();
 		}
 		if (hoveredActorId)
 		{
@@ -592,45 +555,44 @@ export class GameEngine
 	private pointerLeave = (event: PointerEvent) => 
 	{
 		this.hoveredActorId = null;
-		this.refreshAllActorVisuals();
 		this.setHoveredProvince(null);
 	}
 
 	private pointerDown = (event: PointerEvent) => 
 	{
-			const position = this.getPointerWorldPosition(event);
-			if (!position)
+		const position = this.r.getPointerWorldPosition(event);
+		if (!position)
+		{
+			return;
+		}
+		if (event.button === 0)
+		{
+			const actorId = this.pickActorAt(position.x, position.y);
+			if (actorId && this.actorById.get(actorId)?.ownerId === this.localPlayerId)
+			{
+				this.setSelectedActor(actorId);
+				this.setSelectedProvince(null);
+				return;
+			}
+			const nextSelection = this.pickProvinceAt(position.x, position.y);
+			this.setSelectedProvince(nextSelection);
+			return;
+		}
+		if (event.button === 2)
+		{
+			const selectedActorId = this.selectedActorId;
+			const selectedActor = selectedActorId ? this.actorById.get(selectedActorId) : null;
+			if (!selectedActorId || !selectedActor || selectedActor.ownerId !== this.localPlayerId)
 			{
 				return;
 			}
-			if (event.button === 0)
+			const targetFace = this.pickFaceAt(position.x, position.y);
+			if (targetFace === null)
 			{
-				const actorId = this.pickActorAt(position.x, position.y);
-				if (actorId && this.actorById.get(actorId)?.ownerId === this.localPlayerId)
-				{
-					this.setSelectedActor(actorId);
-					this.setSelectedProvince(null);
-					return;
-				}
-				const nextSelection = this.pickProvinceAt(position.x, position.y);
-				this.setSelectedProvince(nextSelection);
 				return;
 			}
-			if (event.button === 2)
-			{
-				const selectedActorId = this.selectedActorId;
-				const selectedActor = selectedActorId ? this.actorById.get(selectedActorId) : null;
-				if (!selectedActorId || !selectedActor || selectedActor.ownerId !== this.localPlayerId)
-				{
-					return;
-				}
-				const targetFace = this.pickFaceAt(position.x, position.y);
-				if (targetFace === null)
-				{
-					return;
-				}
-				this.actorMoveListeners.forEach((listener) => listener(selectedActorId, targetFace));
-			}
+			this.actorMoveListeners.forEach((listener) => listener(selectedActorId, targetFace));
+		}
 	}
 	private contextMenu = (event: MouseEvent) =>
 	{
@@ -766,19 +728,15 @@ export class GameEngine
 
 	private ensureProvinceInteractionOverlay(): ProvinceInteractionOverlay | null
 	{
-		if (!this.layers.terrain)
-		{
-			return null;
-		}
 		if (this.provinceInteractionOverlay)
 		{
 			const meshIndex = this.meshOverlay?.container
-				? this.layers.terrain.children.indexOf(this.meshOverlay.container)
+				? this.r.terrainLayer.children.indexOf(this.meshOverlay.container)
 				: -1;
 			if (meshIndex >= 0)
 			{
 				const targetIndex = Math.max(0, meshIndex - 1);
-				this.layers.terrain.setChildIndex(this.provinceInteractionOverlay.container, targetIndex);
+				this.r.terrainLayer.setChildIndex(this.provinceInteractionOverlay.container, targetIndex);
 			}
 			return this.provinceInteractionOverlay;
 		}
@@ -790,14 +748,14 @@ export class GameEngine
 		container.addChild(hoverGraphics);
 		container.addChild(selectedGraphics);
 		const meshIndex = this.meshOverlay?.container
-			? this.layers.terrain.children.indexOf(this.meshOverlay.container)
+			? this.r.terrainLayer.children.indexOf(this.meshOverlay.container)
 			: -1;
 		if (meshIndex >= 0)
 		{
-			this.layers.terrain.addChildAt(container, Math.max(0, meshIndex));
+			this.r.terrainLayer.addChildAt(container, Math.max(0, meshIndex));
 		} else
 		{
-			this.layers.terrain.addChild(container);
+			this.r.terrainLayer.addChild(container);
 		}
 		this.provinceInteractionOverlay = { container, hoverGraphics, selectedGraphics, neighborGraphics };
 		return this.provinceInteractionOverlay;
@@ -978,30 +936,6 @@ export class GameEngine
 		return inside;
 	}
 
-	private getPointerWorldPosition(event: PointerEvent): Vec2 | null
-	{
-		if (!this.app)
-		{
-			return null;
-		}
-		const canvas = this.app.canvas ?? this.app.view;
-		if (!canvas || !canvas.getBoundingClientRect)
-		{
-			return null;
-		}
-		const rect = canvas.getBoundingClientRect();
-		if (rect.width === 0 || rect.height === 0)
-		{
-			return null;
-		}
-		const scaleX = this.config.width / rect.width;
-		const scaleY = this.config.height / rect.height;
-		return {
-			x: (event.clientX - rect.left) * scaleX,
-			y: (event.clientY - rect.top) * scaleY,
-		};
-	}
-
 	private setHoveredProvince(provinceId: number | null): void
 	{
 		if (this.hoveredProvinceId === provinceId)
@@ -1054,49 +988,10 @@ export class GameEngine
 		);
 	}
 
-	private clearMovementUnits(): void
-	{
-		this.actorById.clear();
-		this.selectedActorId = null;
-		this.hoveredActorId = null;
-		this.movementUnits = [];
-		if (!this.layers.units)
-		{
-			return;
-		}
-		const removed = this.layers.units.removeChildren();
-		for (let i = 0; i < removed.length; i += 1)
-		{
-			const child = removed[i] as { destroy?: (options?: { children?: boolean }) => void };
-			child?.destroy?.({ children: true });
-		}
-		this.movementPathGraphics = null;
-	}
-
-	private resetMovementUnits(): void
-	{
-		if (!this.layers.units || !this.navigationGraph)
-		{
-			return;
-		}
-		this.renderMovementPathDebug();
-	}
-
 	private getMovementUnitColor(index: number): number
 	{
 		const palette = [0xffce54, 0x48dbfb, 0xff6b6b, 0x1dd1a1, 0xf368e0, 0xfeca57, 0x54a0ff, 0x5f27cd];
 		return palette[index % palette.length];
-	}
-
-	private createMovementUnitG(color: number): any
-	{
-		const graphic = new Graphics();
-		graphic.circle(0, 0, 5);
-		graphic.fill({ color, alpha: 0.95 });
-		graphic.stroke({ width: 2, color: 0x0b0e12, alpha: 0.9 });
-		graphic.eventMode = 'none';
-		graphic.tint = color;
-		return graphic;
 	}
 
 	private createMovementUnitSprite(color: number, path: string): Sprite
@@ -1106,32 +1001,35 @@ export class GameEngine
 		sprite.anchor.set(0.5);
 		sprite.width = texture.width;
 		sprite.height = texture.height;
-		//sprite.eventMode = "static";      // not "none"
-		//sprite.cursor = "pointer";
-		//sprite.tint = color;
-		//sprite.alpha = 0.95;
-
 		sprite.eventMode = "none";
-
-		const texture2: Texture = Assets.get("unit_cav_02");
-		const sprite2 = new Sprite(texture2);
-		sprite2.anchor.set(0.8, 0.3);
-
-		const texture3: Texture = Assets.get("unit_levy_01");
-		const sprite3 = new Sprite(texture3);
-		sprite3.anchor.set(0.2, 0.2);
-
-		sprite.addChild(sprite2);
-		sprite.addChild(sprite3);
-
-		//sprite.eventMode = "static";      // not "none"
-		//sprite.cursor = "pointer";
-		//sprite.tint = color;
-		//sprite.alpha = 0.95;
-
-		sprite.eventMode = "none";
-
 		return sprite;
+	}
+
+	private ensureNetUnit(netId: string, ownerId: string): number
+	{
+		for (const eid of query(this.game.world, [ActorComponent]))
+		{
+			if (ActorComponent.netId[eid] == netId)
+			{
+				return eid;
+			}
+		}
+
+		const entity = addEntity(this.game.world);
+
+		addComponents(this.game.world, entity, ActorComponent, TerrainLocationComponent, RenderableComponent);
+
+		ActorComponent.netId[entity] = netId;
+		ActorComponent.ownerId[entity] = ownerId;
+
+		TerrainLocationComponent.faceId[entity] = 0;
+
+		RenderableComponent.sprite[entity] = "unit_cb_02";
+		RenderableComponent.color[entity] = 0xffce54;
+
+		addComponent(this.game.world, entity, Dirty);
+
+		return entity;
 	}
 
 	private ensureReplicatedActor(actorId: string, ownerId: string): MovementTestUnit
@@ -1142,14 +1040,12 @@ export class GameEngine
 			existing.ownerId = ownerId;
 			existing.color = this.resolveActorColor(ownerId, existing.color);
 			existing.sprite.tint = existing.color;
-			this.refreshActorVisual(existing);
 			return existing;
 		}
 
 		const fallbackColor = this.getMovementUnitColor(this.movementUnits.length);
 		const color = this.resolveActorColor(ownerId, fallbackColor);
 
-		//const sprite = this.createMovementUnitG(color);
 		const sprite = this.createMovementUnitSprite(color, "unit_cb_02");
 
 		const unit: MovementTestUnit = {
@@ -1174,12 +1070,11 @@ export class GameEngine
 		this.actorById.set(actorId, unit);
 
 		this.movementUnits.push(unit);
-		if (this.layers.units)
+		if (this.r.unitsLayer)
 		{
-			this.layers.units.addChild(sprite);
+			this.r.unitsLayer.addChild(sprite);
 		}
 
-		this.refreshActorVisual(unit);
 		return unit;
 	}
 
@@ -1206,6 +1101,16 @@ export class GameEngine
 			unit.sprite.removeFromParent();
 		}
 		unit.sprite?.destroy?.();
+	}
+
+	private syncUnitFromSnapshot(
+		eid: number,
+		snapshot: ActorSnapshot,
+		estimatedServerNow: number,
+		clientReceiveMs: number
+	): void
+	{
+		setComponent(this.game.world, eid, TerrainLocationComponent, {faceId : snapshot.currentFace});		
 	}
 
 	private syncActorFromSnapshot(
@@ -1238,7 +1143,6 @@ export class GameEngine
 				actor.sprite.x = currentFacePoint.x;
 				actor.sprite.y = currentFacePoint.y;
 			}
-			this.refreshActorVisual(actor);
 			return;
 		}
 
@@ -1259,14 +1163,12 @@ export class GameEngine
 				actor.sprite.x = currentFacePoint.x;
 				actor.sprite.y = currentFacePoint.y;
 			}
-			this.refreshActorVisual(actor);
 			return;
 		}
 
 		const predicted = this.evaluateUnitTimeline(actor, estimatedServerNow);
 		if (!predicted)
 		{
-			this.refreshActorVisual(actor);
 			return;
 		}
 
@@ -1304,7 +1206,6 @@ export class GameEngine
 		}
 
 		this.updateUnitPoseFromTimeline(actor, estimatedServerNow, clientReceiveMs);
-		this.refreshActorVisual(actor);
 	}
 
 	private syncAllActorSpritePositionsToFaces(): void
@@ -1318,29 +1219,7 @@ export class GameEngine
 		for (let i = 0; i < this.movementUnits.length; i += 1)
 		{
 			this.updateUnitPoseFromTimeline(this.movementUnits[i], estimatedServerNow, clientNow);
-			this.refreshActorVisual(this.movementUnits[i]);
 		}
-	}
-
-	private refreshAllActorVisuals(): void
-	{
-		for (let i = 0; i < this.movementUnits.length; i += 1)
-		{
-			this.refreshActorVisual(this.movementUnits[i]);
-		}
-	}
-
-	private refreshActorVisual(actor: MovementTestUnit): void
-	{
-		if (!actor.sprite)
-		{
-			return;
-		}
-		const isSelected = this.selectedActorId === actor.actorId;
-		const isHovered = this.hoveredActorId === actor.actorId;
-		const isOwned = actor.ownerId === this.localPlayerId;
-		const scale = isSelected ? .45 : isHovered ? .5 : .45;
-		actor.sprite.scale?.set?.(scale, scale);
 	}
 
 	private resolveActorColor(ownerId: string, fallbackColor: number): number
@@ -1727,23 +1606,23 @@ export class GameEngine
 
 	private ensureMovementPathGraphics(): any
 	{
-		if (!this.layers.units)
+		if (!this.r.unitsLayer)
 		{
 			return null;
 		}
 		if (this.movementPathGraphics)
 		{
-			if (this.movementPathGraphics.parent !== this.layers.units)
+			if (this.movementPathGraphics.parent !== this.r.unitsLayer)
 			{
-				this.layers.units.addChildAt(this.movementPathGraphics, 0);
-			} else if (this.layers.units.children[0] !== this.movementPathGraphics)
+				this.r.unitsLayer.addChildAt(this.movementPathGraphics, 0);
+			} else if (this.r.unitsLayer.children[0] !== this.movementPathGraphics)
 			{
-				this.layers.units.setChildIndex(this.movementPathGraphics, 0);
+				this.r.unitsLayer.setChildIndex(this.movementPathGraphics, 0);
 			}
 			return this.movementPathGraphics;
 		}
 		this.movementPathGraphics = new Graphics();
-		this.layers.units.addChildAt(this.movementPathGraphics, 0);
+		this.r.unitsLayer.addChildAt(this.movementPathGraphics, 0);
 		return this.movementPathGraphics;
 	}
 

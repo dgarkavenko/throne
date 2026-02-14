@@ -27,20 +27,6 @@ const fpsTracker = {
 	frames: 0,
 };
 
-function updateFpsCounter(now: number, setFps: (fps: number | null) => void): void
-{
-	fpsTracker.frames += 1;
-	const elapsed = now - fpsTracker.lastSample;
-	if (elapsed < 500)
-	{
-		return;
-	}
-	const fps = Math.round((fpsTracker.frames * 1000) / elapsed);
-	setFps(fps);
-	fpsTracker.frames = 0;
-	fpsTracker.lastSample = now;
-}
-
 function updateSessionTimer(setSessionElapsed: (elapsedMs: number | null) => void): void
 {
 	if (!state.sessionStart)
