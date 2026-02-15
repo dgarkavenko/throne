@@ -3,12 +3,19 @@ import type { TerrainGenerationDirtyFlags, TerrainGenerationState } from '../../
 import type { TerrainRenderControls } from '../terrain/render-controls';
 import type { TerrainRenderRefinementState } from '../terrain/refinement-cache';
 import { MapSystem } from './map-system';
-import type { ActorSnapshot, PlayerState, TerrainSnapshot, WorldSnapshotMessage } from '../types';
-import { Application, Assets, Container, Graphics, Sprite, Text, TextStyle, Texture } from 'pixi.js';
+import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../types';
+import { Container, Graphics } from 'pixi.js';
 import { TRenderer as TRenderer } from '../../ecs/renderer';
-import { createGame, TGame } from '../../ecs/game';
-import { addComponent, addComponents, addEntity, observe, onSet, query, set, setComponent } from 'bitecs';
-import { ActorComponent, Dirty, RenderableComponent, TerrainLocationComponent, TerrainRouteComponent } from '../../ecs/components';
+import {
+	createClientPipeline,
+	createEcsGame,
+	ensureActorEntity,
+	removeActorEntity,
+	type EcsPipeline,
+	type TGame,
+} from '../../ecs/game';
+import { observe, onSet, setComponent } from 'bitecs';
+import { ActorComponent, RenderableComponent, TerrainLocationComponent } from '../../ecs/components';
 
 type GameConfig = {
 	width: number;
@@ -27,13 +34,6 @@ type NavigationNode = {
 type NavigationGraph = {
 	nodes: Record<number, NavigationNode>;
 	landFaceIds: number[];
-};
-type PolylineState = {
-	points: Vec2[];
-	segmentIndex: number;
-	segmentT: number;
-	position: Vec2;
-	finished: boolean;
 };
 
 type ProvinceInteractionModel = {
@@ -78,25 +78,6 @@ type MovementTestConfig = {
 	spacingTarget: number;
 };
 
-type MovementTestUnit = {
-	actorId: string;
-	ownerId: string;
-	color: number;
-	sprite: Sprite;
-	lastStateSeq: number;
-	routeStartFace: number;
-	routeTargetFace: number | null;
-	routeStartedAtServerMs: number;
-	segmentDurationsMs: number[];
-	segmentPrefixMs: number[];
-	correctionOffset: { startedAtClientMs: number; endsAtClientMs: number; offsetX: number; offsetY: number } | null;
-	currentFace: number;
-	targetFace: number | null;
-	commandId: number;
-	facePath: number[];
-	movement: PolylineState | null;
-};
-
 export class GameEngine
 {
 	private readonly config: GameConfig;
@@ -112,7 +93,7 @@ export class GameEngine
 	private selectedActorId: string | null = null;
 	private hoveredActorId: string | null = null;
 	private lastTerrainVersion = 0;
-	private actorById = new Map<string, MovementTestUnit>();
+	private actorEntityById = new Map<string, number>();
 	private movementTestConfig: MovementTestConfig = {
 		enabled: false,
 		unitCount: 8,
@@ -126,8 +107,6 @@ export class GameEngine
 		spacingTarget: 16,
 	};
 	private navigationGraph: NavigationGraph | null = null;
-	private movementUnits: MovementTestUnit[] = [];
-	private movementPathGraphics: any = null;
 	private serverClockOffsetMs = 0;
 	private hasServerClockOffset = false;
 	private lastWorldSnapshotSeq = -1;
@@ -138,6 +117,7 @@ export class GameEngine
 
 	private r: TRenderer;
 	private game: TGame;
+	private clientPipeline: EcsPipeline;
 
 	constructor(config: GameConfig)
 	{
@@ -145,7 +125,8 @@ export class GameEngine
 		this.mapSystem = new MapSystem({ width: config.width, height: config.height });
 		this.autoGenerateTerrain = config.autoGenerateTerrain !== false;
 		this.r = new TRenderer();
-		this.game = createGame();
+		this.game = createEcsGame();
+		this.clientPipeline = createClientPipeline(this.game);
 	}
 
 	async init(field: HTMLElement | null): Promise<void>
@@ -215,88 +196,14 @@ export class GameEngine
 
 	setMovementTestConfig(nextConfig: Partial<MovementTestConfig>): void
 	{
-		const current = this.movementTestConfig;
-		const safeValue = (value: number, fallback: number): number => (Number.isFinite(value) ? value : fallback);
-		const lowlandThreshold = this.clamp(
-			Math.round(safeValue(nextConfig.lowlandThreshold ?? current.lowlandThreshold, current.lowlandThreshold)),
-			1,
-			31
-		);
-		const impassableThresholdInput = this.clamp(
-			Math.round(
-				safeValue(nextConfig.impassableThreshold ?? current.impassableThreshold, current.impassableThreshold)
-			),
-			2,
-			32
-		);
-		const impassableThreshold = this.clamp(Math.max(lowlandThreshold + 1, impassableThresholdInput), 2, 32);
-		const sanitized: MovementTestConfig = {
-			enabled: typeof nextConfig.enabled === 'boolean' ? nextConfig.enabled : current.enabled,
-			unitCount: this.clamp(Math.round(safeValue(nextConfig.unitCount ?? current.unitCount, current.unitCount)), 0, 128),
-			timePerFaceSeconds: this.clamp(
-				Math.round(
-					safeValue(nextConfig.timePerFaceSeconds ?? current.timePerFaceSeconds, current.timePerFaceSeconds)
-				),
-				1,
-				600
-			),
-			lowlandThreshold,
-			impassableThreshold,
-			elevationPower: this.clamp(
-				safeValue(nextConfig.elevationPower ?? current.elevationPower, current.elevationPower),
-				0.5,
-				2
-			),
-			elevationGainK: this.clamp(
-				safeValue(nextConfig.elevationGainK ?? current.elevationGainK, current.elevationGainK),
-				0,
-				4
-			),
-			riverPenalty: this.clamp(safeValue(nextConfig.riverPenalty ?? current.riverPenalty, current.riverPenalty), 0, 8),
-			showPaths: typeof nextConfig.showPaths === 'boolean' ? nextConfig.showPaths : current.showPaths,
-			spacingTarget: this.clamp(
-				Math.round(safeValue(nextConfig.spacingTarget ?? current.spacingTarget, current.spacingTarget)),
-				16,
-				128
-			),
+		if (typeof nextConfig.showPaths !== 'boolean')
+		{
+			return;
+		}
+		this.movementTestConfig = {
+			...this.movementTestConfig,
+			showPaths: nextConfig.showPaths,
 		};
-
-		const changed =
-			sanitized.enabled !== current.enabled ||
-			sanitized.unitCount !== current.unitCount ||
-			sanitized.timePerFaceSeconds !== current.timePerFaceSeconds ||
-			sanitized.lowlandThreshold !== current.lowlandThreshold ||
-			sanitized.impassableThreshold !== current.impassableThreshold ||
-			sanitized.elevationPower !== current.elevationPower ||
-			sanitized.elevationGainK !== current.elevationGainK ||
-			sanitized.riverPenalty !== current.riverPenalty ||
-			sanitized.showPaths !== current.showPaths ||
-			sanitized.spacingTarget !== current.spacingTarget;
-		if (!changed)
-		{
-			return;
-		}
-
-		const unitPopulationChanged =
-			sanitized.enabled !== current.enabled ||
-			sanitized.unitCount !== current.unitCount;
-		const routeCostChanged =
-			sanitized.lowlandThreshold !== current.lowlandThreshold ||
-			sanitized.impassableThreshold !== current.impassableThreshold ||
-			sanitized.elevationPower !== current.elevationPower ||
-			sanitized.elevationGainK !== current.elevationGainK ||
-			sanitized.riverPenalty !== current.riverPenalty;
-		this.movementTestConfig = sanitized;
-		if (unitPopulationChanged)
-		{
-			this.rebuildMovementNavigationAndUnits();
-			return;
-		}
-		if (routeCostChanged)
-		{
-			this.rebuildMovementNavigationGraph();
-			return;
-		}
 	}
 
 	bindAndStart(onFrame?: (deltaMs: number, now: number) => void): void
@@ -305,6 +212,7 @@ export class GameEngine
 		{
 			this.r.app.ticker.add((ticker: { deltaMS: number }) =>
 			{
+				this.clientPipeline.tick(ticker.deltaMS);
 				this.game.tick(ticker.deltaMS);
 				this.r.sync(this.game);
 
@@ -339,7 +247,7 @@ export class GameEngine
 	setLocalPlayerId(playerId: string | null): void
 	{
 		this.localPlayerId = playerId;
-		if (this.selectedActorId && this.actorById.get(this.selectedActorId)?.ownerId !== this.localPlayerId)
+		if (this.selectedActorId && this.getActorOwner(this.selectedActorId) !== this.localPlayerId)
 		{
 			this.selectedActorId = null;
 		}
@@ -347,7 +255,7 @@ export class GameEngine
 
 	setSelectedActor(actorId: string | null): void
 	{
-		if (actorId && this.actorById.get(actorId)?.ownerId !== this.localPlayerId)
+		if (actorId && this.getActorOwner(actorId) !== this.localPlayerId)
 		{
 			return;
 		}
@@ -398,11 +306,12 @@ export class GameEngine
 		{
 			const actorSnapshot = snapshot.actors[i];
 			liveActorIds.add(actorSnapshot.actorId);
-			const actorEntity = this.ensureNetUnit(actorSnapshot.actorId, actorSnapshot.ownerId);
+			const actorEntity = ensureActorEntity(this.game.world, actorSnapshot.actorId, actorSnapshot.ownerId);
+			this.actorEntityById.set(actorSnapshot.actorId, actorEntity);
 			this.syncUnitFromSnapshot(actorEntity, actorSnapshot, estimatedServerNow, clientReceiveMs);
 		}
 		const staleActorIds: string[] = [];
-		this.actorById.forEach((_, actorId) =>
+		this.actorEntityById.forEach((_, actorId) =>
 		{
 			if (!liveActorIds.has(actorId))
 			{
@@ -413,7 +322,7 @@ export class GameEngine
 		{
 			this.removeReplicatedActor(staleActorIds[i]);
 		}
-		if (this.selectedActorId && !this.actorById.has(this.selectedActorId))
+		if (this.selectedActorId && !this.actorEntityById.has(this.selectedActorId))
 		{
 			this.selectedActorId = null;
 		}
@@ -507,7 +416,7 @@ export class GameEngine
 		if (event.button === 0)
 		{
 			const actorId = this.pickActorAt(position.x, position.y);
-			if (actorId && this.actorById.get(actorId)?.ownerId === this.localPlayerId)
+			if (actorId && this.getActorOwner(actorId) === this.localPlayerId)
 			{
 				this.setSelectedActor(actorId);
 				this.setSelectedProvince(null);
@@ -816,10 +725,10 @@ export class GameEngine
 	{
 		let bestId: string | null = null;
 		let bestDistanceSq = Number.POSITIVE_INFINITY;
-		this.actorById.forEach((actor, actorId) =>
+		this.actorEntityById.forEach((eid, actorId) =>
 		{
-			const dx = worldX - actor.sprite.x;
-			const dy = worldY - actor.sprite.y;
+			const dx = worldX - (RenderableComponent.x[eid] ?? 0);
+			const dy = worldY - (RenderableComponent.y[eid] ?? 0);
 			const distanceSq = dx * dx + dy * dy;
 			if (distanceSq <= 100 && distanceSq < bestDistanceSq)
 			{
@@ -920,73 +829,15 @@ export class GameEngine
 		this.navigationGraph = { nodes, landFaceIds };
 	}
 
-	private getMovementUnitColor(index: number): number
-	{
-		const palette = [0xffce54, 0x48dbfb, 0xff6b6b, 0x1dd1a1, 0xf368e0, 0xfeca57, 0x54a0ff, 0x5f27cd];
-		return palette[index % palette.length];
-	}
-
-	private createMovementUnitSprite(color: number, path: string): Sprite
-	{
-		const texture: Texture = Assets.get(path);
-		const sprite = new Sprite(texture);
-		sprite.anchor.set(0.5);
-		sprite.width = texture.width;
-		sprite.height = texture.height;
-		sprite.eventMode = "none";
-		return sprite;
-	}
-
-	private ensureNetUnit(netId: string, ownerId: string): number
-	{
-		for (const eid of query(this.game.world, [ActorComponent]))
-		{
-			if (ActorComponent.netId[eid] == netId)
-			{
-				return eid;
-			}
-		}
-
-		const entity = addEntity(this.game.world);
-
-		addComponents(this.game.world, entity, ActorComponent, TerrainLocationComponent, RenderableComponent);
-
-		ActorComponent.netId[entity] = netId;
-		ActorComponent.ownerId[entity] = ownerId;
-
-		TerrainLocationComponent.faceId[entity] = 0;
-
-		RenderableComponent.sprite[entity] = "unit_cb_02";
-		RenderableComponent.color[entity] = 0xffce54;
-
-		addComponent(this.game.world, entity, Dirty);
-
-		return entity;
-	}
-
 	private removeReplicatedActor(actorId: string): void
 	{
-		const unit = this.actorById.get(actorId);
-		if (!unit)
+		const eid = this.actorEntityById.get(actorId);
+		if (eid === undefined)
 		{
 			return;
 		}
-		this.actorById.delete(actorId);
-		const nextUnits: MovementTestUnit[] = [];
-		for (let i = 0; i < this.movementUnits.length; i += 1)
-		{
-			const entry = this.movementUnits[i];
-			if (entry.actorId !== actorId)
-			{
-				nextUnits.push(entry);
-			}
-		}
-		this.movementUnits = nextUnits;
-		if (unit.sprite?.removeFromParent)
-		{
-			unit.sprite.removeFromParent();
-		}
-		unit.sprite?.destroy?.();
+		this.actorEntityById.delete(actorId);
+		removeActorEntity(this.game.world, eid);
 	}
 
 	private syncUnitFromSnapshot(
@@ -1039,9 +890,14 @@ export class GameEngine
 		return clientNow + this.serverClockOffsetMs;
 	}
 
-	private clamp(value: number, min: number, max: number): number
+	private getActorOwner(actorId: string): string | null
 	{
-		return Math.max(min, Math.min(max, value));
+		const eid = this.actorEntityById.get(actorId);
+		if (eid === undefined)
+		{
+			return null;
+		}
+		return ActorComponent.ownerId[eid] ?? null;
 	}
 
 	private ensureMeshOverlay(terrainLayer: any): MeshOverlay

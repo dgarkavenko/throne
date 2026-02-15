@@ -1,31 +1,103 @@
-import { createWorld, addEntity, addComponent, addComponents, query, pipe, observe, onAdd, onRemove, World } from 'bitecs'
-import { TerrainLocationComponent, TerrainRouteComponent, ActorComponent, RenderableComponent } from "./components"
+import { addComponent, addComponents, addEntity, createWorld, query, removeEntity, type World } from 'bitecs';
+import type { ActorSnapshot } from '../client/types';
+import { ActorComponent, Dirty, RenderableComponent, TerrainLocationComponent } from './components';
 
-export type TGame = {
-	world: any;
+export type EcsGame = {
+	world: World;
 	tick: (dt: number) => void;
 };
 
-export function createGame(): TGame
-{
-	const world = createWorld();	
+export type TGame = EcsGame;
 
+export type EcsPipeline = {
+	tick: (dt: number) => void;
+};
+
+export function createEcsGame(): EcsGame
+{
+	const world = createWorld();
 	return {
 		world,
-		tick(dt: number)
+		tick(dt: number): void
 		{
 			(world as any).dt = dt;
-			logQuery(world);
 		},
 	};
 }
 
-export const logQuery = (world : World) =>
+export function createGame(): EcsGame
 {
-	const entities = query(world, [ActorComponent, RenderableComponent])
+	return createEcsGame();
+}
 
-	for (const eid of entities)
+export function createClientPipeline(_game: EcsGame): EcsPipeline
+{
+	return {
+		tick(_dt: number): void
+		{
+			// Intentionally empty until client ECS systems are moved here.
+		},
+	};
+}
+
+export function createServerPipeline(_game: EcsGame): EcsPipeline
+{
+	return {
+		tick(_dt: number): void
+		{
+			// Intentionally empty until server ECS systems are moved here.
+		},
+	};
+}
+
+export function findActorEntityById(world: World, actorId: string): number | null
+{
+	for (const eid of query(world, [ActorComponent]))
 	{
-		//console.log(eid + " " + ActorComponent.netId[eid] + " " + RenderableComponent.sprite[eid]);
+		if (ActorComponent.netId[eid] === actorId)
+		{
+			return eid;
+		}
 	}
+	return null;
+}
+
+export function ensureActorEntity(world: World, actorId: string, ownerId: string): number
+{
+	const existing = findActorEntityById(world, actorId);
+	if (existing !== null)
+	{
+		ActorComponent.ownerId[existing] = ownerId;
+		return existing;
+	}
+
+	const entity = addEntity(world);
+	addComponents(world, entity, ActorComponent, TerrainLocationComponent, RenderableComponent);
+	ActorComponent.netId[entity] = actorId;
+	ActorComponent.ownerId[entity] = ownerId;
+	TerrainLocationComponent.faceId[entity] = 0;
+	RenderableComponent.sprite[entity] = 'unit_cb_02';
+	RenderableComponent.color[entity] = 0xffce54;
+	addComponent(world, entity, Dirty);
+	return entity;
+}
+
+export function removeActorEntity(world: World, eid: number): void
+{
+	removeEntity(world, eid);
+}
+
+export function collectActorSnapshots(world: World): ActorSnapshot[]
+{
+	const snapshots: ActorSnapshot[] = [];
+	for (const eid of query(world, [ActorComponent, TerrainLocationComponent]))
+	{
+		snapshots.push({
+			actorId: ActorComponent.netId[eid],
+			ownerId: ActorComponent.ownerId[eid],
+			currentFace: TerrainLocationComponent.faceId[eid],
+		});
+	}
+	snapshots.sort((a, b) => a.actorId.localeCompare(b.actorId));
+	return snapshots;
 }

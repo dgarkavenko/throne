@@ -1,17 +1,22 @@
 import { buildTerrainGeneration } from './terrain/pipeline';
-import type { ActorSnapshot, ClientMessage, TerrainSnapshot, TerrainPublishClientMessage } from './client/types';
+import type { ClientMessage, TerrainSnapshot, TerrainPublishClientMessage } from './client/types';
 import { normalizeRoomConfig, type RoomConfig } from './room-config';
+import {
+  collectActorSnapshots,
+  createEcsGame,
+  createServerPipeline,
+  ensureActorEntity,
+  removeActorEntity,
+  type EcsPipeline,
+  type TGame,
+} from './ecs/game';
+import { query } from 'bitecs';
+import { ActorComponent, TerrainLocationComponent } from './ecs/components';
 
 type PlayerState = {
   id: string;
   emoji: string;
   color: string;
-};
-
-type ServerActorState = {
-  actorId: string;
-  ownerId: string;
-  currentFace: number;
 };
 
 type TerrainRuntimeState = {
@@ -43,8 +48,9 @@ export class RoomDurableObject implements DurableObject {
   private initialized = false;
   private initializePromise: Promise<void> | null = null;
   private terrain: TerrainRuntimeState | null = null;
-  private actorsById = new Map<string, ServerActorState>();
   private snapshotSeq = 0;
+  private readonly game: TGame = createEcsGame();
+  private readonly serverPipeline: EcsPipeline = createServerPipeline(this.game);
 
   private readonly emojis = [
     '??',
@@ -98,6 +104,7 @@ export class RoomDurableObject implements DurableObject {
 
   async alarm(): Promise<void> {
     await this.ensureInitialized();
+    this.serverPipeline.tick(0);
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -252,12 +259,12 @@ export class RoomDurableObject implements DurableObject {
   }
 
   private reseedStartingActors(): void {
+    for (const eid of query(this.game.world, [ActorComponent])) {
+      removeActorEntity(this.game.world, eid);
+    }
     if (!this.terrain) {
-      this.actorsById.clear();
       return;
     }
-
-    const nextActors = new Map<string, ServerActorState>();
     const numActors = 12;
 
     for (let i = 0; i < numActors; i += 1) {
@@ -267,14 +274,9 @@ export class RoomDurableObject implements DurableObject {
       if (spawnFace === null) {
         continue;
       }
-      nextActors.set(actorId, {
-        actorId,
-        ownerId,
-        currentFace: spawnFace,
-      });
+      const eid = ensureActorEntity(this.game.world, actorId, ownerId);
+      TerrainLocationComponent.faceId[eid] = spawnFace;
     }
-
-    this.actorsById = nextActors;
   }
 
   private pickSpawnFace(seedId: string): number | null {
@@ -287,14 +289,6 @@ export class RoomDurableObject implements DurableObject {
     }
     const hash = fnv1aHash32(`${this.terrain.terrainVersion}:${seedId}`);
     return faceIds[hash % faceIds.length] ?? null;
-  }
-
-  private makeActorSnapshot(actor: ServerActorState): ActorSnapshot {
-    return {
-      actorId: actor.actorId,
-      ownerId: actor.ownerId,
-      currentFace: actor.currentFace,
-    };
   }
 
   private sendTerrainSnapshot(socket: WebSocket): void {
@@ -324,9 +318,8 @@ export class RoomDurableObject implements DurableObject {
   }
 
   private sendWorldSnapshot(socket: WebSocket): void {
-    const actors = Array.from(this.actorsById.values())
-      .sort((a, b) => a.actorId.localeCompare(b.actorId))
-      .map((actor) => this.makeActorSnapshot(actor));
+    this.serverPipeline.tick(0);
+    const actors = collectActorSnapshots(this.game.world);
 
     this.sendJson(socket, {
       type: 'world_snapshot',
@@ -338,9 +331,8 @@ export class RoomDurableObject implements DurableObject {
   }
 
   private broadcastWorldSnapshot(): void {
-    const actors = Array.from(this.actorsById.values())
-      .sort((a, b) => a.actorId.localeCompare(b.actorId))
-      .map((actor) => this.makeActorSnapshot(actor));
+    this.serverPipeline.tick(0);
+    const actors = collectActorSnapshots(this.game.world);
 
     this.snapshotSeq += 1;
     this.broadcastJson({
