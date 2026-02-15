@@ -88,7 +88,7 @@ export class TRenderer
 		});
 	}
 
-	sync(game: TGame): void
+	syncView(game: TGame): void
 	{
 		for (const eid of query(game.world, [RenderableComponent]))
 		{

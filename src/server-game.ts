@@ -22,7 +22,6 @@ import { ActorComponent, TerrainLocationComponent } from './ecs/components';
 
 type PlayerState = {
   id: number;
-  emoji: string;
   color: string;
 };
 
@@ -59,21 +58,6 @@ export class RoomDurableObject implements DurableObject {
   private snapshotSeq = 0;
   private readonly game: TGame = createEcsGame();
   private readonly serverPipeline: EcsPipeline = createServerPipeline(this.game);
-
-  private readonly emojis = [
-    '??',
-    '??',
-    '??',
-    '??',
-    '?????',
-    '?????',
-    '??',
-    '?????',
-    '?????',
-    '??',
-    '?????',
-    '?????',
-  ];
 
   private readonly colors = [
     '#f6c1c7',
@@ -148,7 +132,6 @@ export class RoomDurableObject implements DurableObject {
 
     const player: PlayerState = {
       id: this.nextPlayerId,
-      emoji: this.pickEmoji(),
       color: this.pickColor(),
     };
     this.nextPlayerId += 1;
@@ -408,11 +391,6 @@ export class RoomDurableObject implements DurableObject {
     } catch {
       this.connections.delete(socket);
     }
-  }
-
-  private pickEmoji(): string {
-    const emoji = this.emojis[Math.floor(Math.random() * this.emojis.length)];
-    return emoji ?? '??';
   }
 
   private pickColor(): string {

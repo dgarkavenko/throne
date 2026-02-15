@@ -96,7 +96,7 @@ export async function startClientGame(): Promise<void>
 		});
 	});
 
-	clientGame.bindAndStart((deltaMs, now) =>
+	clientGame.bind((deltaMs, now) =>
 	{
 		void deltaMs;
 		updateFpsCounter(now, fpsTracker, layout.setFps);

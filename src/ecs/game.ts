@@ -4,7 +4,6 @@ import { ActorComponent, Dirty, RenderableComponent, TerrainLocationComponent } 
 
 export type EcsGame = {
 	world: World;
-	tick: (dt: number) => void;
 };
 
 export type TGame = EcsGame;
@@ -17,17 +16,8 @@ export function createEcsGame(): EcsGame
 {
 	const world = createWorld();
 	return {
-		world,
-		tick(dt: number): void
-		{
-			(world as any).dt = dt;
-		},
+		world
 	};
-}
-
-export function createGame(): EcsGame
-{
-	return createEcsGame();
 }
 
 export function createClientPipeline(_game: EcsGame): EcsPipeline
