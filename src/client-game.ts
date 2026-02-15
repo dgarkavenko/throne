@@ -1,4 +1,4 @@
-import { GameEngine } from './client/engine/game-engine';
+import { ClientGame } from './client/game/client-game';
 import { connectToRoom } from './client/net/connection';
 import { createPageLayout } from './client/ui/layout';
 import type { PlayerState } from './client/types';
@@ -45,12 +45,11 @@ async function startClientGame(): Promise<void> {
     editorLink.href = roomId ? `/editor?room=${encodeURIComponent(roomId)}` : '/editor';
   }
 
-  const engine = new GameEngine({
+  const engine = new ClientGame({
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
     colliderScale: 0.9,
     uiOffset: { x: 24, y: 24 },
-    autoGenerateTerrain: false,
   });
 
   await engine.init(layout.field);

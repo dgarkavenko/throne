@@ -1,4 +1,4 @@
-import { GameEngine } from './client/engine/game-engine';
+import { EditorGame } from './client/game/editor-game';
 import { connectToRoom } from './client/net/connection';
 import { createPageLayout } from './client/ui/layout';
 import type { PlayerState } from './client/types';
@@ -55,7 +55,7 @@ async function startClientEditor(): Promise<void> {
     const roomId = params.get('room');
     gameLink.href = roomId ? `/game?room=${encodeURIComponent(roomId)}` : '/game';
   }
-  const engine = new GameEngine({
+  const engine = new EditorGame({
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
     colliderScale: 0.9,

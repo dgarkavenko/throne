@@ -1,5 +1,5 @@
 import { editorHtml, gameHtml } from './html';
-import { RoomDurableObject } from './room';
+import { RoomDurableObject } from './server-game';
 
 export { RoomDurableObject };
 
@@ -34,7 +34,6 @@ export default {
 		}
 
 		const isClientAsset =
-			url.pathname === '/client.js' ||
 			url.pathname === '/client-editor.js' ||
 			url.pathname === '/client-game.js' ||
 			url.pathname.startsWith('/client/');
