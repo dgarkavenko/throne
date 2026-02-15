@@ -1,8 +1,6 @@
 import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { buildNavigationGraph, findFacePathAStar } from '../src/client/engine/pathfinding';
 import type { TerrainSnapshot } from '../src/client/types';
-import { buildTerrainGeneration } from '../src/terrain/pipeline';
 import {
   DEFAULT_TERRAIN_GENERATION_CONTROLS,
   type TerrainGenerationControls,
@@ -128,14 +126,6 @@ const DEFAULT_CONTROLS: TerrainGenerationControls = {
 
 const DEFAULT_SNAPSHOT: TerrainSnapshot = {
   controls: DEFAULT_CONTROLS,
-  movement: {
-    timePerFaceSeconds: 180,
-    lowlandThreshold: 10,
-    impassableThreshold: 28,
-    elevationPower: 0.8,
-    elevationGainK: 1,
-    riverPenalty: 0.8,
-  },
   mapWidth: 512,
   mapHeight: 512,
 };
@@ -151,46 +141,12 @@ async function openRoom(roomId: string): Promise<MessageSocket> {
   return new MessageSocket(socket!);
 }
 
-function pickReachableTarget(startFace: number): number | null {
-  const config = { width: DEFAULT_SNAPSHOT.mapWidth, height: DEFAULT_SNAPSHOT.mapHeight };
-  const generation = buildTerrainGeneration({
-    config,
-    controls: DEFAULT_CONTROLS,
-    stopAfter: 'rivers',
-  });
-  if (!generation.mesh || !generation.water || !generation.rivers) {
-    return null;
-  }
-  const graph = buildNavigationGraph(generation.mesh.mesh, generation.water.isLand, generation.rivers.riverEdgeMask, {
-    lowlandThreshold: DEFAULT_SNAPSHOT.movement.lowlandThreshold,
-    impassableThreshold: DEFAULT_SNAPSHOT.movement.impassableThreshold,
-    elevationPower: DEFAULT_SNAPSHOT.movement.elevationPower,
-    elevationGainK: DEFAULT_SNAPSHOT.movement.elevationGainK,
-    riverPenalty: DEFAULT_SNAPSHOT.movement.riverPenalty,
-  });
-  if (!graph.nodes[startFace]) {
-    return null;
-  }
-  for (let i = 0; i < graph.landFaceIds.length; i += 1) {
-    const candidate = graph.landFaceIds[i];
-    if (candidate === startFace) {
-      continue;
-    }
-    const route = findFacePathAStar(graph, startFace, candidate);
-    if (route.facePath.length >= 2) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
 describe.skip('room replication v2 (requires non-isolated DO websocket integration runtime)', () => {
-  it('emits v2 actor snapshot schema after terrain publish', async () => {
+  it('emits spawn-only actor snapshot schema after terrain publish', async () => {
     const roomId = `rep-v2-${Date.now()}-schema`;
     const socket = await openRoom(roomId);
     try {
-      const welcome = await socket.next((message) => message.type === 'welcome');
-      const playerId = String(welcome.id);
+      await socket.next((message) => message.type === 'welcome');
       socket.send({ type: 'join' });
 
       socket.send({
@@ -203,100 +159,30 @@ describe.skip('room replication v2 (requires non-isolated DO websocket integrati
         clientVersion: 1,
       });
 
-      const terrainSnapshot = await socket.next((message) => message.type === 'terrain_snapshot');
-      expect(terrainSnapshot.terrainVersion).toBeTypeOf('number');
-
+      await socket.next((message) => message.type === 'terrain_snapshot');
       const worldSnapshot = await socket.next((message) => message.type === 'world_snapshot');
       expect(worldSnapshot.snapshotSeq).toBeTypeOf('number');
       const actors = worldSnapshot.actors as AnyMessage[];
       expect(Array.isArray(actors)).toBe(true);
-      const selfActor = actors.find((actor) => String(actor.actorId) === playerId);
-      expect(selfActor).toBeTruthy();
-      expect(selfActor?.stateSeq).toBeTypeOf('number');
-      expect(selfActor?.routeStartFace).toBeTypeOf('number');
-      expect(selfActor?.routeTargetFace ?? null).toBe(null);
-      expect(selfActor?.segmentFromFace ?? null).toBe(null);
-      expect(selfActor?.segmentToFace ?? null).toBe(null);
+      expect(actors.length).toBeGreaterThan(0);
+      const actor = actors[0];
+      expect(typeof actor.actorId).toBe('string');
+      expect(typeof actor.ownerId).toBe('string');
+      expect(typeof actor.currentFace).toBe('number');
+      expect(actor.commandId).toBeUndefined();
+      expect(actor.routeTargetFace).toBeUndefined();
+      expect(actor.segmentFromFace).toBeUndefined();
     } finally {
       await socket.close();
     }
   }, 15000);
 
-  it('accepts actor_move and emits authoritative edge-state snapshots', async () => {
-    const roomId = `rep-v2-${Date.now()}-move`;
+  it('keeps actor set stable across snapshots without movement updates', async () => {
+    const roomId = `rep-v2-${Date.now()}-stable`;
     const socket = await openRoom(roomId);
     try {
-      const welcome = await socket.next((message) => message.type === 'welcome');
-      const playerId = String(welcome.id);
-      socket.send({ type: 'join' });
-
-      socket.send({
-        type: 'terrain_publish',
-        terrain: {
-          controls: DEFAULT_SNAPSHOT.controls,
-          mapWidth: DEFAULT_SNAPSHOT.mapWidth,
-          mapHeight: DEFAULT_SNAPSHOT.mapHeight,
-        },
-        clientVersion: 1,
-      });
-      await socket.next((message) => message.type === 'terrain_snapshot');
-      const initialWorld = await socket.next((message) => message.type === 'world_snapshot');
-      const terrainVersion = Number(initialWorld.terrainVersion);
-      const selfActor = (initialWorld.actors as AnyMessage[]).find((actor) => String(actor.actorId) === playerId);
-      expect(selfActor).toBeTruthy();
-      const startFace = Number(selfActor?.currentFace);
-      const targetFace = pickReachableTarget(startFace);
-      expect(targetFace).not.toBeNull();
-
-      socket.send({
-        type: 'actor_move',
-        actorId: playerId,
-        targetFace,
-        commandId: 1,
-        terrainVersion,
-      });
-
-      const actorCommand = await socket.next(
-        (message) => message.type === 'actor_command' && String(message.actorId) === playerId
-      );
-      expect(actorCommand.routeStartedAtServerMs).toBeTypeOf('number');
-
-      const movingSnapshot = await socket.next(
-        (message) =>
-          message.type === 'world_snapshot' &&
-          Array.isArray(message.actors) &&
-          (message.actors as AnyMessage[]).some(
-            (actor) => String(actor.actorId) === playerId && Boolean(actor.moving)
-          )
-      );
-      const movingActor = (movingSnapshot.actors as AnyMessage[]).find((actor) => String(actor.actorId) === playerId);
-      expect(movingActor?.segmentFromFace).toBeTypeOf('number');
-      expect(movingActor?.segmentToFace).toBeTypeOf('number');
-      expect(movingActor?.segmentDurationMs).toBeGreaterThan(0);
-      expect(movingActor?.stateSeq).toBeGreaterThan(0);
-
-      const seqA = Number(movingSnapshot.snapshotSeq);
-      const stateSeqA = Number(movingActor?.stateSeq);
-      const nextSnapshot = await socket.next(
-        (message) =>
-          message.type === 'world_snapshot' &&
-          Number(message.snapshotSeq) > seqA &&
-          Array.isArray(message.actors)
-      );
-      const nextActor = (nextSnapshot.actors as AnyMessage[]).find((actor) => String(actor.actorId) === playerId);
-      expect(Number(nextSnapshot.snapshotSeq)).toBeGreaterThan(seqA);
-      expect(Number(nextActor?.stateSeq)).toBeGreaterThanOrEqual(stateSeqA);
-    } finally {
-      await socket.close();
-    }
-  }, 15000);
-
-  it('accepts agents_publish and rebroadcasts movement config', async () => {
-    const roomId = `rep-v2-${Date.now()}-agents`;
-    const socket = await openRoom(roomId);
-    try {
-      socket.send({ type: 'join' });
       await socket.next((message) => message.type === 'welcome');
+      socket.send({ type: 'join' });
 
       socket.send({
         type: 'terrain_publish',
@@ -307,25 +193,16 @@ describe.skip('room replication v2 (requires non-isolated DO websocket integrati
         },
         clientVersion: 1,
       });
+
       await socket.next((message) => message.type === 'terrain_snapshot');
+      const snapA = await socket.next((message) => message.type === 'world_snapshot');
+      const idsA = ((snapA.actors as AnyMessage[]) || []).map((a) => String(a.actorId)).sort();
 
-      socket.send({
-        type: 'agents_publish',
-        agents: {
-          timePerFaceSeconds: 240,
-          lowlandThreshold: 8,
-          impassableThreshold: 20,
-          elevationPower: 1.1,
-          elevationGainK: 1.3,
-          riverPenalty: 1.2,
-        },
-        clientVersion: 2,
-      });
+      socket.send({ type: 'join' });
+      const snapB = await socket.next((message) => message.type === 'world_snapshot' && Number(message.snapshotSeq) >= Number(snapA.snapshotSeq));
+      const idsB = ((snapB.actors as AnyMessage[]) || []).map((a) => String(a.actorId)).sort();
 
-      const terrainSnapshot = await socket.next((message) => message.type === 'terrain_snapshot');
-      const movement = terrainSnapshot.terrain?.movement as Record<string, number> | undefined;
-      expect(movement?.timePerFaceSeconds).toBe(240);
-      expect(movement?.riverPenalty).toBe(1.2);
+      expect(idsB).toEqual(idsA);
     } finally {
       await socket.close();
     }

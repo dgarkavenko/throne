@@ -7,7 +7,7 @@ describe('room-config normalization', () => {
     expect(normalized).toEqual(DEFAULT_ROOM_CONFIG);
   });
 
-  it('clamps invalid numeric values to safe bounds', () => {
+  it('clamps invalid terrain numeric values to safe bounds', () => {
     const normalized = normalizeRoomConfig({
       version: 99,
       terrain: {
@@ -20,28 +20,17 @@ describe('room-config normalization', () => {
       },
       agents: {
         timePerFaceSeconds: -10,
-        lowlandThreshold: -5,
-        impassableThreshold: 1000,
-        elevationPower: 7,
-        elevationGainK: -3,
-        riverPenalty: 100,
       },
     });
 
-    expect(normalized.version).toBe(1);
+    expect(normalized.version).toBe(2);
     expect(normalized.terrain.controls.spacing).toBe(16);
     expect(normalized.terrain.controls.seed).toBe(0);
     expect(normalized.terrain.mapWidth).toBe(256);
     expect(normalized.terrain.mapHeight).toBe(4096);
-    expect(normalized.agents.timePerFaceSeconds).toBe(1);
-    expect(normalized.agents.lowlandThreshold).toBe(1);
-    expect(normalized.agents.impassableThreshold).toBe(32);
-    expect(normalized.agents.elevationPower).toBe(2);
-    expect(normalized.agents.elevationGainK).toBe(0);
-    expect(normalized.agents.riverPenalty).toBe(8);
   });
 
-  it('normalizes shape regardless of incoming version', () => {
+  it('normalizes shape regardless of incoming version and ignores legacy agents', () => {
     const normalized = normalizeRoomConfig({
       version: 0,
       terrain: {
@@ -53,24 +42,12 @@ describe('room-config normalization', () => {
       },
       agents: {
         timePerFaceSeconds: 200,
-        lowlandThreshold: 9,
-        impassableThreshold: 12,
-        elevationPower: 0.9,
-        elevationGainK: 1.2,
-        riverPenalty: 0.4,
       },
     });
 
-    expect(normalized.version).toBe(1);
+    expect(normalized.version).toBe(2);
     expect(normalized.terrain.controls.spacing).toBe(64);
     expect(normalized.terrain.mapWidth).toBe(1024);
     expect(normalized.terrain.mapHeight).toBe(768);
-    expect(normalized.agents.timePerFaceSeconds).toBe(200);
-    expect(normalized.agents.lowlandThreshold).toBe(9);
-    expect(normalized.agents.impassableThreshold).toBe(12);
-    expect(normalized.agents.elevationPower).toBe(0.9);
-    expect(normalized.agents.elevationGainK).toBe(1.2);
-    expect(normalized.agents.riverPenalty).toBe(0.4);
   });
 });
-

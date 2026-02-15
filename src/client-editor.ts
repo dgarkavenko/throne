@@ -120,14 +120,6 @@ async function startClientEditor(): Promise<void> {
     },
     onTerrainSnapshot: (message) => {
       layout.setTerrainGenerationSettings(message.terrain.controls);
-      layout.setAgentSettings({
-        timePerFaceSeconds: message.terrain.movement.timePerFaceSeconds,
-        lowlandThreshold: message.terrain.movement.lowlandThreshold,
-        impassableThreshold: message.terrain.movement.impassableThreshold,
-        elevationPower: message.terrain.movement.elevationPower,
-        elevationGainK: message.terrain.movement.elevationGainK,
-        riverPenalty: message.terrain.movement.riverPenalty,
-      });
       engine.applyTerrainSnapshot(message.terrain, message.terrainVersion);
       engine.setTerrainRenderControls(layout.getTerrainRenderSettings());
       engine.setMovementTestConfig({
@@ -139,7 +131,7 @@ async function startClientEditor(): Promise<void> {
       engine.applyWorldSnapshot(message);
     }
   });
- 
+
   layout.onPublishTerrain(() => {
     if (!state.playerId || !state.hostId || state.playerId !== state.hostId) {
       return;
@@ -153,6 +145,9 @@ async function startClientEditor(): Promise<void> {
     layout.setTerrainSyncStatus('Publishing...');
   });
 
+  engine.bindAndStart((_deltaMs, now) => {
+    updateFpsCounter(now, layout.setFps);
+  });
 }
 
 void startClientEditor();

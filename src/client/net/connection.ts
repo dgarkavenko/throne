@@ -1,8 +1,4 @@
 import type {
-  ActorCommandMessage,
-  ActorRejectMessage,
-  AgentsConfig,
-  AgentsPublishClientMessage,
   PlayerState,
   ServerMessage,
   TerrainConfig,
@@ -17,15 +13,11 @@ type ConnectionEvents = {
   onWelcome?: (playerId: string) => void;
   onState?: (players: PlayerState[], sessionStart: number | null, hostId: string | null) => void;
   onTerrainSnapshot?: (message: TerrainSnapshotMessage) => void;
-  onActorCommand?: (message: ActorCommandMessage) => void;
   onWorldSnapshot?: (message: WorldSnapshotMessage) => void;
-  onActorReject?: (message: ActorRejectMessage) => void;
 };
 
 type Connection = {
   publishTerrainConfig: (terrain: TerrainConfig, clientVersion?: number) => void;
-  publishAgentsConfig: (agents: AgentsConfig, clientVersion?: number) => void;
-  sendActorMove: (actorId: string, targetFace: number, commandId: number, terrainVersion: number) => void;
 };
 
 export function connectToRoom(events: ConnectionEvents = {}): Connection {
@@ -66,16 +58,9 @@ export function connectToRoom(events: ConnectionEvents = {}): Connection {
       events.onTerrainSnapshot?.(payload);
       return;
     }
-    if (payload.type === 'actor_command') {
-      events.onActorCommand?.(payload);
-      return;
-    }
     if (payload.type === 'world_snapshot') {
       events.onWorldSnapshot?.(payload);
       return;
-    }
-    if (payload.type === 'actor_reject') {
-      events.onActorReject?.(payload);
     }
   });
 
@@ -101,23 +86,6 @@ export function connectToRoom(events: ConnectionEvents = {}): Connection {
         type: 'terrain_publish',
         terrain,
         clientVersion,
-      });
-    },
-    publishAgentsConfig(agents, clientVersion = Date.now()) {
-      const payload: AgentsPublishClientMessage = {
-        type: 'agents_publish',
-        agents,
-        clientVersion,
-      };
-      send(payload);
-    },
-    sendActorMove(actorId, targetFace, commandId, terrainVersion) {
-      send({
-        type: 'actor_move',
-        actorId,
-        targetFace,
-        commandId,
-        terrainVersion,
       });
     },
   };

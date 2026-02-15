@@ -1,14 +1,5 @@
 import type { TerrainGenerationControls } from '../terrain/controls';
 
-export interface AgentsConfig {
-  timePerFaceSeconds: number;
-  lowlandThreshold: number;
-  impassableThreshold: number;
-  elevationPower: number;
-  elevationGainK: number;
-  riverPenalty: number;
-}
-
 export interface TerrainConfig {
   controls: TerrainGenerationControls;
   mapWidth: number;
@@ -23,7 +14,6 @@ export interface PlayerState {
 
 export interface TerrainSnapshot {
   controls: TerrainGenerationControls;
-  movement: AgentsConfig;
   mapWidth: number;
   mapHeight: number;
 }
@@ -31,25 +21,14 @@ export interface TerrainSnapshot {
 export interface ActorSnapshot {
   actorId: string;
   ownerId: string;
-  terrainVersion: number;
-  stateSeq: number;
-  commandId: number;
-  moving: boolean;
   currentFace: number;
-  targetFace: number | null;
-  routeStartFace: number;
-  routeTargetFace: number | null;
-  routeStartedAtServerMs: number;
-  segmentFromFace: number | null;
-  segmentToFace: number | null;
-  segmentDurationMs: number;
-  segmentTQ16: number;
 }
 
 export interface WelcomeMessage {
   type: 'welcome';
   id: string;
 }
+
 export interface StateMessage {
   type: 'state';
   players: PlayerState[];
@@ -65,18 +44,6 @@ export interface TerrainSnapshotMessage {
   serverTime: number;
 }
 
-export interface ActorCommandMessage {
-  type: 'actor_command';
-  actorId: string;
-  ownerId: string;
-  commandId: number;
-  startFace: number;
-  targetFace: number;
-  startedAt: number;
-  routeStartedAtServerMs: number;
-  terrainVersion: number;
-}
-
 export interface WorldSnapshotMessage {
   type: 'world_snapshot';
   terrainVersion: number;
@@ -85,21 +52,11 @@ export interface WorldSnapshotMessage {
   actors: ActorSnapshot[];
 }
 
-export interface ActorRejectMessage {
-  type: 'actor_reject';
-  actorId: string;
-  commandId: number;
-  reason: string;
-  terrainVersion: number;
-}
-
 export type ServerMessage =
   | WelcomeMessage
   | StateMessage
   | TerrainSnapshotMessage
-  | ActorCommandMessage
-  | WorldSnapshotMessage
-  | ActorRejectMessage;
+  | WorldSnapshotMessage;
 
 export interface JoinClientMessage {
   type: 'join';
@@ -111,22 +68,4 @@ export interface TerrainPublishClientMessage {
   clientVersion: number;
 }
 
-export interface AgentsPublishClientMessage {
-  type: 'agents_publish';
-  agents: AgentsConfig;
-  clientVersion: number;
-}
-
-export interface ActorMoveClientMessage {
-  type: 'actor_move';
-  actorId: string;
-  targetFace: number;
-  commandId: number;
-  terrainVersion: number;
-}
-
-export type ClientMessage =
-  | JoinClientMessage
-  | TerrainPublishClientMessage
-  | AgentsPublishClientMessage
-  | ActorMoveClientMessage;
+export type ClientMessage = JoinClientMessage | TerrainPublishClientMessage;

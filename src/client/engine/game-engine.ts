@@ -3,16 +3,7 @@ import type { TerrainGenerationDirtyFlags, TerrainGenerationState } from '../../
 import type { TerrainRenderControls } from '../terrain/render-controls';
 import type { TerrainRenderRefinementState } from '../terrain/refinement-cache';
 import { MapSystem } from './map-system';
-import
-{
-	buildNavigationGraph,
-	createPolylineAdvanceState,
-	facePathToPoints,
-	findFacePathAStar,
-	type NavigationGraph,
-	type PolylineAdvanceState,
-} from './pathfinding';
-import type { ActorCommandMessage, ActorSnapshot, PlayerState, TerrainSnapshot, WorldSnapshotMessage } from '../types';
+import type { ActorSnapshot, PlayerState, TerrainSnapshot, WorldSnapshotMessage } from '../types';
 import { Application, Assets, Container, Graphics, Sprite, Text, TextStyle, Texture } from 'pixi.js';
 import { TRenderer as TRenderer } from '../../ecs/renderer';
 import { createGame, TGame } from '../../ecs/game';
@@ -28,6 +19,22 @@ type GameConfig = {
 };
 
 type Vec2 = { x: number; y: number };
+type NavigationNode = {
+	faceId: number;
+	point: Vec2;
+	neighbors: Array<{ neighborFaceId: number; stepCost: number }>;
+};
+type NavigationGraph = {
+	nodes: Record<number, NavigationNode>;
+	landFaceIds: number[];
+};
+type PolylineState = {
+	points: Vec2[];
+	segmentIndex: number;
+	segmentT: number;
+	position: Vec2;
+	finished: boolean;
+};
 
 type ProvinceInteractionModel = {
 	facePolygons: Vec2[][];
@@ -87,7 +94,7 @@ type MovementTestUnit = {
 	targetFace: number | null;
 	commandId: number;
 	facePath: number[];
-	movement: PolylineAdvanceState | null;
+	movement: PolylineState | null;
 };
 
 export class GameEngine
@@ -106,8 +113,6 @@ export class GameEngine
 	private hoveredActorId: string | null = null;
 	private lastTerrainVersion = 0;
 	private actorById = new Map<string, MovementTestUnit>();
-	private playerColorById = new Map<string, string>();
-	private actorMoveListeners = new Set<(actorId: string, targetFace: number) => void>();
 	private movementTestConfig: MovementTestConfig = {
 		enabled: false,
 		unitCount: 8,
@@ -290,11 +295,8 @@ export class GameEngine
 		if (routeCostChanged)
 		{
 			this.rebuildMovementNavigationGraph();
-			this.replanMovementUnitsToCurrentTargets();
-			this.renderMovementPathDebug();
 			return;
 		}
-		this.renderMovementPathDebug();
 	}
 
 	bindAndStart(onFrame?: (deltaMs: number, now: number) => void): void
@@ -361,24 +363,10 @@ export class GameEngine
 		return this.selectedActorId;
 	}
 
-	bindActorMoveCommandReplication(listener: (actorId: string, targetFace: number) => void): () => void
-	{
-		this.actorMoveListeners.add(listener);
-		return () => this.actorMoveListeners.delete(listener);
-	}
-
 	getTerrainSnapshotForReplication(): TerrainSnapshot
 	{
 		return {
 			controls: this.mapSystem.getGenerationControls(),
-			movement: {
-				timePerFaceSeconds: this.movementTestConfig.timePerFaceSeconds,
-				lowlandThreshold: this.movementTestConfig.lowlandThreshold,
-				impassableThreshold: this.movementTestConfig.impassableThreshold,
-				elevationPower: this.movementTestConfig.elevationPower,
-				elevationGainK: this.movementTestConfig.elevationGainK,
-				riverPenalty: this.movementTestConfig.riverPenalty,
-			},
 			mapWidth: this.config.width,
 			mapHeight: this.config.height,
 		};
@@ -389,42 +377,6 @@ export class GameEngine
 		this.lastTerrainVersion = Math.max(0, Math.round(terrainVersion));
 		this.lastWorldSnapshotSeq = -1;
 		this.setTerrainGenerationControls(snapshot.controls);
-		this.setMovementTestConfig({
-			timePerFaceSeconds: snapshot.movement.timePerFaceSeconds,
-			lowlandThreshold: snapshot.movement.lowlandThreshold,
-			impassableThreshold: snapshot.movement.impassableThreshold,
-			elevationPower: snapshot.movement.elevationPower,
-			elevationGainK: snapshot.movement.elevationGainK,
-			riverPenalty: snapshot.movement.riverPenalty,
-		});
-		this.replanMovementUnitsToCurrentTargets();
-		this.renderMovementPathDebug();
-	}
-
-	applyActorCommand(command: ActorCommandMessage): void
-	{
-		if (!this.terrainState || !this.navigationGraph || command.terrainVersion !== this.lastTerrainVersion)
-		{
-			return;
-		}
-		//const actor = this.ensureReplicatedActor(command.actorId, command.ownerId);
-		// if (command.commandId < actor.commandId)
-		// {
-		// 	return;
-		// }
-		// actor.commandId = command.commandId;
-		// actor.routeStartFace = command.startFace;
-		// actor.routeTargetFace = command.targetFace;
-		// actor.routeStartedAtServerMs = command.routeStartedAtServerMs;
-		// actor.currentFace = command.startFace;
-		// actor.targetFace = command.targetFace;
-		// actor.correctionOffset = null;
-		// this.assignPathFromFaceToTarget(actor, command.startFace, command.targetFace);
-		// const clientNow = Date.now();
-		// const estimatedServerNow = this.getEstimatedServerNow(clientNow);
-		// this.updateUnitPoseFromTimeline(actor, estimatedServerNow, clientNow);
-		// this.refreshActorVisual(actor);
-		// this.renderMovementPathDebug();
 	}
 
 	applyWorldSnapshot(snapshot: WorldSnapshotMessage): void
@@ -445,21 +397,9 @@ export class GameEngine
 		for (let i = 0; i < snapshot.actors.length; i += 1)
 		{
 			const actorSnapshot = snapshot.actors[i];
-			if (actorSnapshot.terrainVersion !== snapshot.terrainVersion)
-			{
-				continue;
-			}
 			liveActorIds.add(actorSnapshot.actorId);
 			const actorEntity = this.ensureNetUnit(actorSnapshot.actorId, actorSnapshot.ownerId);
 			this.syncUnitFromSnapshot(actorEntity, actorSnapshot, estimatedServerNow, clientReceiveMs);
-
-			
-			//const actor = this.ensureReplicatedActor(actorSnapshot.actorId, actorSnapshot.ownerId);
-			// if (actorSnapshot.commandId < actor.commandId || actorSnapshot.stateSeq < actor.lastStateSeq)
-			// {
-			// 	continue;
-			// }
-			//this.syncActorFromSnapshot(actor, actorSnapshot, estimatedServerNow, clientReceiveMs);
 		}
 		const staleActorIds: string[] = [];
 		this.actorById.forEach((_, actorId) =>
@@ -477,7 +417,6 @@ export class GameEngine
 		{
 			this.selectedActorId = null;
 		}
-		this.renderMovementPathDebug();
 	}
 
 	onProvinceSelectionChange(listener: (provinceId: number | null) => void): () => void
@@ -580,18 +519,7 @@ export class GameEngine
 		}
 		if (event.button === 2)
 		{
-			const selectedActorId = this.selectedActorId;
-			const selectedActor = selectedActorId ? this.actorById.get(selectedActorId) : null;
-			if (!selectedActorId || !selectedActor || selectedActor.ownerId !== this.localPlayerId)
-			{
-				return;
-			}
-			const targetFace = this.pickFaceAt(position.x, position.y);
-			if (targetFace === null)
-			{
-				return;
-			}
-			this.actorMoveListeners.forEach((listener) => listener(selectedActorId, targetFace));
+			return;
 		}
 	}
 	private contextMenu = (event: MouseEvent) =>
@@ -960,9 +888,6 @@ export class GameEngine
 	private rebuildMovementNavigationAndUnits(): void
 	{
 		this.rebuildMovementNavigationGraph();
-		this.replanMovementUnitsToCurrentTargets();
-		this.syncAllActorSpritePositionsToFaces();
-		this.renderMovementPathDebug();
 	}
 
 	private rebuildMovementNavigationGraph(): void
@@ -973,19 +898,26 @@ export class GameEngine
 			return;
 		}
 
-		const { mesh, water, rivers } = this.terrainState;
-		this.navigationGraph = buildNavigationGraph(
-			mesh.mesh,
-			water.isLand,
-			rivers.riverEdgeMask,
+		const { mesh, water } = this.terrainState;
+		const nodes: Record<number, NavigationNode> = {};
+		const landFaceIds: number[] = [];
+		for (let i = 0; i < mesh.mesh.faces.length; i += 1)
+		{
+			if (!water.isLand[i])
 			{
-				lowlandThreshold: this.movementTestConfig.lowlandThreshold,
-				impassableThreshold: this.movementTestConfig.impassableThreshold,
-				elevationPower: this.movementTestConfig.elevationPower,
-				elevationGainK: this.movementTestConfig.elevationGainK,
-				riverPenalty: this.movementTestConfig.riverPenalty,
+				continue;
 			}
-		);
+			const face = mesh.mesh.faces[i];
+			nodes[i] = {
+				faceId: i,
+				point: { x: face.point.x, y: face.point.y },
+				neighbors: face.adjacentFaces
+					.filter((neighborFaceId) => water.isLand[neighborFaceId])
+					.map((neighborFaceId) => ({ neighborFaceId, stepCost: 1 })),
+			};
+			landFaceIds.push(i);
+		}
+		this.navigationGraph = { nodes, landFaceIds };
 	}
 
 	private getMovementUnitColor(index: number): number
@@ -1032,52 +964,6 @@ export class GameEngine
 		return entity;
 	}
 
-	private ensureReplicatedActor(actorId: string, ownerId: string): MovementTestUnit
-	{
-		const existing = this.actorById.get(actorId);
-		if (existing)
-		{
-			existing.ownerId = ownerId;
-			existing.color = this.resolveActorColor(ownerId, existing.color);
-			existing.sprite.tint = existing.color;
-			return existing;
-		}
-
-		const fallbackColor = this.getMovementUnitColor(this.movementUnits.length);
-		const color = this.resolveActorColor(ownerId, fallbackColor);
-
-		const sprite = this.createMovementUnitSprite(color, "unit_cb_02");
-
-		const unit: MovementTestUnit = {
-			actorId,
-			ownerId,
-			color,
-			sprite,
-			lastStateSeq: 0,
-			routeStartFace: 0,
-			routeTargetFace: null,
-			routeStartedAtServerMs: 0,
-			segmentDurationsMs: [],
-			segmentPrefixMs: [0],
-			correctionOffset: null,
-			currentFace: 0,
-			targetFace: null,
-			commandId: 0,
-			facePath: [],
-			movement: null,
-		};
-
-		this.actorById.set(actorId, unit);
-
-		this.movementUnits.push(unit);
-		if (this.r.unitsLayer)
-		{
-			this.r.unitsLayer.addChild(sprite);
-		}
-
-		return unit;
-	}
-
 	private removeReplicatedActor(actorId: string): void
 	{
 		const unit = this.actorById.get(actorId);
@@ -1113,448 +999,6 @@ export class GameEngine
 		setComponent(this.game.world, eid, TerrainLocationComponent, {faceId : snapshot.currentFace});		
 	}
 
-	private syncActorFromSnapshot(
-		actor: MovementTestUnit,
-		snapshot: ActorSnapshot,
-		estimatedServerNow: number,
-		clientReceiveMs: number
-	): void
-	{
-		actor.commandId = snapshot.commandId;
-		actor.lastStateSeq = snapshot.stateSeq;
-		actor.ownerId = snapshot.ownerId;
-		actor.color = this.resolveActorColor(snapshot.ownerId, actor.color);
-		actor.sprite.tint = actor.color;
-		actor.currentFace = snapshot.currentFace;
-
-		const currentFacePoint = this.getFacePoint(snapshot.currentFace);
-		if (!snapshot.moving || snapshot.targetFace === null || snapshot.routeTargetFace === null)
-		{
-			actor.routeStartFace = snapshot.currentFace;
-			actor.targetFace = null;
-			actor.routeTargetFace = null;
-			actor.facePath = [snapshot.currentFace];
-			actor.segmentDurationsMs = [];
-			actor.segmentPrefixMs = [0];
-			actor.movement = null;
-			actor.correctionOffset = null;
-			if (currentFacePoint)
-			{
-				actor.sprite.x = currentFacePoint.x;
-				actor.sprite.y = currentFacePoint.y;
-			}
-			return;
-		}
-
-		actor.routeStartFace = snapshot.routeStartFace;
-		actor.routeTargetFace = snapshot.routeTargetFace;
-		actor.routeStartedAtServerMs = snapshot.routeStartedAtServerMs;
-		actor.targetFace = snapshot.targetFace;
-
-		const routeReady = this.assignPathFromFaceToTarget(actor, snapshot.routeStartFace, snapshot.routeTargetFace);
-		if (!routeReady || !actor.movement || actor.facePath.length < 2)
-		{
-			actor.targetFace = null;
-			actor.routeTargetFace = null;
-			actor.movement = null;
-			actor.correctionOffset = null;
-			if (currentFacePoint)
-			{
-				actor.sprite.x = currentFacePoint.x;
-				actor.sprite.y = currentFacePoint.y;
-			}
-			return;
-		}
-
-		const predicted = this.evaluateUnitTimeline(actor, estimatedServerNow);
-		if (!predicted)
-		{
-			return;
-		}
-
-		const segmentIndex = this.findSegmentIndexByFaces(actor.facePath, snapshot.segmentFromFace, snapshot.segmentToFace);
-		const topologyMismatch = segmentIndex < 0;
-		const authoritativeT = this.clamp(snapshot.segmentTQ16 / 65535, 0, 1);
-		const fromPoint = topologyMismatch
-			? predicted.fromPoint
-			: actor.movement.points[segmentIndex];
-		const toPoint = topologyMismatch
-			? predicted.toPoint
-			: actor.movement.points[segmentIndex + 1] ?? predicted.toPoint;
-		const authoritativePos = this.computeLerp(fromPoint, toPoint, authoritativeT);
-		const drift = Math.hypot(authoritativePos.x - predicted.position.x, authoritativePos.y - predicted.position.y);
-
-		if (topologyMismatch || drift > 32)
-		{
-			const safeSegmentIndex = topologyMismatch ? predicted.segmentIndex : segmentIndex;
-			const segmentDuration = actor.segmentDurationsMs[safeSegmentIndex] ?? 0;
-			const elapsedToAuthoritativePoint =
-				(actor.segmentPrefixMs[safeSegmentIndex] ?? 0) + segmentDuration * authoritativeT;
-			actor.routeStartedAtServerMs = estimatedServerNow - elapsedToAuthoritativePoint;
-			actor.correctionOffset = null;
-		} else if (drift > 6)
-		{
-			actor.correctionOffset = {
-				startedAtClientMs: clientReceiveMs,
-				endsAtClientMs: clientReceiveMs + 150,
-				offsetX: authoritativePos.x - predicted.position.x,
-				offsetY: authoritativePos.y - predicted.position.y,
-			};
-		} else
-		{
-			actor.correctionOffset = null;
-		}
-
-		this.updateUnitPoseFromTimeline(actor, estimatedServerNow, clientReceiveMs);
-	}
-
-	private syncAllActorSpritePositionsToFaces(): void
-	{
-		if (!this.navigationGraph)
-		{
-			return;
-		}
-		const clientNow = Date.now();
-		const estimatedServerNow = this.getEstimatedServerNow(clientNow);
-		for (let i = 0; i < this.movementUnits.length; i += 1)
-		{
-			this.updateUnitPoseFromTimeline(this.movementUnits[i], estimatedServerNow, clientNow);
-		}
-	}
-
-	private resolveActorColor(ownerId: string, fallbackColor: number): number
-	{
-		const cssColor = this.playerColorById.get(ownerId);
-		if (!cssColor)
-		{
-			return fallbackColor;
-		}
-		const normalized = cssColor.trim();
-		const match6 = /^#([0-9a-f]{6})$/i.exec(normalized);
-		if (match6)
-		{
-			return Number.parseInt(match6[1], 16);
-		}
-		const match3 = /^#([0-9a-f]{3})$/i.exec(normalized);
-		if (match3)
-		{
-			const expanded = `${match3[1][0]}${match3[1][0]}${match3[1][1]}${match3[1][1]}${match3[1][2]}${match3[1][2]}`;
-			return Number.parseInt(expanded, 16);
-		}
-		return fallbackColor;
-	}
-
-	private assignPathToTargetFace(unit: MovementTestUnit, targetFace: number, _fromCurrentPosition: boolean): boolean
-	{
-		const startFace = this.resolveUnitPathStartFace(unit);
-		if (startFace === null)
-		{
-			return false;
-		}
-		return this.assignPathFromFaceToTarget(unit, startFace, targetFace);
-	}
-
-	private assignPathFromFaceToTarget(unit: MovementTestUnit, startFace: number, targetFace: number): boolean
-	{
-		if (!this.terrainState || !this.navigationGraph || !this.navigationGraph.nodes[startFace] || !this.navigationGraph.nodes[targetFace])
-		{
-			return false;
-		}
-
-		if (startFace === targetFace)
-		{
-			unit.routeStartFace = startFace;
-			unit.routeTargetFace = null;
-			unit.currentFace = startFace;
-			unit.targetFace = null;
-			unit.facePath = [startFace];
-			unit.segmentDurationsMs = [];
-			unit.segmentPrefixMs = [0];
-			unit.movement = createPolylineAdvanceState([{ ...this.navigationGraph.nodes[startFace].point }], 0);
-			return true;
-		}
-
-		const result = findFacePathAStar(this.navigationGraph, startFace, targetFace);
-		if (!Number.isFinite(result.totalCost) || result.facePath.length < 2)
-		{
-			return false;
-		}
-
-		const pathPoints = facePathToPoints(this.terrainState.mesh.mesh, result.facePath);
-		const segmentDurationsMs = this.buildPathSegmentDurationsMs(result.facePath);
-		if (pathPoints.length < 2 || segmentDurationsMs.length !== pathPoints.length - 1)
-		{
-			return false;
-		}
-
-		unit.currentFace = startFace;
-		unit.routeStartFace = startFace;
-		unit.routeTargetFace = targetFace;
-		unit.targetFace = targetFace;
-		unit.facePath = result.facePath;
-		unit.segmentDurationsMs = segmentDurationsMs;
-		unit.segmentPrefixMs = this.buildSegmentPrefixMs(segmentDurationsMs);
-		unit.movement = createPolylineAdvanceState(pathPoints, 0);
-		unit.movement.segmentIndex = 0;
-		unit.movement.segmentT = 0;
-		unit.movement.position = { ...pathPoints[0] };
-		unit.movement.finished = false;
-		return true;
-	}
-
-	private resolveUnitPathStartFace(unit: MovementTestUnit): number | null
-	{
-		if (!this.navigationGraph)
-		{
-			return null;
-		}
-		if (this.navigationGraph.nodes[unit.currentFace])
-		{
-			return unit.currentFace;
-		}
-		if (unit.facePath.length > 0)
-		{
-			for (let i = unit.facePath.length - 1; i >= 0; i -= 1)
-			{
-				const candidate = unit.facePath[i];
-				if (this.navigationGraph.nodes[candidate])
-				{
-					return candidate;
-				}
-			}
-		}
-		return null;
-	}
-
-	private replanMovementUnitsToCurrentTargets(): void
-	{
-		if (!this.navigationGraph || !this.terrainState)
-		{
-			return;
-		}
-		for (let i = 0; i < this.movementUnits.length; i += 1)
-		{
-			const unit = this.movementUnits[i];
-			const targetFace = unit.routeTargetFace ?? unit.targetFace;
-			if (targetFace === null)
-			{
-				continue;
-			}
-			const replanned = this.assignPathFromFaceToTarget(unit, unit.currentFace, targetFace);
-			if (!replanned)
-			{
-				unit.targetFace = null;
-				unit.routeTargetFace = null;
-				unit.facePath = [unit.currentFace];
-				unit.segmentDurationsMs = [];
-				unit.segmentPrefixMs = [0];
-				unit.movement = null;
-			} else
-			{
-				unit.routeStartedAtServerMs = this.getEstimatedServerNow(Date.now());
-			}
-		}
-	}
-
-	private simulation(inDeltaMs: number): void
-	{
-		const clientNow = Date.now();
-		const estimatedServerNow = this.getEstimatedServerNow(clientNow);
-		for (let i = 0; i < this.movementUnits.length; i += 1)
-		{
-			this.updateUnitPoseFromTimeline(this.movementUnits[i], estimatedServerNow, clientNow);
-		}
-	}
-
-	private render(inDeltaMs: number): void
-	{
-		this.renderMovementPathDebug();
-	}
-
-	private updateUnitPoseFromTimeline(unit: MovementTestUnit, estimatedServerNow: number, clientNow: number): void
-	{
-		if (!unit.movement || unit.facePath.length < 2 || unit.segmentDurationsMs.length === 0 || unit.routeTargetFace === null)
-		{
-			const point = this.getFacePoint(unit.currentFace);
-			if (point)
-			{
-				unit.sprite.x = point.x;
-				unit.sprite.y = point.y;
-			}
-			return;
-		}
-		const state = this.evaluateUnitTimeline(unit, estimatedServerNow);
-		if (!state)
-		{
-			return;
-		}
-		unit.movement.segmentIndex = state.segmentIndex;
-		unit.movement.segmentT = state.segmentT;
-		unit.movement.finished = state.finished;
-		const corrected = this.applyUnitCorrection(unit, state.position, clientNow);
-		unit.movement.position = corrected;
-		unit.sprite.x = corrected.x;
-		unit.sprite.y = corrected.y;
-		if (state.finished)
-		{
-			const finalFace = unit.facePath[unit.facePath.length - 1];
-			if (Number.isFinite(finalFace))
-			{
-				unit.currentFace = finalFace;
-			}
-			unit.targetFace = null;
-			unit.routeTargetFace = null;
-		} else
-		{
-			const fromFace = unit.facePath[state.segmentIndex];
-			const toFace = unit.facePath[state.segmentIndex + 1];
-			unit.currentFace = state.segmentT >= 0.5 ? toFace : fromFace;
-		}
-	}
-
-	private evaluateUnitTimeline(
-		unit: MovementTestUnit,
-		estimatedServerNow: number
-	): { position: Vec2; fromPoint: Vec2; toPoint: Vec2; segmentIndex: number; segmentT: number; finished: boolean } | null
-	{
-		if (!unit.movement || unit.movement.points.length < 2 || unit.segmentDurationsMs.length === 0)
-		{
-			return null;
-		}
-		const totalMs = unit.segmentPrefixMs[unit.segmentPrefixMs.length - 1] ?? 0;
-		if (totalMs <= 0)
-		{
-			const lastPoint = unit.movement.points[unit.movement.points.length - 1];
-			return {
-				position: { ...lastPoint },
-				fromPoint: { ...lastPoint },
-				toPoint: { ...lastPoint },
-				segmentIndex: Math.max(0, unit.movement.points.length - 2),
-				segmentT: 1,
-				finished: true,
-			};
-		}
-		const elapsedMs = this.clamp(estimatedServerNow - unit.routeStartedAtServerMs, 0, totalMs);
-		const segmentIndex = this.findSegmentIndexByElapsed(unit.segmentPrefixMs, elapsedMs);
-		const segmentDurationMs = unit.segmentDurationsMs[segmentIndex] ?? 0;
-		const segmentStartMs = unit.segmentPrefixMs[segmentIndex] ?? 0;
-		const segmentT =
-			segmentDurationMs <= 1e-6 ? 1 : this.clamp((elapsedMs - segmentStartMs) / segmentDurationMs, 0, 1);
-		const fromPoint = unit.movement.points[segmentIndex];
-		const toPoint = unit.movement.points[segmentIndex + 1] ?? fromPoint;
-		return {
-			position: this.computeLerp(fromPoint, toPoint, segmentT),
-			fromPoint: { ...fromPoint },
-			toPoint: { ...toPoint },
-			segmentIndex,
-			segmentT,
-			finished: elapsedMs >= totalMs - 0.001,
-		};
-	}
-
-	private applyUnitCorrection(unit: MovementTestUnit, basePosition: Vec2, clientNow: number): Vec2
-	{
-		const correction = unit.correctionOffset;
-		if (!correction)
-		{
-			return basePosition;
-		}
-		if (clientNow >= correction.endsAtClientMs)
-		{
-			unit.correctionOffset = null;
-			return basePosition;
-		}
-		const durationMs = Math.max(1, correction.endsAtClientMs - correction.startedAtClientMs);
-		const progress = this.clamp((clientNow - correction.startedAtClientMs) / durationMs, 0, 1);
-		const remaining = 1 - progress;
-		return {
-			x: basePosition.x + correction.offsetX * remaining,
-			y: basePosition.y + correction.offsetY * remaining,
-		};
-	}
-
-	private buildPathSegmentDurationsMs(facePath: number[]): number[]
-	{
-		if (!this.navigationGraph || facePath.length < 2)
-		{
-			return [];
-		}
-		const durations: number[] = [];
-		for (let i = 0; i < facePath.length - 1; i += 1)
-		{
-			const fromFaceId = facePath[i];
-			const toFaceId = facePath[i + 1];
-			const fromNode = this.navigationGraph.nodes[fromFaceId];
-			if (!fromNode)
-			{
-				return [];
-			}
-			const neighbor = fromNode.neighbors.find((entry) => entry.neighborFaceId === toFaceId);
-			if (!neighbor || !Number.isFinite(neighbor.stepCost) || neighbor.stepCost <= 0)
-			{
-				return [];
-			}
-			durations.push(this.movementTestConfig.timePerFaceSeconds * neighbor.stepCost * 1000);
-		}
-		return durations;
-	}
-
-	private buildSegmentPrefixMs(segmentDurationsMs: number[]): number[]
-	{
-		const prefix = new Array<number>(segmentDurationsMs.length + 1);
-		prefix[0] = 0;
-		for (let i = 0; i < segmentDurationsMs.length; i += 1)
-		{
-			prefix[i + 1] = prefix[i] + Math.max(0, segmentDurationsMs[i]);
-		}
-		return prefix;
-	}
-
-	private findSegmentIndexByElapsed(prefix: number[], elapsedMs: number): number
-	{
-		if (prefix.length <= 1)
-		{
-			return 0;
-		}
-		const clamped = this.clamp(elapsedMs, 0, prefix[prefix.length - 1]);
-		let low = 0;
-		let high = prefix.length - 2;
-		while (low <= high)
-		{
-			const mid = Math.floor((low + high) / 2);
-			const start = prefix[mid];
-			const end = prefix[mid + 1];
-			if (clamped < start)
-			{
-				high = mid - 1;
-				continue;
-			}
-			if (clamped > end)
-			{
-				low = mid + 1;
-				continue;
-			}
-			return mid;
-		}
-		return Math.max(0, Math.min(prefix.length - 2, low));
-	}
-
-	private findSegmentIndexByFaces(facePath: number[], fromFace: number | null, toFace: number | null): number
-	{
-		if (!Number.isFinite(fromFace) || !Number.isFinite(toFace))
-		{
-			return -1;
-		}
-		for (let i = 0; i < facePath.length - 1; i += 1)
-		{
-			if (facePath[i] === fromFace && facePath[i + 1] === toFace)
-			{
-				return i;
-			}
-		}
-		return -1;
-	}
-
 	private getFacePoint(faceId: number): Vec2 | null
 	{
 		if (!this.navigationGraph)
@@ -1567,15 +1011,6 @@ export class GameEngine
 			return null;
 		}
 		return { x: node.point.x, y: node.point.y };
-	}
-
-	private computeLerp(a: Vec2, b: Vec2, t: number): Vec2
-	{
-		const clampedT = this.clamp(t, 0, 1);
-		return {
-			x: a.x + (b.x - a.x) * clampedT,
-			y: a.y + (b.y - a.y) * clampedT,
-		};
 	}
 
 	private updateServerClockOffset(serverTimeMs: number, clientReceiveMs: number): void
@@ -1602,71 +1037,6 @@ export class GameEngine
 			return clientNow;
 		}
 		return clientNow + this.serverClockOffsetMs;
-	}
-
-	private ensureMovementPathGraphics(): any
-	{
-		if (!this.r.unitsLayer)
-		{
-			return null;
-		}
-		if (this.movementPathGraphics)
-		{
-			if (this.movementPathGraphics.parent !== this.r.unitsLayer)
-			{
-				this.r.unitsLayer.addChildAt(this.movementPathGraphics, 0);
-			} else if (this.r.unitsLayer.children[0] !== this.movementPathGraphics)
-			{
-				this.r.unitsLayer.setChildIndex(this.movementPathGraphics, 0);
-			}
-			return this.movementPathGraphics;
-		}
-		this.movementPathGraphics = new Graphics();
-		this.r.unitsLayer.addChildAt(this.movementPathGraphics, 0);
-		return this.movementPathGraphics;
-	}
-
-	private renderMovementPathDebug(): void
-	{
-		const graphics = this.ensureMovementPathGraphics();
-		if (!graphics)
-		{
-			return;
-		}
-		graphics.clear();
-		if (!this.movementTestConfig.showPaths)
-		{
-			return;
-		}
-
-		for (let i = 0; i < this.movementUnits.length; i += 1)
-		{
-			const unit = this.movementUnits[i];
-			const movement = unit.movement;
-			if (!movement || movement.points.length < 2)
-			{
-				continue;
-			}
-			const startX = unit.sprite?.x ?? movement.position.x;
-			const startY = unit.sprite?.y ?? movement.position.y;
-			graphics.moveTo(startX, startY);
-
-			const firstPointIndex = Math.min(movement.points.length - 1, Math.max(1, movement.segmentIndex + 1));
-			for (let p = firstPointIndex; p < movement.points.length; p += 1)
-			{
-				const point = movement.points[p];
-				graphics.lineTo(point.x, point.y);
-			}
-			graphics.stroke({ width: 1.8, color: unit.color, alpha: 0.7 });
-
-			const targetPoint = movement.points[movement.points.length - 1];
-			const markerSize = 5;
-			graphics.moveTo(targetPoint.x - markerSize, targetPoint.y - markerSize);
-			graphics.lineTo(targetPoint.x + markerSize, targetPoint.y + markerSize);
-			graphics.moveTo(targetPoint.x - markerSize, targetPoint.y + markerSize);
-			graphics.lineTo(targetPoint.x + markerSize, targetPoint.y - markerSize);
-			graphics.stroke({ width: 1.8, color: unit.color, alpha: 0.95 });
-		}
 	}
 
 	private clamp(value: number, min: number, max: number): number
