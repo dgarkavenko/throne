@@ -1,5 +1,5 @@
 import { addComponent, addComponents, addEntity, createWorld, query, removeEntity, type World } from 'bitecs';
-import type { ActorSnapshot } from '../client/types';
+import type { ActorSnapshot } from '../shared/protocol';
 import { ActorComponent, Dirty, RenderableComponent, TerrainLocationComponent } from './components';
 
 export type EcsGame = {

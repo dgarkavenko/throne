@@ -1,3 +1,8 @@
+/**
+ * Terrain generation pipeline orchestrator.
+ * Stage branches are strictly ordered and downstream-invalidating:
+ * mesh -> water -> elevation -> rivers -> provinces.
+ */
 import {
   fingerprintTerrainGenerationControls,
   type TerrainGenerationControls,

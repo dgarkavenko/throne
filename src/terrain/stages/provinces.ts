@@ -1,5 +1,5 @@
-import { createStepRng, STEP_SEEDS, type TerrainMeshState, type TerrainWaterState } from '../../client/engine/terrain';
-import { basegenPolitical } from '../../client/engine/political';
+import { createStepRng, STEP_SEEDS, type TerrainMeshState, type TerrainWaterState } from '../core/terrain-core';
+import { basegenPolitical } from '../core/political-core';
 import { toLegacyTerrainControls, type TerrainGenerationControls } from '../controls';
 import type { TerrainRiverTopologyState } from '../types';
 

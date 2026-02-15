@@ -1,4 +1,4 @@
-import { buildRiverTraces, createStepRng, STEP_SEEDS, type TerrainMeshState, type TerrainWaterState } from '../../client/engine/terrain';
+import { buildRiverTraces, createStepRng, STEP_SEEDS, type TerrainMeshState, type TerrainWaterState } from '../core/terrain-core';
 import { toLegacyTerrainControls, type TerrainGenerationControls } from '../controls';
 
 export function runRiversStage(
@@ -16,4 +16,3 @@ export function runRiversStage(
     water.oceanWater
   );
 }
-

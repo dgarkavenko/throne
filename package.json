@@ -3,7 +3,8 @@
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
-		"build:client": "tsc -p tsconfig.client.json",
+		"clean:client": "node -e \"const fs=require('node:fs');['public/client','public/ecs','public/terrain','public/vendor','public/client-editor.js','public/client-game.js','public/client.js'].forEach((p)=>fs.rmSync(p,{recursive:true,force:true}));\"",
+		"build:client": "npm run clean:client && tsc -p tsconfig.client.json",
 		"dev:client": "tsc -p tsconfig.client.json --watch",
 		"predev": "npm run build:client",
 		"predev:standalone": "npm run build:client",
@@ -14,6 +15,7 @@
 		"dev:standalone": "wrangler dev --local",
 		"start": "wrangler dev",
 		"test": "vitest",
+		"check:boundaries": "node scripts/check-terrain-boundaries.mjs",
 		"cf-typegen": "wrangler types"
 	},
 	"devDependencies": {

@@ -4,7 +4,7 @@ import type {
   TerrainConfig,
   TerrainSnapshotMessage,
   WorldSnapshotMessage,
-} from '../types';
+} from '../../shared/protocol';
 
 type ConnectionEvents = {
   onStatus?: (message: string) => void;

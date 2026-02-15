@@ -1,4 +1,4 @@
-import { createRng, createStepRng, STEP_SEEDS, terrainRefine } from '../engine/terrain';
+import { createRng, createStepRng, STEP_SEEDS, terrainRefine } from '../../terrain/core/terrain-core';
 import type { TerrainGenerationState } from '../../terrain/types';
 import { toLegacyTerrainControls, type TerrainGenerationControls } from '../../terrain/controls';
 import {

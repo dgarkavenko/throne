@@ -1,4 +1,4 @@
-import type { TerrainControls as LegacyTerrainControls } from '../client/engine/terrain';
+import type { TerrainControls as LegacyTerrainControls } from './core/terrain-core';
 
 export type TerrainGenerationControls = {
   spacing: number;

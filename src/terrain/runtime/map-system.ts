@@ -1,16 +1,16 @@
-import { buildTerrainGeneration, computeGenerationDirty } from '../../terrain/pipeline';
+import { buildTerrainGeneration, computeGenerationDirty } from '../pipeline';
 import type {
   TerrainGenerationCache,
   TerrainGenerationConfig,
   TerrainGenerationDirtyFlags,
   TerrainGenerationState,
-} from '../../terrain/types';
+} from '../types';
 import {
   DEFAULT_TERRAIN_GENERATION_CONTROLS,
   normalizeTerrainGenerationControls,
   type TerrainGenerationControls,
-} from '../../terrain/controls';
-import { toTerrainGenerationState } from '../../terrain/pipeline';
+} from '../controls';
+import { toTerrainGenerationState } from '../pipeline';
 
 export class MapSystem {
   private generationControls: TerrainGenerationControls = { ...DEFAULT_TERRAIN_GENERATION_CONTROLS };

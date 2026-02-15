@@ -3,8 +3,8 @@ import type {
   TerrainMeshState,
   TerrainMountainState,
   TerrainWaterState,
-} from '../client/engine/terrain';
-import type { ProvinceGraph } from '../client/engine/political';
+} from './core/terrain-core';
+import type { ProvinceGraph } from './core/political-core';
 import type { TerrainGenerationControls } from './controls';
 
 export type TerrainGenerationConfig = {

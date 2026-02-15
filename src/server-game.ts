@@ -1,5 +1,12 @@
+/**
+ * Room Durable Object runtime.
+ * Branches managed here:
+ * - player session lifecycle (connect/disconnect/host reassignment)
+ * - message routing (`join`, `terrain_publish`)
+ * - terrain versioning and snapshot broadcast (`terrain_snapshot`, `world_snapshot`)
+ */
 import { buildTerrainGeneration } from './terrain/pipeline';
-import type { ClientMessage, TerrainSnapshot, TerrainPublishClientMessage } from './client/types';
+import type { ClientMessage, TerrainSnapshot, TerrainPublishClientMessage } from './shared/protocol';
 import { normalizeRoomConfig, type RoomConfig } from './room-config';
 import {
   collectActorSnapshots,

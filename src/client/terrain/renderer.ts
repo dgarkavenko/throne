@@ -1,5 +1,5 @@
 import { Container, Graphics } from 'pixi.js';
-import { renderTerrain, updateProvinceBorders } from '../engine/terrain';
+import { renderTerrain, updateProvinceBorders } from '../../terrain/core/terrain-core';
 import { toLegacyTerrainControls, type TerrainGenerationControls } from '../../terrain/controls';
 import type { TerrainGenerationState } from '../../terrain/types';
 import {

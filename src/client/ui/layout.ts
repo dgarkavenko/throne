@@ -1,3 +1,10 @@
+/**
+ * Browser layout adapter for game/editor controls.
+ * Control-scope branches:
+ * - settings visibility by session identity
+ * - debug-only mode hides authoritative control groups
+ * - host-only publish and terrain control enablement
+ */
 import type { TerrainGenerationControls } from '../../terrain/controls';
 import type { TerrainRenderControls } from '../terrain/render-controls';
 

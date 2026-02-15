@@ -9,6 +9,6 @@
 		"lib": ["dom", "dom.iterable", "es2020"],
 		"types": []
 	},
-	"include": ["src/client.ts", "src/client-editor.ts", "src/client-game.ts"],
+	"include": ["src/client-editor.ts", "src/client-game.ts"],
 	"exclude": ["test"]
 }

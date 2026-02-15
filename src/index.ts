@@ -1,3 +1,11 @@
+/**
+ * Worker HTTP router.
+ * Route branches:
+ * - `/` redirect to `/game`
+ * - `/game` and `/editor` HTML shells
+ * - `/room/:id` WebSocket forwarding to Room Durable Object
+ * - static JS/module asset proxy for compiled client artifacts
+ */
 import { editorHtml, gameHtml } from './html';
 import { RoomDurableObject } from './server-game';
 

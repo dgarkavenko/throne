@@ -1,4 +1,4 @@
-import { basegenPolitical } from './political';
+import { basegenPolitical } from './political-core';
 import {
 	clamp,
 	lerp,
@@ -11,7 +11,7 @@ import {
 	vec2Normalize,
 	vec2Sub,
 	type Vec2,
-} from './throne-math';
+} from './math';
 import { Graphics, Container } from "pixi.js";
 
 export type TerrainControls = {

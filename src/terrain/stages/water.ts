@@ -1,4 +1,4 @@
-import { createStepRng, generateWater, STEP_SEEDS, type TerrainMeshState } from '../../client/engine/terrain';
+import { createStepRng, generateWater, STEP_SEEDS, type TerrainMeshState } from '../core/terrain-core';
 import { toLegacyTerrainControls, type TerrainGenerationControls } from '../controls';
 import type { TerrainGenerationConfig } from '../types';
 

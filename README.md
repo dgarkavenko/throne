@@ -3,10 +3,17 @@
 Multiplayer strategy prototype on Cloudflare Workers + Durable Objects.
 
 ## Architecture
-- Server runtime: `src/index.ts`, `src/room.ts`
-- Client runtime: `src/client-editor.ts`, `src/client-game.ts`, `src/client/*`
+- Server runtime: `src/index.ts`, `src/server-game.ts`
+- Browser entry shims: `src/client-editor.ts`, `src/client-game.ts`
+- Browser entries: `src/client/entries/*`
+- Browser runtime modes: `src/client/runtime/*`
 - Rendering: PixiJS (client-only)
-- Terrain generation pipeline: `src/terrain/*`
+- Terrain domain: `src/terrain/*` (core, runtime, navigation, stages)
+- Shared protocol types: `src/shared/protocol.ts`
+
+Detailed architecture maps:
+- `docs/architecture/runtime-map.md`
+- `docs/architecture/module-boundaries.md`
 
 ## Route Model
 - `/game`: runtime gameplay surface (authoritative snapshots, actor commands)

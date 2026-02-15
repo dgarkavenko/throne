@@ -8,7 +8,7 @@ import {
 	findFacePathAStar,
 	type NavigationGraph,
 	type NavigationMesh,
-} from '../src/client/engine/pathfinding';
+} from '../src/terrain/navigation/pathfinding';
 
 function makeMesh(
 	points: Array<{ x: number; y: number }>,

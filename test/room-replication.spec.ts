@@ -1,6 +1,6 @@
 import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import type { TerrainSnapshot } from '../src/client/types';
+import type { TerrainSnapshot } from '../src/shared/protocol';
 import {
   DEFAULT_TERRAIN_GENERATION_CONTROLS,
   type TerrainGenerationControls,

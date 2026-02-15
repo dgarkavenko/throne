@@ -1,4 +1,4 @@
-import { clamp, vec2Len, vec2LenSq, vec2Sub, type Vec2 } from './throne-math';
+import { clamp, vec2Len, vec2LenSq, vec2Sub, type Vec2 } from './math';
 
 type MeshFace = {
 	index: number;

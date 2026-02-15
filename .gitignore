@@ -166,9 +166,11 @@ dist
 !.env.example
 .wrangler/
 
-# Client build output
-public/client.js
+# Client build output (generated)
+public/**/*.js
 public/client/
-public/ecs
-public/client-editor.js
-public/terrain
+public/ecs/
+public/terrain/
+public/vendor/
+!public/assets/
+!public/assets/**
