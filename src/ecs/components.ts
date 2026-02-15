@@ -1,6 +1,6 @@
 export const ActorComponent = {
-	netId: [] as string[],
-	ownerId: [] as string[]
+	netId: [] as number[],
+	ownerId: [] as number[]
 }
 
 export const TerrainLocationComponent = {

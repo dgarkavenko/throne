@@ -1,6 +1,6 @@
 {
 	"name": "throne",
-	"version": "0.0.0",
+	"version": "0.0.1",
 	"private": true,
 	"scripts": {
 		"clean:client": "node -e \"const fs=require('node:fs');['public/client','public/ecs','public/terrain','public/vendor','public/client-editor.js','public/client-game.js','public/client.js'].forEach((p)=>fs.rmSync(p,{recursive:true,force:true}));\"",

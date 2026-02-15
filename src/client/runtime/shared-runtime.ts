@@ -27,8 +27,6 @@ import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../..
 export type GameConfig = {
   width: number;
   height: number;
-  colliderScale: number;
-  uiOffset: { x: number; y: number };
 };
 
 type Vec2 = { x: number; y: number };
@@ -86,11 +84,11 @@ export class SharedGameRuntime {
   private selectedProvinceId: number | null = null;
   private selectionListeners = new Set<(provinceId: number | null) => void>();
 
-  protected localPlayerId: string | null = null;
-  private selectedActorId: string | null = null;
-  private hoveredActorId: string | null = null;
+  protected localPlayerId: number | null = null;
+  private selectedActorId: number | null = null;
+  private hoveredActorId: number | null = null;
   protected lastTerrainVersion = 0;
-  private actorEntityById = new Map<string, number>();
+  private actorEntityById = new Map<number, number>();
   private movementTestConfig: MovementTestConfig = {
     enabled: false,
     unitCount: 8,
@@ -187,9 +185,9 @@ export class SharedGameRuntime {
     }
   }
 
-  setLocalPlayerId(playerId: string | null): void {
+  setLocalPlayerId(playerId: number | null): void {
     this.localPlayerId = playerId;
-    if (this.selectedActorId && this.getActorOwner(this.selectedActorId) !== this.localPlayerId) {
+    if (this.selectedActorId !== null && this.getActorOwner(this.selectedActorId) !== this.localPlayerId) {
       this.selectedActorId = null;
     }
   }
@@ -256,7 +254,7 @@ export class SharedGameRuntime {
     const clientReceiveMs = Date.now();
     this.updateServerClockOffset(snapshot.serverTime, clientReceiveMs);
     const estimatedServerNow = this.getEstimatedServerNow(clientReceiveMs);
-    const liveActorIds = new Set<string>();
+    const liveActorIds = new Set<number>();
     for (let i = 0; i < snapshot.actors.length; i += 1) {
       const actorSnapshot = snapshot.actors[i];
       liveActorIds.add(actorSnapshot.actorId);
@@ -264,7 +262,7 @@ export class SharedGameRuntime {
       this.actorEntityById.set(actorSnapshot.actorId, actorEntity);
       this.syncUnitFromSnapshot(actorEntity, actorSnapshot, estimatedServerNow, clientReceiveMs);
     }
-    const staleActorIds: string[] = [];
+    const staleActorIds: number[] = [];
     this.actorEntityById.forEach((_, actorId) => {
       if (!liveActorIds.has(actorId)) {
         staleActorIds.push(actorId);
@@ -273,7 +271,7 @@ export class SharedGameRuntime {
     for (let i = 0; i < staleActorIds.length; i += 1) {
       this.removeReplicatedActor(staleActorIds[i]);
     }
-    if (this.selectedActorId && !this.actorEntityById.has(this.selectedActorId)) {
+    if (this.selectedActorId !== null && !this.actorEntityById.has(this.selectedActorId)) {
       this.selectedActorId = null;
     }
   }
@@ -321,7 +319,7 @@ export class SharedGameRuntime {
     if (this.hoveredActorId !== hoveredActorId) {
       this.hoveredActorId = hoveredActorId;
     }
-    if (hoveredActorId) {
+    if (hoveredActorId !== null) {
       this.setHoveredProvince(null);
       return;
     }
@@ -341,7 +339,7 @@ export class SharedGameRuntime {
     }
     if (event.button === 0) {
       const actorId = this.pickActorAt(position.x, position.y);
-      if (actorId && this.getActorOwner(actorId) === this.localPlayerId) {
+      if (actorId !== null && this.getActorOwner(actorId) === this.localPlayerId) {
         this.setSelectedActor(actorId);
         this.setSelectedProvince(null);
         return;
@@ -599,8 +597,8 @@ export class SharedGameRuntime {
     return null;
   }
 
-  private pickActorAt(worldX: number, worldY: number): string | null {
-    let bestId: string | null = null;
+  private pickActorAt(worldX: number, worldY: number): number | null {
+    let bestId: number | null = null;
     let bestDistanceSq = Number.POSITIVE_INFINITY;
     this.actorEntityById.forEach((eid, actorId) => {
       const dx = worldX - (RenderableComponent.x[eid] ?? 0);
@@ -659,8 +657,8 @@ export class SharedGameRuntime {
     this.selectionListeners.forEach((listener) => listener(provinceId));
   }
 
-  private setSelectedActor(actorId: string | null): void {
-    if (actorId && this.getActorOwner(actorId) !== this.localPlayerId) {
+  private setSelectedActor(actorId: number | null): void {
+    if (actorId !== null && this.getActorOwner(actorId) !== this.localPlayerId) {
       return;
     }
     if (this.selectedActorId === actorId) {
@@ -699,7 +697,7 @@ export class SharedGameRuntime {
     this.navigationGraph = { nodes, landFaceIds };
   }
 
-  private removeReplicatedActor(actorId: string): void {
+  private removeReplicatedActor(actorId: number): void {
     const eid = this.actorEntityById.get(actorId);
     if (eid === undefined) {
       return;
@@ -749,7 +747,7 @@ export class SharedGameRuntime {
     return clientNow + this.serverClockOffsetMs;
   }
 
-  private getActorOwner(actorId: string): string | null {
+  private getActorOwner(actorId: number): number | null {
     const eid = this.actorEntityById.get(actorId);
     if (eid === undefined) {
       return null;

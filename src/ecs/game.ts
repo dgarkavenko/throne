@@ -50,7 +50,7 @@ export function createServerPipeline(_game: EcsGame): EcsPipeline
 	};
 }
 
-export function findActorEntityById(world: World, actorId: string): number | null
+export function findActorEntityById(world: World, actorId: number): number | null
 {
 	for (const eid of query(world, [ActorComponent]))
 	{
@@ -62,7 +62,7 @@ export function findActorEntityById(world: World, actorId: string): number | nul
 	return null;
 }
 
-export function ensureActorEntity(world: World, actorId: string, ownerId: string): number
+export function ensureActorEntity(world: World, actorId: number, ownerId: number): number
 {
 	const existing = findActorEntityById(world, actorId);
 	if (existing !== null)
@@ -98,6 +98,6 @@ export function collectActorSnapshots(world: World): ActorSnapshot[]
 			currentFace: TerrainLocationComponent.faceId[eid],
 		});
 	}
-	snapshots.sort((a, b) => a.actorId.localeCompare(b.actorId));
+	snapshots.sort((a, b) => a.actorId - b.actorId);
 	return snapshots;
 }

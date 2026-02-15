@@ -21,7 +21,7 @@ import { query } from 'bitecs';
 import { ActorComponent, TerrainLocationComponent } from './ecs/components';
 
 type PlayerState = {
-  id: string;
+  id: number;
   emoji: string;
   color: string;
 };
@@ -49,7 +49,8 @@ function fnv1aHash32(text: string): number {
 
 export class RoomDurableObject implements DurableObject {
   private connections = new Map<WebSocket, PlayerState>();
-  private hostId: string | null = null;
+  private hostId: number | null = null;
+  private nextPlayerId = 1;
   private sessionStart: number | null = null;
   private roomConfig: RoomConfig = normalizeRoomConfig(null);
   private initialized = false;
@@ -146,10 +147,11 @@ export class RoomDurableObject implements DurableObject {
     socket.accept();
 
     const player: PlayerState = {
-      id: crypto.randomUUID(),
+      id: this.nextPlayerId,
       emoji: this.pickEmoji(),
       color: this.pickColor(),
     };
+    this.nextPlayerId += 1;
 
     if (this.connections.size === 0) {
       this.hostId = player.id;
@@ -211,7 +213,7 @@ export class RoomDurableObject implements DurableObject {
     player: PlayerState,
     message: TerrainPublishClientMessage
   ): Promise<void> {
-    if (!this.hostId || player.id !== this.hostId) {
+    if (this.hostId === null || player.id !== this.hostId) {
       return;
     }
 
@@ -275,8 +277,8 @@ export class RoomDurableObject implements DurableObject {
     const numActors = 12;
 
     for (let i = 0; i < numActors; i += 1) {
-      const actorId = `actor${i}`;
-      const ownerId = `house${i % 4}`;
+      const actorId = i + 1;
+      const ownerId = (i % 4) + 1;
       const spawnFace = this.pickSpawnFace(actorId);
       if (spawnFace === null) {
         continue;
@@ -286,7 +288,7 @@ export class RoomDurableObject implements DurableObject {
     }
   }
 
-  private pickSpawnFace(seedId: string): number | null {
+  private pickSpawnFace(seedId: number): number | null {
     if (!this.terrain) {
       return null;
     }
@@ -306,12 +308,12 @@ export class RoomDurableObject implements DurableObject {
       type: 'terrain_snapshot',
       terrainVersion: this.terrain.terrainVersion,
       terrain: this.terrain.snapshot,
-      publishedBy: this.hostId ?? '',
+      publishedBy: this.hostId,
       serverTime: Date.now(),
     });
   }
 
-  private broadcastTerrainSnapshot(publishedBy: string): void {
+  private broadcastTerrainSnapshot(publishedBy: number): void {
     if (!this.terrain) {
       return;
     }

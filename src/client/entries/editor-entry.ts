@@ -29,8 +29,6 @@ export async function startClientEditor(): Promise<void> {
   const engine = new EditorGame({
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
-    colliderScale: 0.9,
-    uiOffset: { x: 24, y: 24 },
     autoGenerateTerrain: true,
   });
 
@@ -45,7 +43,7 @@ export async function startClientEditor(): Promise<void> {
   });
 
   const syncSettingsAccess = (): void => {
-    const hasSessionIdentity = Boolean(state.playerId) && Boolean(state.hostId);
+    const hasSessionIdentity = state.playerId !== null && state.hostId !== null;
     if (!hasSessionIdentity) {
       layout.setSettingsVisible(false);
       layout.setTerrainPublishVisible(false);
@@ -104,7 +102,7 @@ export async function startClientEditor(): Promise<void> {
   });
 
   layout.onPublishTerrain(() => {
-    if (!state.playerId || !state.hostId || state.playerId !== state.hostId) {
+    if (state.playerId === null || state.hostId === null || state.playerId !== state.hostId) {
       return;
     }
     const snapshot = engine.getTerrainSnapshotForReplication();

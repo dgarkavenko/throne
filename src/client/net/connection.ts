@@ -10,8 +10,8 @@ type ConnectionEvents = {
   onStatus?: (message: string) => void;
   onConnected?: (roomId: string) => void;
   onDisconnected?: () => void;
-  onWelcome?: (playerId: string) => void;
-  onState?: (players: PlayerState[], sessionStart: number | null, hostId: string | null) => void;
+  onWelcome?: (playerId: number) => void;
+  onState?: (players: PlayerState[], sessionStart: number | null, hostId: number | null) => void;
   onTerrainSnapshot?: (message: TerrainSnapshotMessage) => void;
   onWorldSnapshot?: (message: WorldSnapshotMessage) => void;
 };
@@ -50,7 +50,7 @@ export function connectToRoom(events: ConnectionEvents = {}): Connection {
       events.onState?.(
         payload.players || [],
         typeof payload.sessionStart === 'number' ? payload.sessionStart : null,
-        typeof payload.hostId === 'string' ? payload.hostId : null
+        typeof payload.hostId === 'number' ? payload.hostId : null
       );
       return;
     }

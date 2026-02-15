@@ -1,8 +1,8 @@
 import type { PlayerState } from '../../shared/protocol';
 
 export type SessionClientState = {
-  playerId: string | null;
-  hostId: string | null;
+  playerId: number | null;
+  hostId: number | null;
   sessionStart: number | null;
   sessionTimerId: number | null;
   players: PlayerState[];

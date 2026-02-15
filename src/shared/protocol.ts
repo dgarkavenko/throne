@@ -7,7 +7,7 @@ export interface TerrainConfig {
 }
 
 export interface PlayerState {
-  id: string;
+  id: number;
   emoji: string;
   color: string;
 }
@@ -19,20 +19,20 @@ export interface TerrainSnapshot {
 }
 
 export interface ActorSnapshot {
-  actorId: string;
-  ownerId: string;
+  actorId: number;
+  ownerId: number;
   currentFace: number;
 }
 
 export interface WelcomeMessage {
   type: 'welcome';
-  id: string;
+  id: number;
 }
 
 export interface StateMessage {
   type: 'state';
   players: PlayerState[];
-  hostId: string | null;
+  hostId: number | null;
   sessionStart: number | null;
 }
 
@@ -40,7 +40,7 @@ export interface TerrainSnapshotMessage {
   type: 'terrain_snapshot';
   terrainVersion: number;
   terrain: TerrainSnapshot;
-  publishedBy: string;
+  publishedBy: number | null;
   serverTime: number;
 }
 
