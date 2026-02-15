@@ -169,3 +169,6 @@ dist
 # Client build output
 public/client.js
 public/client/
+public/ecs
+public/client-editor.js
+public/terrain
