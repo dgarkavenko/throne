@@ -25,3 +25,9 @@ export const RenderableComponent = {
 export const Dirty = {}
 
 export const VisibleTag = {}
+
+export const RenderableInfoComponent = {
+	sprite: [] as string[],
+	scale: [] as number[],
+	anchor: [] as number[]
+};

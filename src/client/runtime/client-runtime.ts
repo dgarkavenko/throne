@@ -1,7 +1,7 @@
 /**
- * Shared browser runtime used by both game and editor modes.
+ * Browser runtime for `/game` mode.
  * Key runtime branches:
- * - terrain generation apply/regenerate flow (full or dirty-stage partial)
+ * - terrain snapshot application (authoritative generation controls)
  * - world snapshot acceptance gates (terrain version + sequence monotonicity)
  * - pointer interaction branch for actor selection vs province selection
  */
@@ -14,16 +14,16 @@ import
 		ensureActorEntity,
 		removeActorEntity,
 		type EcsPipeline,
-		type TGame,
+		type EcsGame,
 	} from '../../ecs/game';
 import { ActorComponent, RenderableComponent, TerrainLocationComponent } from '../../ecs/components';
-import { TRenderer } from '../../ecs/renderer';
-import type { TerrainGenerationControls } from '../../terrain/controls';
-import type { TerrainGenerationDirtyFlags, TerrainGenerationState } from '../../terrain/types';
-import { MapSystem } from '../../terrain/runtime/map-system';
-import { TerrainRenderer } from '../terrain/renderer';
+import { GameRenderer } from '../rendering/game-renderer';
 import { DEFAULT_TERRAIN_RENDER_CONTROLS, type TerrainRenderControls } from '../terrain/render-controls';
 import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
+import {
+	SharedTerrainRuntime,
+	type TerrainNavigationConfig,
+} from './shared-terrain-runtime';
 
 export type GameConfig = {
 	width: number;
@@ -31,17 +31,6 @@ export type GameConfig = {
 };
 
 type Vec2 = { x: number; y: number };
-
-type NavigationNode = {
-	faceId: number;
-	point: Vec2;
-	neighbors: Array<{ neighborFaceId: number; stepCost: number }>;
-};
-
-type NavigationGraph = {
-	nodes: Record<number, NavigationNode>;
-	landFaceIds: number[];
-};
 
 type ProvinceInteractionModel = {
 	facePolygons: Vec2[][];
@@ -66,30 +55,22 @@ type ProvinceInteractionOverlay = {
 type MovementTestConfig = {
 	enabled: boolean;
 	unitCount: number;
-	timePerFaceSeconds: number;
-	lowlandThreshold: number;
-	impassableThreshold: number;
-	elevationPower: number;
-	elevationGainK: number;
-	riverPenalty: number;
-	showPaths: boolean;
+} & TerrainNavigationConfig & {
 	spacingTarget: number;
 };
 
-export class SharedGameRuntime
+export class ClientGame
 {
-	protected readonly config: GameConfig;
-	protected terrainState: TerrainGenerationState | null = null;
+	private readonly config: GameConfig;
 	private provinceInteractionModel: ProvinceInteractionModel | null = null;
 	private provinceInteractionOverlay: ProvinceInteractionOverlay | null = null;
 	private hoveredProvinceId: number | null = null;
 	private selectedProvinceId: number | null = null;
 	private selectionListeners = new Set<(provinceId: number | null) => void>();
 
-	protected localPlayerId: number | null = null;
+	private localPlayerId: number | null = null;
 	private selectedActorId: number | null = null;
 	private hoveredActorId: number | null = null;
-	protected lastTerrainVersion = 0;
 	private actorEntityById = new Map<number, number>();
 	private movementTestConfig: MovementTestConfig = {
 		enabled: false,
@@ -100,26 +81,26 @@ export class SharedGameRuntime
 		elevationPower: 0.8,
 		elevationGainK: 1,
 		riverPenalty: 0.8,
-		showPaths: true,
 		spacingTarget: 16,
 	};
-	private navigationGraph: NavigationGraph | null = null;
 	private serverClockOffsetMs = 0;
 	private hasServerClockOffset = false;
 	private lastWorldSnapshotSeq = -1;
 
-	protected readonly mapSystem: MapSystem;
-	protected hasTerrain = false;
-	private terrainRenderer: TerrainRenderer | null = null;
-	protected readonly r: TRenderer;
-	protected readonly game: TGame;
-	protected readonly clientPipeline: EcsPipeline;
+	private readonly terrain: SharedTerrainRuntime;
+	private readonly r: GameRenderer;
+	private readonly game: EcsGame;
+	private readonly clientPipeline: EcsPipeline;
 
 	constructor(config: GameConfig)
 	{
 		this.config = config;
-		this.mapSystem = new MapSystem({ width: config.width, height: config.height });
-		this.r = new TRenderer();
+		this.r = new GameRenderer();
+		this.terrain = new SharedTerrainRuntime({
+			width: config.width,
+			height: config.height,
+			terrainLayer: this.r.terrainLayer,
+		});
 		this.game = createEcsGame();
 		this.clientPipeline = createClientPipeline(this.game);
 	}
@@ -128,10 +109,6 @@ export class SharedGameRuntime
 	{
 		await this.r.init(this.config.width, this.config.height, window.devicePixelRatio || 1, field);
 		await this.r.hook(this.game);
-		this.terrainRenderer = new TerrainRenderer({
-			config: { width: this.config.width, height: this.config.height },
-			terrainLayer: this.r.terrainLayer,
-		});
 
 		observe(this.game.world, onSet(TerrainLocationComponent), (eid, params) =>
 		{
@@ -161,36 +138,26 @@ export class SharedGameRuntime
 
 	setTerrainRenderControls(nextControls: TerrainRenderControls): void
 	{
-		const terrainRenderer = this.terrainRenderer;
-		if (!terrainRenderer)
-		{
-			return;
-		}
-		const result = terrainRenderer.setRenderControls(nextControls);
-		if (!this.hasTerrain || !this.terrainState || !result.changed)
-		{
-			return;
-		}
-		if (result.refinementChanged)
-		{
-			this.renderTerrainState(this.terrainState);
-		} else
-		{
-			terrainRenderer.rerenderProvinceBorders(this.mapSystem.getGenerationControls());
-			this.renderProvinceInteractionOverlay();
-		}
+		this.terrain.setTerrainRenderControls(nextControls);
+		this.renderProvinceInteractionOverlay();
 	}
 
 	setMovementTestConfig(nextConfig: Partial<MovementTestConfig>): void
 	{
-		if (typeof nextConfig.showPaths !== 'boolean')
-		{
-			return;
-		}
+		const hasCostConfig =
+			typeof nextConfig.lowlandThreshold === 'number' ||
+			typeof nextConfig.impassableThreshold === 'number' ||
+			typeof nextConfig.elevationPower === 'number' ||
+			typeof nextConfig.elevationGainK === 'number' ||
+			typeof nextConfig.riverPenalty === 'number';
 		this.movementTestConfig = {
 			...this.movementTestConfig,
-			showPaths: nextConfig.showPaths,
+			...nextConfig,
 		};
+		if (hasCostConfig)
+		{
+			this.terrain.setNavigationConfig(nextConfig);
+		}
 	}
 
 	bind(onFrame?: (deltaMs: number, now: number) => void): void
@@ -209,7 +176,7 @@ export class SharedGameRuntime
 
 	getTerrainVersion(): number
 	{
-		return this.lastTerrainVersion;
+		return this.terrain.state.lastTerrainVersion;
 	}
 
 	onProvinceSelectionChange(listener: (provinceId: number | null) => void): () => void
@@ -221,57 +188,25 @@ export class SharedGameRuntime
 		};
 	}
 
-	protected setTerrainGenerationControlsInternal(
-		nextControls: TerrainGenerationControls,
-		regenerateIfMissing: boolean
-	): void
+	applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void
 	{
-		const result = this.mapSystem.setTerrainGenerationControls(nextControls);
-		if (!this.hasTerrain)
-		{
-			if (regenerateIfMissing)
-			{
-				this.regenerateTerrain();
-			}
-			return;
-		}
-		if (result.changed)
-		{
-			this.regenerateTerrainPartial(result.dirty);
-			return;
-		}
-		if (this.terrainState)
-		{
-			this.renderTerrainState(this.terrainState);
-		}
-	}
-
-	protected applyTerrainSnapshotInternal(snapshot: TerrainSnapshot, terrainVersion: number): void
-	{
-		this.lastTerrainVersion = Math.max(0, Math.round(terrainVersion));
 		this.lastWorldSnapshotSeq = -1;
-		this.setTerrainGenerationControlsInternal(snapshot.controls, true);
+		this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
+		this.rebuildProvinceInteractionModel();
+		this.renderProvinceInteractionOverlay();
 	}
 
-	protected getTerrainSnapshotForReplicationInternal(): TerrainSnapshot
+	applyWorldSnapshot(snapshot: WorldSnapshotMessage): void
 	{
-		return {
-			controls: this.mapSystem.getGenerationControls(),
-			mapWidth: this.config.width,
-			mapHeight: this.config.height,
-		};
-	}
-
-	protected applyWorldSnapshotInternal(
-		snapshot: WorldSnapshotMessage,
-		throwIfTerrainMissing: boolean
-	): void
-	{
-		if (throwIfTerrainMissing && (!this.navigationGraph || !this.terrainState))
+		if (!this.terrain.state.navigationGraph || !this.terrain.state.terrainState)
 		{
 			throw new Error('Received world snapshot before terrain snapshot.');
 		}
-		if (!this.navigationGraph || !this.terrainState || snapshot.terrainVersion !== this.lastTerrainVersion)
+		if (
+			!this.terrain.state.navigationGraph ||
+			!this.terrain.state.terrainState ||
+			snapshot.terrainVersion !== this.terrain.state.lastTerrainVersion
+		)
 		{
 			return;
 		}
@@ -308,46 +243,6 @@ export class SharedGameRuntime
 		{
 			this.selectedActorId = null;
 		}
-	}
-
-	protected regenerateTerrainPartial(flags: TerrainGenerationDirtyFlags): void
-	{
-		if (!this.r.terrainLayer)
-		{
-			return;
-		}
-		const state = this.mapSystem.regeneratePartial(flags);
-		this.terrainState = state;
-		this.rebuildMovementNavigationAndUnits();
-		this.renderTerrainState(state);
-		this.rebuildProvinceInteractionModel();
-		this.renderProvinceInteractionOverlay();
-		this.hasTerrain = true;
-	}
-
-	protected regenerateTerrain(): void
-	{
-		if (!this.r.terrainLayer)
-		{
-			return;
-		}
-		const state = this.mapSystem.regenerateAll();
-		this.terrainState = state;
-		this.rebuildMovementNavigationAndUnits();
-		this.renderTerrainState(state);
-		this.rebuildProvinceInteractionModel();
-		this.renderProvinceInteractionOverlay();
-		this.hasTerrain = true;
-	}
-
-	protected renderTerrainState(state: TerrainGenerationState): void
-	{
-		if (!this.terrainRenderer)
-		{
-			return;
-		}
-		this.terrainRenderer.render(state, this.mapSystem.getGenerationControls());
-		this.renderProvinceInteractionOverlay();
 	}
 
 	private pointerMove = (event: PointerEvent) =>
@@ -410,17 +305,18 @@ export class SharedGameRuntime
 
 	private rebuildProvinceInteractionModel(): void
 	{
-		if (!this.terrainState)
+		const terrainState = this.terrain.state.terrainState;
+		if (!terrainState)
 		{
 			this.provinceInteractionModel = null;
 			return;
 		}
-		const { mesh: meshState, provinces } = this.terrainState;
+		const { mesh: meshState, provinces } = terrainState;
 		const mesh = meshState.mesh;
 		const faceCount = mesh.faces.length;
 		const facePolygons: Vec2[][] = new Array(faceCount);
 		const faceAabbs: Array<{ minX: number; minY: number; maxX: number; maxY: number }> = new Array(faceCount);
-		const generationControls = this.mapSystem.getGenerationControls();
+		const generationControls = this.terrain.state.generationControls;
 		const gridSize = Math.max(32, generationControls.spacing * 2);
 		const gridColumns = Math.max(1, Math.ceil(this.config.width / gridSize));
 		const gridRows = Math.max(1, Math.ceil(this.config.height / gridSize));
@@ -539,7 +435,7 @@ export class SharedGameRuntime
 	{
 		if (this.provinceInteractionOverlay)
 		{
-			const overlayContainer = this.terrainRenderer?.getOverlayContainer();
+			const overlayContainer = this.terrain.getOverlayContainer();
 			const meshIndex = overlayContainer ? this.r.terrainLayer.children.indexOf(overlayContainer) : -1;
 			if (meshIndex >= 0)
 			{
@@ -555,7 +451,7 @@ export class SharedGameRuntime
 		container.addChild(neighborGraphics);
 		container.addChild(hoverGraphics);
 		container.addChild(selectedGraphics);
-		const overlayContainer = this.terrainRenderer?.getOverlayContainer();
+		const overlayContainer = this.terrain.getOverlayContainer();
 		const meshIndex = overlayContainer ? this.r.terrainLayer.children.indexOf(overlayContainer) : -1;
 		if (meshIndex >= 0)
 		{
@@ -579,7 +475,7 @@ export class SharedGameRuntime
 		overlay.selectedGraphics.clear();
 		overlay.neighborGraphics.clear();
 
-		const borderWidth = this.terrainRenderer?.getRenderControls().provinceBorderWidth
+		const borderWidth = this.terrain.state.renderControls.provinceBorderWidth
 			?? DEFAULT_TERRAIN_RENDER_CONTROLS.provinceBorderWidth;
 		const hoverWidth = Math.max(1, borderWidth * 0.6);
 		const selectedWidth = Math.max(2, borderWidth * 0.95);
@@ -601,7 +497,7 @@ export class SharedGameRuntime
 				this.drawProvinceBorder(overlay.selectedGraphics, segments, 0xffffff, 0.95, selectedWidth);
 			}
 			const center = this.provinceInteractionModel.provinceCentroids[this.selectedProvinceId];
-			const neighbors = this.terrainState?.provinces.faces[this.selectedProvinceId]?.adjacentProvinces ?? [];
+			const neighbors = this.terrain.state.terrainState?.provinces.faces[this.selectedProvinceId]?.adjacentProvinces ?? [];
 			if (center && neighbors.length > 0)
 			{
 				neighbors.forEach((neighborId) =>
@@ -778,41 +674,6 @@ export class SharedGameRuntime
 		this.selectedActorId = actorId;
 	}
 
-	private rebuildMovementNavigationAndUnits(): void
-	{
-		this.rebuildMovementNavigationGraph();
-	}
-
-	private rebuildMovementNavigationGraph(): void
-	{
-		if (!this.terrainState)
-		{
-			this.navigationGraph = null;
-			return;
-		}
-
-		const { mesh, water } = this.terrainState;
-		const nodes: Record<number, NavigationNode> = {};
-		const landFaceIds: number[] = [];
-		for (let i = 0; i < mesh.mesh.faces.length; i += 1)
-		{
-			if (!water.isLand[i])
-			{
-				continue;
-			}
-			const face = mesh.mesh.faces[i];
-			nodes[i] = {
-				faceId: i,
-				point: { x: face.point.x, y: face.point.y },
-				neighbors: face.adjacentFaces
-					.filter((neighborFaceId) => water.isLand[neighborFaceId])
-					.map((neighborFaceId) => ({ neighborFaceId, stepCost: 1 })),
-			};
-			landFaceIds.push(i);
-		}
-		this.navigationGraph = { nodes, landFaceIds };
-	}
-
 	private removeReplicatedActor(actorId: number): void
 	{
 		const eid = this.actorEntityById.get(actorId);
@@ -836,11 +697,11 @@ export class SharedGameRuntime
 
 	private getFacePoint(faceId: number): Vec2 | null
 	{
-		if (!this.navigationGraph)
+		if (!this.terrain.state.navigationGraph)
 		{
 			return null;
 		}
-		const node = this.navigationGraph.nodes[faceId];
+		const node = this.terrain.state.navigationGraph.nodes[faceId];
 		if (!node)
 		{
 			return null;

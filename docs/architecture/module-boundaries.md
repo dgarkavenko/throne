@@ -5,6 +5,8 @@
   - Worker + Durable Object server runtime.
 - `src/client/**`
   - Browser-only runtime, UI, networking, and Pixi presentation.
+- `src/client/rendering/**`
+  - Browser renderer and Pixi surface/layer lifecycle.
 - `src/terrain/**`
   - Shared terrain domain: generation core, stages, runtime helpers, navigation.
 - `src/ecs/**`
@@ -40,7 +42,11 @@
 - Runtime API shims:
   - `src/client/game/client-game.ts` re-exports from `src/client/runtime/modes.ts`
   - `src/client/game/editor-game.ts` re-exports from `src/client/runtime/modes.ts`
-  - `src/client/game/shared-game-runtime.ts` re-exports from `src/client/runtime/shared-runtime.ts`
+  - `src/client/runtime/modes.ts` re-exports concrete runtimes:
+    - `src/client/runtime/client-runtime.ts`
+    - `src/client/runtime/editor-runtime.ts`
+  - `src/client/runtime/shared-terrain-runtime.ts` owns shared terrain lifecycle/state.
+  - `src/client/game/shared-game-runtime.ts` now type-shims `GameConfig` only.
 - Type shim:
   - `src/client/types.ts` re-exports from `src/shared/protocol.ts`
 

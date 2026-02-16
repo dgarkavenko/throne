@@ -58,6 +58,7 @@ The browser clients render terrain and consume authoritative snapshots over WebS
 ## Runtime Role Branches
 ### Game View (`/game`)
 - Always read-only terrain generation controls.
+- Render/intermediate/agent controls are local-only visual/navigation tuning.
 - Host/non-host both receive snapshots.
 - World snapshot is accepted only after terrain snapshot has been applied.
 
@@ -88,8 +89,11 @@ The browser clients render terrain and consume authoritative snapshots over WebS
   - removes stale actors not present in snapshot
 
 ## Shared Modules in Runtime Path
-- `src/client/runtime/shared-runtime.ts`: shared rendering/input/snapshot behavior.
+- `src/client/runtime/client-runtime.ts`: `/game` runtime behavior.
+- `src/client/runtime/editor-runtime.ts`: `/editor` runtime behavior.
+- `src/client/runtime/shared-terrain-runtime.ts`: shared terrain generation/render/navigation state controller.
 - `src/terrain/runtime/map-system.ts`: generation controls + dirty-stage regeneration.
+- `src/client/rendering/game-renderer.ts`: browser renderer/pixi layer lifecycle.
 - `src/client/terrain/renderer.ts`: terrain draw and overlay control.
 - `src/client/ui/layout.ts`: DOM bindings and control-scope branching.
 - `src/client/net/connection.ts`: room WebSocket protocol wiring.

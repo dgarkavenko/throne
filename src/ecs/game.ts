@@ -6,8 +6,6 @@ export type EcsGame = {
 	world: World;
 };
 
-export type TGame = EcsGame;
-
 export type EcsPipeline = {
 	tick: (dt: number) => void;
 };

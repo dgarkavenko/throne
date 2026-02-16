@@ -25,6 +25,11 @@ export async function startClientGame(): Promise<void>
 	const state = createSessionClientState();
 	const fpsTracker = createFpsTracker();
 	const layout = createPageLayout();
+	layout.setSettingsVisible(false);
+	layout.setDebugControlsOnly(false);
+	layout.setTerrainControlsEnabled(false);
+	layout.setTerrainPublishVisible(false);
+	layout.setAgentControlsEnabled(false);
 
 	setRoomRouteLink('editor-link', '/editor');
 
@@ -33,17 +38,21 @@ export async function startClientGame(): Promise<void>
 		height: GAME_HEIGHT,
 	});
 
+	const GameConfig = {
+		navigation: (movement: ReturnType<typeof layout.getMovementSettings>) => ({
+			timePerFaceSeconds: movement.timePerFaceSeconds,
+			lowlandThreshold: movement.lowlandThreshold,
+			impassableThreshold: movement.impassableThreshold,
+			elevationPower: movement.elevationPower,
+			elevationGainK: movement.elevationGainK,
+			riverPenalty: movement.riverPenalty,
+		}),
+	};
+
 	await clientGame.init(layout.field);
-	layout.setSettingsVisible(false);
-	layout.setDebugControlsOnly(false);
-	layout.setTerrainControlsEnabled(false);
-	layout.setTerrainPublishVisible(false);
-	layout.setAgentControlsEnabled(false);
 
 	clientGame.setTerrainRenderControls(layout.getTerrainRenderSettings());
-	clientGame.setMovementTestConfig({
-		showPaths: layout.getMovementSettings().debugPaths,
-	});
+	clientGame.setMovementTestConfig(GameConfig.navigation(layout.getMovementSettings()));
 
 	const syncHostAccess = (): void =>
 	{
@@ -74,9 +83,7 @@ export async function startClientGame(): Promise<void>
 		{
 			clientGame.applyTerrainSnapshot(message.terrain, message.terrainVersion);
 			clientGame.setTerrainRenderControls(layout.getTerrainRenderSettings());
-			clientGame.setMovementTestConfig({
-				showPaths: layout.getMovementSettings().debugPaths,
-			});
+			clientGame.setMovementTestConfig(GameConfig.navigation(layout.getMovementSettings()));
 			layout.setStatus(`Terrain synced v${message.terrainVersion}`);
 		},
 		onWorldSnapshot: (message) =>
@@ -91,9 +98,7 @@ export async function startClientGame(): Promise<void>
 	layout.onTerrainSettingsChange((nextSettings) =>
 	{
 		clientGame.setTerrainRenderControls(nextSettings.render);
-		clientGame.setMovementTestConfig({
-			showPaths: nextSettings.movement.debugPaths,
-		});
+		clientGame.setMovementTestConfig(GameConfig.navigation(nextSettings.movement));
 	});
 
 	clientGame.bind((deltaMs, now) =>

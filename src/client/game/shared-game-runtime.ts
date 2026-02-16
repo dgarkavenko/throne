@@ -1,1 +1,1 @@
-export { SharedGameRuntime, type GameConfig } from '../runtime/shared-runtime';
+export type { GameConfig } from '../runtime/modes';
