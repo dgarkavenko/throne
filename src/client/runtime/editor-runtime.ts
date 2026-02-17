@@ -58,8 +58,6 @@ export class EditorGame {
     this.terrain.setNavigationConfig(nextConfig);
   }
 
-  bind(_onFrame?: (deltaMs: number, now: number) => void): void {}
-
   getTerrainVersion(): number {
     return this.terrain.state.lastTerrainVersion;
   }

@@ -52,7 +52,7 @@ export async function startClientGame(): Promise<void>
 	await clientGame.init(layout.field);
 
 	clientGame.setTerrainRenderControls(layout.getTerrainRenderSettings());
-	clientGame.setMovementTestConfig(GameConfig.navigation(layout.getMovementSettings()));
+	clientGame.setMovementConfig(GameConfig.navigation(layout.getMovementSettings()));
 
 	const syncHostAccess = (): void =>
 	{
@@ -83,7 +83,7 @@ export async function startClientGame(): Promise<void>
 		{
 			clientGame.applyTerrainSnapshot(message.terrain, message.terrainVersion);
 			clientGame.setTerrainRenderControls(layout.getTerrainRenderSettings());
-			clientGame.setMovementTestConfig(GameConfig.navigation(layout.getMovementSettings()));
+			clientGame.setMovementConfig(GameConfig.navigation(layout.getMovementSettings()));
 			layout.setStatus(`Terrain synced v${message.terrainVersion}`);
 		},
 		onWorldSnapshot: (message) =>
@@ -98,12 +98,8 @@ export async function startClientGame(): Promise<void>
 	layout.onTerrainSettingsChange((nextSettings) =>
 	{
 		clientGame.setTerrainRenderControls(nextSettings.render);
-		clientGame.setMovementTestConfig(GameConfig.navigation(nextSettings.movement));
+		clientGame.setMovementConfig(GameConfig.navigation(nextSettings.movement));
 	});
 
-	clientGame.bind((deltaMs, now) =>
-	{
-		void deltaMs;
-		updateFpsCounter(now, fpsTracker, layout.setFps);
-	});
+	clientGame.bindUtilityTick(layout.setFps);
 }

@@ -57,7 +57,7 @@ export class GameRenderer
 
 		observe(game.world, onAdd(Dirty), (eid) =>
 		{		
-			const alias = RenderableComponent.sprite[eid];
+			const alias = RenderableComponent.content[eid];
 			if (!alias)
 			{
 				console.warn("Renderable added but sprite alias missing", { eid });
@@ -112,33 +112,6 @@ export class GameRenderer
 
 		canvas.addEventListener(type, handler);
 		this.canvasHandlers.set(type, handler);
-	}
-
-	public getPointerWorldPosition(event: PointerEvent): Vec2 | null
-	{
-		if (!this.app)
-		{
-			return null;
-		}
-
-		const canvas = this.app.canvas ?? this.app.view;
-		
-		if (!canvas || !canvas.getBoundingClientRect)
-		{
-			return null;
-		}
-		
-		const rect = canvas.getBoundingClientRect();
-		if (rect.width === 0 || rect.height === 0)
-		{
-			return null;
-		}
-		const scaleX = this._width / rect.width;
-		const scaleY = this._height / rect.height;
-		return {
-			x: (event.clientX - rect.left) * scaleX,
-			y: (event.clientY - rect.top) * scaleY,
-		};
 	}
 
 };

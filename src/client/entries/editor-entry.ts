@@ -113,7 +113,4 @@ export async function startClientEditor(): Promise<void> {
     layout.setTerrainSyncStatus('Publishing...');
   });
 
-  engine.bind((_deltaMs, now) => {
-    updateFpsCounter(now, fpsTracker, layout.setFps);
-  });
 }

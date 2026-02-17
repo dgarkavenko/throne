@@ -6,7 +6,7 @@
  * - pointer interaction branch for actor selection vs province selection
  */
 import { observe, onSet, setComponent } from 'bitecs';
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, Ticker, UPDATE_PRIORITY } from 'pixi.js';
 import
 	{
 		createClientPipeline,
@@ -52,7 +52,7 @@ type ProvinceInteractionOverlay = {
 	neighborGraphics: any;
 };
 
-type MovementTestConfig = {
+type MovementConfig = {
 	enabled: boolean;
 	unitCount: number;
 } & TerrainNavigationConfig & {
@@ -72,7 +72,7 @@ export class ClientGame
 	private selectedActorId: number | null = null;
 	private hoveredActorId: number | null = null;
 	private actorEntityById = new Map<number, number>();
-	private movementTestConfig: MovementTestConfig = {
+	private movementTestConfig: MovementConfig = {
 		enabled: false,
 		unitCount: 8,
 		timePerFaceSeconds: 180,
@@ -89,6 +89,7 @@ export class ClientGame
 
 	private readonly terrain: SharedTerrainRuntime;
 	private readonly r: GameRenderer;
+	private ticker: Ticker;
 	private readonly game: EcsGame;
 	private readonly clientPipeline: EcsPipeline;
 
@@ -96,6 +97,8 @@ export class ClientGame
 	{
 		this.config = config;
 		this.r = new GameRenderer();
+		this.ticker = this.r.app.ticker;
+
 		this.terrain = new SharedTerrainRuntime({
 			width: config.width,
 			height: config.height,
@@ -110,6 +113,8 @@ export class ClientGame
 		await this.r.init(this.config.width, this.config.height, window.devicePixelRatio || 1, field);
 		await this.r.hook(this.game);
 
+		this.ticker = this.r.app.ticker;
+
 		observe(this.game.world, onSet(TerrainLocationComponent), (eid, params) =>
 		{
 			const currentFacePoint = this.getFacePoint(params.faceId);
@@ -121,7 +126,7 @@ export class ClientGame
 			return params;
 		});
 
-		this.r.app.ticker.add
+		this.ticker.add
 		(			
 			(ticker) =>
 			{
@@ -142,7 +147,7 @@ export class ClientGame
 		this.renderProvinceInteractionOverlay();
 	}
 
-	setMovementTestConfig(nextConfig: Partial<MovementTestConfig>): void
+	setMovementConfig(nextConfig: Partial<MovementConfig>): void
 	{
 		const hasCostConfig =
 			typeof nextConfig.lowlandThreshold === 'number' ||
@@ -160,9 +165,15 @@ export class ClientGame
 		}
 	}
 
-	bind(onFrame?: (deltaMs: number, now: number) => void): void
-	{
-
+	bindUtilityTick(onFrame: (dt: number, fps: number) => void): void {
+		this.ticker.add
+			(
+				(ticker) => {
+					onFrame(ticker.deltaTime, ticker.FPS)
+				}
+				, undefined
+				, UPDATE_PRIORITY.UTILITY
+			);
 	}
 
 	setLocalPlayerId(playerId: number | null): void
@@ -245,9 +256,36 @@ export class ClientGame
 		}
 	}
 
+	public getPointerCanvasPosition(event: PointerEvent): Vec2 | null
+	{
+		const canvas = this.r.app.canvas;
+		
+		if (!canvas || !canvas.getBoundingClientRect)
+		{
+			return null;
+		}
+
+		const rect = canvas.getBoundingClientRect();
+		if (rect.width === 0 || rect.height === 0)
+		{
+			return null;
+		}
+
+		const scaleX = this.config.width / rect.width;
+		const scaleY = this.config.height / rect.height;
+
+		return {
+			x: (event.clientX - rect.left) * scaleX,
+			y: (event.clientY - rect.top) * scaleY,
+		};
+	}
+
 	private pointerMove = (event: PointerEvent) =>
 	{
-		const position = this.r.getPointerWorldPosition(event);
+		const position = this.getPointerCanvasPosition(event);
+
+		console.log("mouse", {ev: {x: event.clientX, y: event.clientY}, cv: position});
+
 		if (!position)
 		{
 			return;
@@ -274,7 +312,7 @@ export class ClientGame
 
 	private pointerDown = (event: PointerEvent) =>
 	{
-		const position = this.r.getPointerWorldPosition(event);
+		const position = this.getPointerCanvasPosition(event);
 		if (!position)
 		{
 			return;

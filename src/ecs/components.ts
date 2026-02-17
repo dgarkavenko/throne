@@ -17,17 +17,11 @@ export const TerrainRouteComponent =
 
 export const RenderableComponent = {
 	color: [] as number[],
-	sprite: [] as string[],
+	content: [] as string[],
+	anchor: [] as number[],
 	x: [] as number[],
 	y: [] as number[],
 };
 
 export const Dirty = {}
-
 export const VisibleTag = {}
-
-export const RenderableInfoComponent = {
-	sprite: [] as string[],
-	scale: [] as number[],
-	anchor: [] as number[]
-};

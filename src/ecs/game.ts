@@ -64,7 +64,7 @@ export function ensureActorEntity(world: World, actorId: number, ownerId: number
 	ActorComponent.netId[entity] = actorId;
 	ActorComponent.ownerId[entity] = ownerId;
 	TerrainLocationComponent.faceId[entity] = 0;
-	RenderableComponent.sprite[entity] = 'unit_cb_02';
+	RenderableComponent.content[entity] = 'unit_cb_02';
 	RenderableComponent.color[entity] = 0xffce54;
 	addComponent(world, entity, Dirty);
 	return entity;
