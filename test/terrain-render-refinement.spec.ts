@@ -7,8 +7,8 @@ import { buildTerrainGeneration, toTerrainGenerationState } from '../src/terrain
 import {
   DEFAULT_TERRAIN_RENDER_CONTROLS,
   type TerrainRenderControls,
-} from '../src/client/terrain/render-controls';
-import { TerrainRefinementCacheStore } from '../src/client/terrain/refinement-cache';
+} from '../src/client/rendering/render-controls';
+import { TerrainRefinementCacheStore } from '../src/client/rendering/refinement-cache';
 
 const CONFIG = { width: 640, height: 360 };
 
@@ -68,4 +68,3 @@ describe('terrain refinement cache', () => {
     expect(second).not.toBe(first);
   });
 });
-

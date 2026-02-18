@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SharedTerrainRuntime } from '../src/client/runtime/shared-terrain-runtime';
 import { DEFAULT_TERRAIN_GENERATION_CONTROLS } from '../src/terrain/controls';
-import { DEFAULT_TERRAIN_RENDER_CONTROLS } from '../src/client/terrain/render-controls';
 
 const SIZE = { width: 640, height: 360 };
 
@@ -18,8 +17,8 @@ describe('shared terrain runtime', () => {
       mapHeight: SIZE.height,
     };
     runtime.applyTerrainSnapshot(firstSnapshot, 7);
-    const firstPresentation = runtime.getPresentationState();
-    const firstFingerprint = runtime.state.terrainState?.generationFingerprint ?? null;
+    const firstTerrainState = runtime.state.terrainState;
+    const firstFingerprint = firstTerrainState?.generationFingerprint ?? null;
 
     runtime.applyTerrainSnapshot(
       {
@@ -38,11 +37,15 @@ describe('shared terrain runtime', () => {
     expect(runtime.state.generationControls.seed).toBe(firstSnapshot.controls.seed);
     expect(runtime.state.generationControls.spacing).toBe(firstSnapshot.controls.spacing);
     expect(runtime.state.terrainState?.generationFingerprint ?? null).toBe(firstFingerprint);
-    expect(runtime.getPresentationState()).toBe(firstPresentation);
+    expect(runtime.state.terrainState).toBe(firstTerrainState);
+    expect(runtime.mapWidth).toBe(SIZE.width);
+    expect(runtime.mapHeight).toBe(SIZE.height);
   });
 
-  it('keeps refinement payload stable for non-refinement render-control changes', () => {
+  it('exposes terrain state only after terrain is available', () => {
     const runtime = new SharedTerrainRuntime(SIZE);
+    expect(runtime.state.terrainState).toBeNull();
+
     runtime.applyTerrainSnapshot(
       {
         controls: {
@@ -54,19 +57,8 @@ describe('shared terrain runtime', () => {
       },
       1
     );
-    const first = runtime.getPresentationState();
-    expect(first).not.toBeNull();
 
-    const result = runtime.setTerrainRenderControls({
-      ...DEFAULT_TERRAIN_RENDER_CONTROLS,
-      showDualGraph: true,
-      provinceBorderWidth: DEFAULT_TERRAIN_RENDER_CONTROLS.provinceBorderWidth + 2,
-    });
-    const second = runtime.getPresentationState();
-
-    expect(result.changed).toBe(true);
-    expect(result.refinementChanged).toBe(false);
-    expect(second).not.toBeNull();
-    expect(second?.staticRender.refined).toStrictEqual(first?.staticRender.refined);
+    expect(runtime.state.terrainState).not.toBeNull();
+    expect(runtime.state.generationControls.seed).toBe(99);
   });
 });

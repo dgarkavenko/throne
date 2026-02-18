@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveHoverTarget, resolveSelectionTarget } from '../src/client/runtime/selection-policy';
 import { DEFAULT_TERRAIN_GENERATION_CONTROLS } from '../src/terrain/controls';
 import { buildTerrainGeneration, toTerrainGenerationState } from '../src/terrain/pipeline';
-import { buildProvincePickModel, pickProvinceAt } from '../src/client/terrain/presentation';
+import { buildProvincePickModel, pickProvinceAt } from '../src/client/runtime/province-pick';
 
 describe('client province selection policy', () => {
   it('prioritizes actor over province for hover and selection', () => {

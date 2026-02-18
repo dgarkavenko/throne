@@ -7,7 +7,7 @@
 import { GameRenderer } from '../rendering/game-renderer';
 import type { TerrainGenerationControls } from '../../terrain/controls';
 import type { TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
-import type { TerrainRenderControls } from '../terrain/render-controls';
+import type { TerrainRenderControls } from '../rendering/render-controls';
 import { SharedTerrainRuntime } from './shared-terrain-runtime';
 
 export type GameConfig = {
@@ -37,22 +37,32 @@ export class EditorGame {
       window.devicePixelRatio || 1,
       field
     );
-    const presentation = this.terrain.getPresentationState();
-    if (presentation) {
-      this.r.renderTerrainStatic(presentation);
+    const terrainState = this.terrain.state.terrainState;
+    if (terrainState) {
+      this.r.renderTerrain(
+        this.terrain.mapWidth,
+        this.terrain.mapHeight,
+        terrainState,
+        this.terrain.state.generationControls
+      );
     }
   }
 
   setTerrainRenderControls(nextControls: TerrainRenderControls): void {
-    const result = this.terrain.setTerrainRenderControls(nextControls);
-    const presentation = this.terrain.getPresentationState();
-    if (!presentation || !result.changed) {
+    const result = this.r.setTerrainRenderControls(nextControls);
+    const terrainState = this.terrain.state.terrainState;
+    if (!terrainState || !result.changed) {
       return;
     }
     if (result.refinementChanged) {
-      this.r.renderTerrainStatic(presentation);
+      this.r.renderTerrain(
+        this.terrain.mapWidth,
+        this.terrain.mapHeight,
+        terrainState,
+        this.terrain.state.generationControls
+      );
     } else {
-      this.r.rerenderProvinceBorders(presentation);
+      this.r.rerenderProvinceBorders();
     }
   }
 
@@ -62,17 +72,27 @@ export class EditorGame {
 
   setTerrainGenerationControls(nextControls: TerrainGenerationControls): void {
     this.terrain.setTerrainGenerationControls(nextControls, true);
-    const presentation = this.terrain.getPresentationState();
-    if (presentation) {
-      this.r.renderTerrainStatic(presentation);
+    const terrainState = this.terrain.state.terrainState;
+    if (terrainState) {
+      this.r.renderTerrain(
+        this.terrain.mapWidth,
+        this.terrain.mapHeight,
+        terrainState,
+        this.terrain.state.generationControls
+      );
     }
   }
 
   applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void {
     this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
-    const presentation = this.terrain.getPresentationState();
-    if (presentation) {
-      this.r.renderTerrainStatic(presentation);
+    const terrainState = this.terrain.state.terrainState;
+    if (terrainState) {
+      this.r.renderTerrain(
+        this.terrain.mapWidth,
+        this.terrain.mapHeight,
+        terrainState,
+        this.terrain.state.generationControls
+      );
     }
   }
 

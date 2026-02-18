@@ -11,8 +11,21 @@ import
 	} from '../../ecs/components';
 import type { EcsGame } from '../../ecs/game';
 import { renderTerrain, updateProvinceBorders } from '../../terrain/core/terrain-core';
-import { toLegacyTerrainControls } from '../../terrain/controls';
-import type { TerrainPresentationState, Vec2 } from '../terrain/types';
+import { toLegacyTerrainControls, type TerrainGenerationControls } from '../../terrain/controls';
+import type { TerrainGenerationState } from '../../terrain/types';
+import {
+	DEFAULT_TERRAIN_RENDER_CONTROLS,
+	fingerprintTerrainRenderControls,
+	hasRefinementControlChange,
+	normalizeTerrainRenderControls,
+	type TerrainRenderControls,
+} from './render-controls';
+import { TerrainRefinementCacheStore } from './refinement-cache';
+import {
+	buildTerrainPresentationState,
+	type TerrainPresentationState,
+	type Vec2,
+} from './terrain-presentation';
 
 type MeshOverlay = {
 	container: Container;
@@ -39,17 +52,19 @@ export class GameRenderer
 
 	private readonly sprites = new Map<number, Sprite>();
 	private canvasHandlers = new Map<string, EventListener>();
+	private readonly refinementCache = new TerrainRefinementCacheStore();
+	private renderControls: TerrainRenderControls = { ...DEFAULT_TERRAIN_RENDER_CONTROLS };
+	private lastTerrainState: TerrainGenerationState | null = null;
+	private lastGenerationControls: TerrainGenerationControls | null = null;
+	private lastMapWidth = 0;
+	private lastMapHeight = 0;
 	private terrainState: TerrainPresentationState | null = null;
 	private meshOverlay: MeshOverlay | null = null;
 	private provinceSelectionOverlay: ProvinceSelectionOverlay | null = null;
-	private _width: number;
-	private _height: number;
 
 	constructor()
 	{
 		this.app = new Application();
-		this._width = 1;
-		this._height = 1;
 	}
 
 	async init(w: number, h: number, ratio: number, field: HTMLElement | null): Promise<void>
@@ -63,9 +78,6 @@ export class GameRenderer
 			antialias: true,
 		});
 
-		this._width = 1;
-		this._height = 1;
-
 		if (field)
 		{
 			field.appendChild(this.app.canvas ?? this.app.view);
@@ -74,7 +86,7 @@ export class GameRenderer
 		this.app.stage.addChild(this.terrainLayer, this.unitsLayer, this.uiLayer);
 	}
 
-	async hook(game: EcsGame): Promise<void>
+	async hookGame(game: EcsGame): Promise<void>
 	{
 		await Assets.load([
 			{ alias: 'unit_cb_02', src: '/assets/units/unit_cb_02.png' },
@@ -111,25 +123,62 @@ export class GameRenderer
 		});
 	}
 
-	renderTerrainStatic(state: TerrainPresentationState): void
+	setTerrainRenderControls(next: TerrainRenderControls): {
+		changed: boolean;
+		refinementChanged: boolean;
+	}
 	{
-		this.terrainState = state;
-		const staticRender = state.staticRender;
-		const renderControls = staticRender.renderControls;
+		const sanitized = normalizeTerrainRenderControls(next);
+		const prev = this.renderControls;
+		const changed =
+			fingerprintTerrainRenderControls(prev) !== fingerprintTerrainRenderControls(sanitized);
+		const refinementChanged = hasRefinementControlChange(prev, sanitized);
+		this.renderControls = sanitized;
+		if (refinementChanged)
+		{
+			this.refinementCache.clear();
+		}
+		return { changed, refinementChanged };
+	}
+
+	renderTerrain(
+		mapWidth: number,
+		mapHeight: number,
+		terrainState: TerrainGenerationState,
+		generationControls: TerrainGenerationControls
+	): void
+	{
+		this.lastTerrainState = terrainState;
+		this.lastGenerationControls = { ...generationControls };
+		this.lastMapWidth = mapWidth;
+		this.lastMapHeight = mapHeight;
+		const refined = this.refinementCache.resolve(
+			terrainState,
+			generationControls,
+			this.renderControls
+		);
+		this.terrainState = buildTerrainPresentationState(
+			{ width: mapWidth, height: mapHeight },
+			terrainState,
+			generationControls,
+			this.renderControls,
+			refined
+		);
+		const staticRender = this.terrainState.staticRender;
 		const legacyControls = toLegacyTerrainControls(staticRender.generationControls, {
-			showPolygonGraph: renderControls.showPolygonGraph,
-			showDualGraph: renderControls.showDualGraph,
-			showCornerNodes: renderControls.showCornerNodes,
-			showCenterNodes: renderControls.showCenterNodes,
-			showInsertedPoints: renderControls.showInsertedPoints,
-			provinceBorderWidth: renderControls.provinceBorderWidth,
-			showLandBorders: renderControls.showLandBorders,
-			showShoreBorders: renderControls.showShoreBorders,
-			intermediateSeed: renderControls.intermediateSeed,
-			intermediateMaxIterations: renderControls.intermediateMaxIterations,
-			intermediateThreshold: renderControls.intermediateThreshold,
-			intermediateRelMagnitude: renderControls.intermediateRelMagnitude,
-			intermediateAbsMagnitude: renderControls.intermediateAbsMagnitude,
+			showPolygonGraph: this.renderControls.showPolygonGraph,
+			showDualGraph: this.renderControls.showDualGraph,
+			showCornerNodes: this.renderControls.showCornerNodes,
+			showCenterNodes: this.renderControls.showCenterNodes,
+			showInsertedPoints: this.renderControls.showInsertedPoints,
+			provinceBorderWidth: this.renderControls.provinceBorderWidth,
+			showLandBorders: this.renderControls.showLandBorders,
+			showShoreBorders: this.renderControls.showShoreBorders,
+			intermediateSeed: this.renderControls.intermediateSeed,
+			intermediateMaxIterations: this.renderControls.intermediateMaxIterations,
+			intermediateThreshold: this.renderControls.intermediateThreshold,
+			intermediateRelMagnitude: this.renderControls.intermediateRelMagnitude,
+			intermediateAbsMagnitude: this.renderControls.intermediateAbsMagnitude,
 		});
 		renderTerrain(
 			staticRender.config,
@@ -149,25 +198,41 @@ export class GameRenderer
 		this.repositionProvinceOverlay();
 	}
 
-	rerenderProvinceBorders(state: TerrainPresentationState): void
+	rerenderProvinceBorders(): void
 	{
-		this.terrainState = state;
-		const staticRender = state.staticRender;
-		const renderControls = staticRender.renderControls;
+		if (!this.lastTerrainState || !this.lastGenerationControls)
+		{
+			return;
+		}
+		const terrainState = this.lastTerrainState;
+		const generationControls = this.lastGenerationControls;
+		const refined = this.refinementCache.resolve(
+			terrainState,
+			generationControls,
+			this.renderControls
+		);
+		this.terrainState = buildTerrainPresentationState(
+			{ width: this.lastMapWidth, height: this.lastMapHeight },
+			terrainState,
+			generationControls,
+			this.renderControls,
+			refined
+		);
+		const staticRender = this.terrainState.staticRender;
 		const legacyControls = toLegacyTerrainControls(staticRender.generationControls, {
-			showPolygonGraph: renderControls.showPolygonGraph,
-			showDualGraph: renderControls.showDualGraph,
-			showCornerNodes: renderControls.showCornerNodes,
-			showCenterNodes: renderControls.showCenterNodes,
-			showInsertedPoints: renderControls.showInsertedPoints,
-			provinceBorderWidth: renderControls.provinceBorderWidth,
-			showLandBorders: renderControls.showLandBorders,
-			showShoreBorders: renderControls.showShoreBorders,
-			intermediateSeed: renderControls.intermediateSeed,
-			intermediateMaxIterations: renderControls.intermediateMaxIterations,
-			intermediateThreshold: renderControls.intermediateThreshold,
-			intermediateRelMagnitude: renderControls.intermediateRelMagnitude,
-			intermediateAbsMagnitude: renderControls.intermediateAbsMagnitude,
+			showPolygonGraph: this.renderControls.showPolygonGraph,
+			showDualGraph: this.renderControls.showDualGraph,
+			showCornerNodes: this.renderControls.showCornerNodes,
+			showCenterNodes: this.renderControls.showCenterNodes,
+			showInsertedPoints: this.renderControls.showInsertedPoints,
+			provinceBorderWidth: this.renderControls.provinceBorderWidth,
+			showLandBorders: this.renderControls.showLandBorders,
+			showShoreBorders: this.renderControls.showShoreBorders,
+			intermediateSeed: this.renderControls.intermediateSeed,
+			intermediateMaxIterations: this.renderControls.intermediateMaxIterations,
+			intermediateThreshold: this.renderControls.intermediateThreshold,
+			intermediateRelMagnitude: this.renderControls.intermediateRelMagnitude,
+			intermediateAbsMagnitude: this.renderControls.intermediateAbsMagnitude,
 		});
 		updateProvinceBorders(this.terrainLayer, legacyControls);
 		this.setGraphOverlayVisibility();

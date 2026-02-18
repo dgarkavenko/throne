@@ -1014,7 +1014,7 @@ export function createPageLayout(): PageLayout {
 				fpsEl.textContent = 'FPS: --';
 				return;
 			}
-			fpsEl.textContent = 'FPS: ' + fps;
+			fpsEl.textContent = 'FPS: ' + Math.round(fps);
 		},
 		setConnected(isConnected) {
 			document.body.classList.toggle('connected', isConnected);

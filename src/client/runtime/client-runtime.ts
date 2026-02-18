@@ -35,9 +35,14 @@ import
 		TerrainLocationComponent,
 	} from '../../ecs/components';
 import { GameRenderer } from '../rendering/game-renderer';
-import type { TerrainRenderControls } from '../terrain/render-controls';
+import type { TerrainRenderControls } from '../rendering/render-controls';
 import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
 import { SharedTerrainRuntime } from './shared-terrain-runtime';
+import {
+	buildProvincePickModel,
+	pickProvinceAt as pickProvinceFromModel,
+	type ProvincePickModel,
+} from './province-pick';
 import { resolveHoverTarget, resolveSelectionTarget } from './selection-policy';
 
 export type GameConfig = {
@@ -64,6 +69,7 @@ export class ClientGame
 	private lastWorldSnapshotSeq = -1;
 
 	private readonly terrain: SharedTerrainRuntime;
+	private pickModel: ProvincePickModel | null = null;
 	private readonly r: GameRenderer;
 	private ticker: Ticker;
 	private readonly game: EcsGame;
@@ -86,7 +92,7 @@ export class ClientGame
 	async init(field: HTMLElement | null): Promise<void>
 	{
 		await this.r.init(this.config.width, this.config.height, window.devicePixelRatio || 1, field);
-		await this.r.hook(this.game);
+		await this.r.hookGame(this.game);
 
 		this.ticker = this.r.app.ticker;
 
@@ -115,18 +121,23 @@ export class ClientGame
 
 	setTerrainRenderControls(nextControls: TerrainRenderControls): void
 	{
-		const result = this.terrain.setTerrainRenderControls(nextControls);
-		const presentation = this.terrain.getPresentationState();
-		if (!presentation || !result.changed)
+		const result = this.r.setTerrainRenderControls(nextControls);
+		const terrainState = this.terrain.state.terrainState;
+		if (!terrainState || !result.changed)
 		{
 			return;
 		}
 		if (result.refinementChanged)
 		{
-			this.r.renderTerrainStatic(presentation);
+			this.r.renderTerrain(
+				this.terrain.mapWidth,
+				this.terrain.mapHeight,
+				terrainState,
+				this.terrain.state.generationControls
+			);
 		} else
 		{
-			this.r.rerenderProvinceBorders(presentation);
+			this.r.rerenderProvinceBorders();
 		}
 	}
 
@@ -165,10 +176,16 @@ export class ClientGame
 	{
 		this.lastWorldSnapshotSeq = -1;
 		this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
-		const presentation = this.terrain.getPresentationState();
-		if (presentation)
+		this.rebuildPickModel();
+		const terrainState = this.terrain.state.terrainState;
+		if (terrainState)
 		{
-			this.r.renderTerrainStatic(presentation);
+			this.r.renderTerrain(
+				this.terrain.mapWidth,
+				this.terrain.mapHeight,
+				terrainState,
+				this.terrain.state.generationControls
+			);
 			this.ensureProvinceEntities();
 		}
 	}
@@ -235,7 +252,7 @@ export class ClientGame
 	{
 		const position = this.getPointerCanvasPosition(event);
 		const hoveredActorId = this.getActorIdAt(this.game.world, position.x, position.y);
-		const hoveredProvinceId = this.terrain.pickProvinceAt(position.x, position.y);
+		const hoveredProvinceId = this.pickProvinceAt(position.x, position.y);
 		const resolution = resolveHoverTarget(hoveredActorId, hoveredProvinceId);
 		this.setHoveredActor(resolution.actorId);
 		this.setHoveredProvince(resolution.provinceId);
@@ -254,7 +271,7 @@ export class ClientGame
 		if (event.button === 0)
 		{
 			const actorId = this.getActorIdAt(this.game.world, position.x, position.y);
-			const provinceId = this.terrain.pickProvinceAt(position.x, position.y);
+			const provinceId = this.pickProvinceAt(position.x, position.y);
 			const resolution = resolveSelectionTarget(actorId, provinceId);
 			this.setSelectedActor(resolution.actorId);
 			this.setSelectedProvince(resolution.provinceId);
@@ -346,12 +363,12 @@ export class ClientGame
 		{
 			return;
 		}
-		const presentation = this.terrain.getPresentationState();
-		if (!presentation)
+		const provinceCount = this.terrain.state.terrainState?.provinces.faces.length;
+		if (provinceCount === undefined)
 		{
 			return;
 		}
-		for (let provinceId = 0; provinceId < presentation.overlay.provinceCount; provinceId += 1)
+		for (let provinceId = 0; provinceId < provinceCount; provinceId += 1)
 		{
 			const entity = addEntity(this.game.world);
 			addComponent(this.game.world, entity, ProvinceComponent);
@@ -445,5 +462,29 @@ export class ClientGame
 			return clientNow;
 		}
 		return clientNow + this.serverClockOffsetMs;
+	}
+
+	private rebuildPickModel(): void
+	{
+		const terrainState = this.terrain.state.terrainState;
+		if (!terrainState)
+		{
+			this.pickModel = null;
+			return;
+		}
+		this.pickModel = buildProvincePickModel(
+			{ width: this.terrain.mapWidth, height: this.terrain.mapHeight },
+			terrainState,
+			this.terrain.state.generationControls
+		);
+	}
+
+	private pickProvinceAt(worldX: number, worldY: number): number | null
+	{
+		if (!this.pickModel)
+		{
+			return null;
+		}
+		return pickProvinceFromModel(this.pickModel, worldX, worldY);
 	}
 }
