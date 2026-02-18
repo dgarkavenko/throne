@@ -5,44 +5,16 @@
  * - world snapshot acceptance gates (terrain version + sequence monotonicity)
  * - pointer interaction branch for actor selection vs province selection
  */
-import
-	{
-		addComponent,
-		addEntity,
-		observe,
-		onSet,
-		query,
-		removeComponent,
-		setComponent,
-		World,
-	} from 'bitecs';
+import { addComponent, addEntity, observe, onSet, query, removeComponent, setComponent, World } from 'bitecs';
 import { Ticker, UPDATE_PRIORITY } from 'pixi.js';
-import
-	{
-		createClientPipeline,
-		createEcsGame,
-		ensureActorEntity,
-		type EcsPipeline,
-		type EcsGame,
-	} from '../../ecs/game';
-import
-	{
-		ActorComponent,
-		Hovered,
-		ProvinceComponent,
-		RenderableComponent,
-		Selected,
-		TerrainLocationComponent,
-	} from '../../ecs/components';
+import { createClientPipeline, createEcsGame, ensureActorEntity, type EcsPipeline, type EcsGame } from '../../ecs/game';
+import { ActorComponent, Hovered, ProvinceComponent, RenderableComponent, Selected, TerrainLocationComponent } from '../../ecs/components';
 import { GameRenderer } from '../rendering/game-renderer';
 import type { TerrainRenderControls } from '../rendering/render-controls';
+import type { TerrainGenerationState } from '../../terrain/types';
 import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
 import { SharedTerrainRuntime } from './shared-terrain-runtime';
-import {
-	buildProvincePickModel,
-	pickProvinceAt as pickProvinceFromModel,
-	type ProvincePickModel,
-} from './province-pick';
+import { buildProvincePickModel, pickProvinceAt as pickProvinceFromModel, type ProvincePickModel } from './province-pick';
 
 export type GameConfig = {
 	width: number;
@@ -66,7 +38,8 @@ export class ClientGame
 	private hasServerClockOffset = false;
 	private lastWorldSnapshotSeq = -1;
 
-	private readonly terrain: SharedTerrainRuntime;
+	private readonly terrainGen: SharedTerrainRuntime;
+	private terrainState: TerrainGenerationState | null = null;
 	private pickModel: ProvincePickModel | null = null;
 	private readonly r: GameRenderer;
 	private ticker: Ticker;
@@ -82,7 +55,7 @@ export class ClientGame
 		this.r = new GameRenderer();
 		this.ticker = this.r.app.ticker;
 
-		this.terrain = new SharedTerrainRuntime({
+		this.terrainGen = new SharedTerrainRuntime({
 			width: config.width,
 			height: config.height,
 		});
@@ -123,18 +96,17 @@ export class ClientGame
 	setTerrainRenderControls(nextControls: TerrainRenderControls): void
 	{
 		const result = this.r.setTerrainRenderControls(nextControls);
-		const terrainState = this.terrain.state.terrainState;
-		if (!terrainState || !result.changed)
+		if (!this.terrainState || !result.changed)
 		{
 			return;
 		}
 		if (result.refinementChanged)
 		{
 			this.r.renderTerrain(
-				this.terrain.mapWidth,
-				this.terrain.mapHeight,
-				terrainState,
-				this.terrain.state.generationControls
+				this.terrainGen.mapWidth,
+				this.terrainGen.mapHeight,
+				this.terrainState,
+				this.terrainGen.getGenerationControls()
 			);
 		} else
 		{
@@ -161,7 +133,7 @@ export class ClientGame
 
 	getTerrainVersion(): number
 	{
-		return this.terrain.state.lastTerrainVersion;
+		return this.terrainGen.getTerrainVersion();
 	}
 
 	onProvinceSelectionChange(listener: (provinceId: number | null) => void): () => void
@@ -177,38 +149,36 @@ export class ClientGame
 	{
 		this.lastWorldSnapshotSeq = -1;
 		this.pickModel = null;
-		this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
-		const terrainState = this.terrain.state.terrainState;
+		this.terrainState = this.terrainGen.applyTerrainSnapshot(snapshot, terrainVersion);
 		
-		if (terrainState)
+		if (this.terrainState)
 		{
 			this.makeProvinceEntities();
 
 			this.pickModel = buildProvincePickModel(
-				{ width: this.terrain.mapWidth, height: this.terrain.mapHeight },
-				terrainState,
-				this.terrain.state.generationControls,
+				{ width: this.terrainGen.mapWidth, height: this.terrainGen.mapHeight },
+				this.terrainState,
 				this.game.world
 			);
 
 			this.r.renderTerrain(
-				this.terrain.mapWidth,
-				this.terrain.mapHeight,
-				terrainState,
-				this.terrain.state.generationControls
+				this.terrainGen.mapWidth,
+				this.terrainGen.mapHeight,
+				this.terrainState,
+				this.terrainGen.getGenerationControls()
 			);	
 		}
 	}
 
 	applyWorldSnapshot(snapshot: WorldSnapshotMessage): void
 	{
-		if (!this.terrain.state.terrainState)
+		if (!this.terrainState)
 		{
 			throw new Error('Received world snapshot before terrain snapshot.');
 		}
 		if (
-			!this.terrain.state.terrainState ||
-			snapshot.terrainVersion !== this.terrain.state.lastTerrainVersion
+			!this.terrainState ||
+			snapshot.terrainVersion !== this.terrainGen.getTerrainVersion()
 		)
 		{
 			return;
@@ -366,11 +336,11 @@ export class ClientGame
 
 	private makeProvinceEntities(): void
 	{
-		if (this.provinceEntitiesInitialized || !this.terrain.state.terrainState)
+		if (this.provinceEntitiesInitialized || !this.terrainState)
 		{
 			return;
 		}
-		const provinceCount = this.terrain.state.terrainState.provinces.faces.length;
+		const provinceCount = this.terrainState.provinces.faces.length;
 		if (provinceCount === undefined)
 		{
 			return;
@@ -380,7 +350,7 @@ export class ClientGame
 			const entity = addEntity(this.game.world);
 			addComponent(this.game.world, entity, ProvinceComponent);
 			ProvinceComponent.provinceId[entity] = provinceId;
-			ProvinceComponent.face[entity] = this.terrain.state.terrainState.provinces.faces[provinceId];
+			ProvinceComponent.face[entity] = this.terrainState.provinces.faces[provinceId];
 			this.provinceEntityById.set(provinceId, entity);
 		}
 		this.provinceEntitiesInitialized = true;
@@ -434,11 +404,11 @@ export class ClientGame
 
 	private getFacePoint(faceId: number): Vec2 | null
 	{
-		if (!this.terrain.state.terrainState)
+		if (!this.terrainState)
 		{
 			return null;
 		}
-		const face = this.terrain.state.terrainState.mesh.mesh.faces[faceId];
+		const face = this.terrainState.mesh.mesh.faces[faceId];
 		if (!face)
 		{
 			return null;

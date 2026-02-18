@@ -38,7 +38,6 @@ function pointInPolygon(x: number, y: number, polygon: Vec2[]): boolean
 export function buildProvincePickModel(
 	size: TerrainSize,
 	terrainState: TerrainGenerationState,
-	generationControls: TerrainGenerationControls,
 	world: World
 ): ProvincePickModel
 {
@@ -47,7 +46,7 @@ export function buildProvincePickModel(
 	const faceCount = meshState.mesh.faces.length;
 	const facePolygons: Vec2[][] = new Array(faceCount);
 	const faceAabbs: Array<{ minX: number; minY: number; maxX: number; maxY: number }> = new Array(faceCount);
-	const gridSize = Math.max(32, generationControls.spacing * 2);
+	const gridSize = 32;
 	const gridColumns = Math.max(1, Math.ceil(size.width / gridSize));
 	const gridRows = Math.max(1, Math.ceil(size.height / gridSize));
 	const grid = new Map<number, number[]>();

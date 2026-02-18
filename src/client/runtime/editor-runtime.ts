@@ -6,6 +6,7 @@
  */
 import { GameRenderer } from '../rendering/game-renderer';
 import type { TerrainGenerationControls } from '../../terrain/controls';
+import type { TerrainGenerationState } from '../../terrain/types';
 import type { TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
 import type { TerrainRenderControls } from '../rendering/render-controls';
 import { SharedTerrainRuntime } from './shared-terrain-runtime';
@@ -18,6 +19,7 @@ export type GameConfig = {
 export class EditorGame {
   private readonly config: GameConfig;
   private readonly terrain: SharedTerrainRuntime;
+  private terrainState: TerrainGenerationState | null = null;
   private readonly r: GameRenderer;
 
   constructor(config: GameConfig & { autoGenerateTerrain?: boolean }) {
@@ -26,8 +28,10 @@ export class EditorGame {
     this.terrain = new SharedTerrainRuntime({
       width: config.width,
       height: config.height,
-      autoGenerateTerrain: config.autoGenerateTerrain,
     });
+    if (config.autoGenerateTerrain) {
+      this.terrainState = this.terrain.regenerateAll();
+    }
   }
 
   async init(field: HTMLElement | null): Promise<void> {
@@ -37,29 +41,27 @@ export class EditorGame {
       window.devicePixelRatio || 1,
       field
     );
-    const terrainState = this.terrain.state.terrainState;
-    if (terrainState) {
+    if (this.terrainState) {
       this.r.renderTerrain(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
-        terrainState,
-        this.terrain.state.generationControls
+        this.terrainState,
+        this.terrain.getGenerationControls()
       );
     }
   }
 
   setTerrainRenderControls(nextControls: TerrainRenderControls): void {
     const result = this.r.setTerrainRenderControls(nextControls);
-    const terrainState = this.terrain.state.terrainState;
-    if (!terrainState || !result.changed) {
+    if (!this.terrainState || !result.changed) {
       return;
     }
     if (result.refinementChanged) {
       this.r.renderTerrain(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
-        terrainState,
-        this.terrain.state.generationControls
+        this.terrainState,
+        this.terrain.getGenerationControls()
       );
     } else {
       this.r.rerenderProvinceBorders();
@@ -67,31 +69,29 @@ export class EditorGame {
   }
 
   getTerrainVersion(): number {
-    return this.terrain.state.lastTerrainVersion;
+    return this.terrain.getTerrainVersion();
   }
 
   setTerrainGenerationControls(nextControls: TerrainGenerationControls): void {
-    this.terrain.setTerrainGenerationControls(nextControls, true);
-    const terrainState = this.terrain.state.terrainState;
-    if (terrainState) {
+    this.terrainState = this.terrain.setTerrainGenerationControls(nextControls, true);
+    if (this.terrainState) {
       this.r.renderTerrain(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
-        terrainState,
-        this.terrain.state.generationControls
+        this.terrainState,
+        this.terrain.getGenerationControls()
       );
     }
   }
 
   applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void {
-    this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
-    const terrainState = this.terrain.state.terrainState;
-    if (terrainState) {
+    this.terrainState = this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
+    if (this.terrainState) {
       this.r.renderTerrain(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
-        terrainState,
-        this.terrain.state.generationControls
+        this.terrainState,
+        this.terrain.getGenerationControls()
       );
     }
   }

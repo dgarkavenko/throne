@@ -9,14 +9,6 @@ import type { TerrainSnapshot } from '../../shared/protocol';
 export type SharedTerrainRuntimeConfig = {
   width: number;
   height: number;
-  autoGenerateTerrain?: boolean;
-};
-
-export type SharedTerrainRuntimeState = {
-  hasTerrain: boolean;
-  lastTerrainVersion: number;
-  terrainState: TerrainGenerationState | null;
-  generationControls: TerrainGenerationControls;
 };
 
 export class SharedTerrainRuntime {
@@ -24,51 +16,48 @@ export class SharedTerrainRuntime {
   public readonly mapHeight: number;
   private readonly mapSystem: MapSystem;
   private hasAcceptedTerrainSnapshot = false;
-
-  public readonly state: SharedTerrainRuntimeState;
+  private lastTerrainVersion = 0;
+  private terrainState: TerrainGenerationState | null = null;
 
   constructor(config: SharedTerrainRuntimeConfig) {
     this.mapWidth = config.width;
     this.mapHeight = config.height;
     this.mapSystem = new MapSystem({ width: config.width, height: config.height });
-    this.state = {
-      hasTerrain: false,
-      lastTerrainVersion: 0,
-      terrainState: null,
-      generationControls: this.mapSystem.getGenerationControls(),
-    };
-    if (config.autoGenerateTerrain) {
-      this.regenerateAll();
-      this.hasAcceptedTerrainSnapshot = true;
-    }
   }
 
   setTerrainGenerationControls(
     next: TerrainGenerationControls,
     regenerateIfMissing = false
-  ): void {
+  ): TerrainGenerationState | null {
     const result = this.mapSystem.setTerrainGenerationControls(next);
-    this.state.generationControls = this.mapSystem.getGenerationControls();
-    if (!this.state.hasTerrain) {
+    if (!this.terrainState) {
       if (regenerateIfMissing) {
-        this.regenerateAll();
+        return this.regenerateAll();
       }
-      return;
+      return null;
     }
     if (result.changed) {
-      this.regeneratePartial(result.dirty);
-      return;
+      return this.regeneratePartial(result.dirty);
     }
+    return this.terrainState;
   }
 
-  applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void {
+  applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): TerrainGenerationState | null {
     if (this.hasAcceptedTerrainSnapshot) {
       console.warn('[SharedTerrainRuntime] ignoring terrain snapshot: terrain is immutable after first apply');
-      return;
+      return this.terrainState;
     }
     this.hasAcceptedTerrainSnapshot = true;
-    this.state.lastTerrainVersion = Math.max(0, Math.round(terrainVersion));
-    this.setTerrainGenerationControls(snapshot.controls, true);
+    this.lastTerrainVersion = Math.max(0, Math.round(terrainVersion));
+    return this.setTerrainGenerationControls(snapshot.controls, true);
+  }
+
+  getGenerationControls(): TerrainGenerationControls {
+    return this.mapSystem.getGenerationControls();
+  }
+
+  getTerrainVersion(): number {
+    return this.lastTerrainVersion;
   }
 
   getTerrainSnapshotForReplication(): TerrainSnapshot {
@@ -79,17 +68,15 @@ export class SharedTerrainRuntime {
     };
   }
 
-  regenerateAll(): void {
+  regenerateAll(): TerrainGenerationState {
     const state = this.mapSystem.regenerateAll();
-    this.state.generationControls = this.mapSystem.getGenerationControls();
-    this.state.terrainState = state;
-    this.state.hasTerrain = true;
+    this.terrainState = state;
+    return state;
   }
 
-  regeneratePartial(dirty: TerrainGenerationDirtyFlags): void {
+  regeneratePartial(dirty: TerrainGenerationDirtyFlags): TerrainGenerationState {
     const state = this.mapSystem.regeneratePartial(dirty);
-    this.state.generationControls = this.mapSystem.getGenerationControls();
-    this.state.terrainState = state;
-    this.state.hasTerrain = true;
+    this.terrainState = state;
+    return state;
   }
 }

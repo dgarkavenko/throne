@@ -1,32 +1,48 @@
 import { describe, expect, it } from 'vitest';
+import { addComponent, addEntity, createWorld, type World } from 'bitecs';
 import { SharedTerrainRuntime } from '../src/client/runtime/shared-terrain-runtime';
 import { DEFAULT_TERRAIN_GENERATION_CONTROLS } from '../src/terrain/controls';
 import { buildProvincePickModel, pickProvinceAt } from '../src/client/runtime/province-pick';
+import { ProvinceComponent } from '../src/ecs/components';
+import type { TerrainGenerationState } from '../src/terrain/types';
 
 const SIZE = { width: 512, height: 512 };
 
-function buildRuntimePickModel(runtime: SharedTerrainRuntime) {
-  const terrainState = runtime.state.terrainState;
+function createProvinceWorld(terrainState: TerrainGenerationState): World {
+  const world = createWorld();
+  const provinceCount = terrainState.provinces.faces.length;
+  for (let provinceId = 0; provinceId < provinceCount; provinceId += 1) {
+    const entity = addEntity(world);
+    addComponent(world, entity, ProvinceComponent);
+    ProvinceComponent.provinceId[entity] = provinceId;
+    ProvinceComponent.face[entity] = terrainState.provinces.faces[provinceId];
+  }
+  return world;
+}
+
+function buildRuntimePickModel(runtime: SharedTerrainRuntime, terrainState: TerrainGenerationState | null) {
   if (!terrainState) {
     return null;
   }
+  const world = createProvinceWorld(terrainState);
   return buildProvincePickModel(
     { width: runtime.mapWidth, height: runtime.mapHeight },
     terrainState,
-    runtime.state.generationControls
+    runtime.getGenerationControls(),
+    world
   );
 }
 
 describe('runtime province pick', () => {
   it('returns null before terrain exists', () => {
     const runtime = new SharedTerrainRuntime(SIZE);
-    const pickModel = buildRuntimePickModel(runtime);
+    const pickModel = buildRuntimePickModel(runtime, null);
     expect(pickModel).toBeNull();
   });
 
   it('returns null on water and province id on land', () => {
     const runtime = new SharedTerrainRuntime(SIZE);
-    runtime.applyTerrainSnapshot(
+    const terrainState = runtime.applyTerrainSnapshot(
       {
         controls: {
           ...DEFAULT_TERRAIN_GENERATION_CONTROLS,
@@ -37,13 +53,12 @@ describe('runtime province pick', () => {
       },
       1
     );
-    const pickModel = buildRuntimePickModel(runtime);
+    const pickModel = buildRuntimePickModel(runtime, terrainState);
     expect(pickModel).not.toBeNull();
     if (!pickModel) {
       return;
     }
 
-    const terrainState = runtime.state.terrainState;
     expect(terrainState).not.toBeNull();
     if (!terrainState) {
       return;
@@ -59,7 +74,11 @@ describe('runtime province pick', () => {
         continue;
       }
       const expectedProvinceId = terrainState.provinces.provinceByFace[i];
-      if (pickProvinceAt(pickModel, point.x, point.y) === expectedProvinceId) {
+      const pickedProvinceEntity = pickProvinceAt(pickModel, point.x, point.y);
+      if (
+        pickedProvinceEntity !== null &&
+        ProvinceComponent.provinceId[pickedProvinceEntity] === expectedProvinceId
+      ) {
         matchedLand = true;
         break;
       }
@@ -85,7 +104,7 @@ describe('runtime province pick', () => {
 
   it('keeps pick results stable across renderer-side interactions', () => {
     const runtime = new SharedTerrainRuntime(SIZE);
-    runtime.applyTerrainSnapshot(
+    const terrainState = runtime.applyTerrainSnapshot(
       {
         controls: {
           ...DEFAULT_TERRAIN_GENERATION_CONTROLS,
@@ -97,12 +116,12 @@ describe('runtime province pick', () => {
       1
     );
 
-    const point = runtime.state.terrainState?.mesh.mesh.faces[0]?.point;
+    const point = terrainState?.mesh.mesh.faces[0]?.point;
     expect(point).toBeDefined();
     if (!point) {
       return;
     }
-    const pickModel = buildRuntimePickModel(runtime);
+    const pickModel = buildRuntimePickModel(runtime, terrainState);
     expect(pickModel).not.toBeNull();
     if (!pickModel) {
       return;
