@@ -38,21 +38,9 @@ export async function startClientGame(): Promise<void>
 		height: GAME_HEIGHT,
 	});
 
-	const GameConfig = {
-		navigation: (movement: ReturnType<typeof layout.getMovementSettings>) => ({
-			timePerFaceSeconds: movement.timePerFaceSeconds,
-			lowlandThreshold: movement.lowlandThreshold,
-			impassableThreshold: movement.impassableThreshold,
-			elevationPower: movement.elevationPower,
-			elevationGainK: movement.elevationGainK,
-			riverPenalty: movement.riverPenalty,
-		}),
-	};
-
 	await clientGame.init(layout.field);
 
 	clientGame.setTerrainRenderControls(layout.getTerrainRenderSettings());
-	clientGame.setMovementConfig(GameConfig.navigation(layout.getMovementSettings()));
 
 	const syncHostAccess = (): void =>
 	{
@@ -83,7 +71,6 @@ export async function startClientGame(): Promise<void>
 		{
 			clientGame.applyTerrainSnapshot(message.terrain, message.terrainVersion);
 			clientGame.setTerrainRenderControls(layout.getTerrainRenderSettings());
-			clientGame.setMovementConfig(GameConfig.navigation(layout.getMovementSettings()));
 			layout.setStatus(`Terrain synced v${message.terrainVersion}`);
 		},
 		onWorldSnapshot: (message) =>
@@ -98,7 +85,6 @@ export async function startClientGame(): Promise<void>
 	layout.onTerrainSettingsChange((nextSettings) =>
 	{
 		clientGame.setTerrainRenderControls(nextSettings.render);
-		clientGame.setMovementConfig(GameConfig.navigation(nextSettings.movement));
 	});
 
 	clientGame.bindUtilityTick(layout.setFps);

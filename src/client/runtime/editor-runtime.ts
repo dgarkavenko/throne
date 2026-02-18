@@ -3,26 +3,16 @@
  * Terrain-only responsibilities:
  * - terrain generation apply/regenerate flow
  * - terrain rendering/debug controls
- * - local navigation graph rebuild from movement settings
  */
 import { GameRenderer } from '../rendering/game-renderer';
 import type { TerrainGenerationControls } from '../../terrain/controls';
 import type { TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
 import type { TerrainRenderControls } from '../terrain/render-controls';
-import {
-  SharedTerrainRuntime,
-  type TerrainNavigationConfig,
-} from './shared-terrain-runtime';
+import { SharedTerrainRuntime } from './shared-terrain-runtime';
 
 export type GameConfig = {
   width: number;
   height: number;
-};
-
-type MovementTestConfig = TerrainNavigationConfig & {
-  enabled: boolean;
-  unitCount: number;
-  spacingTarget: number;
 };
 
 export class EditorGame {
@@ -64,10 +54,6 @@ export class EditorGame {
     } else {
       this.r.rerenderProvinceBorders(presentation);
     }
-  }
-
-  setMovementTestConfig(nextConfig: Partial<MovementTestConfig>): void {
-    this.terrain.setNavigationConfig(nextConfig);
   }
 
   getTerrainVersion(): number {

@@ -5,414 +5,445 @@
  * - world snapshot acceptance gates (terrain version + sequence monotonicity)
  * - pointer interaction branch for actor selection vs province selection
  */
-import {
-  addComponent,
-  addEntity,
-  observe,
-  onSet,
-  query,
-  removeComponent,
-  setComponent,
-  World,
-} from 'bitecs';
+import
+	{
+		addComponent,
+		addEntity,
+		observe,
+		onSet,
+		query,
+		removeComponent,
+		setComponent,
+		World,
+	} from 'bitecs';
 import { Ticker, UPDATE_PRIORITY } from 'pixi.js';
-import {
-  createClientPipeline,
-  createEcsGame,
-  ensureActorEntity,
-  type EcsPipeline,
-  type EcsGame,
-} from '../../ecs/game';
-import {
-  ActorComponent,
-  Hovered,
-  ProvinceComponent,
-  RenderableComponent,
-  Selected,
-  TerrainLocationComponent,
-} from '../../ecs/components';
+import
+	{
+		createClientPipeline,
+		createEcsGame,
+		ensureActorEntity,
+		type EcsPipeline,
+		type EcsGame,
+	} from '../../ecs/game';
+import
+	{
+		ActorComponent,
+		Hovered,
+		ProvinceComponent,
+		RenderableComponent,
+		Selected,
+		TerrainLocationComponent,
+	} from '../../ecs/components';
 import { GameRenderer } from '../rendering/game-renderer';
 import type { TerrainRenderControls } from '../terrain/render-controls';
 import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
-import {
-  SharedTerrainRuntime,
-  type TerrainNavigationConfig,
-} from './shared-terrain-runtime';
+import { SharedTerrainRuntime } from './shared-terrain-runtime';
 import { resolveHoverTarget, resolveSelectionTarget } from './selection-policy';
 
 export type GameConfig = {
-  width: number;
-  height: number;
+	width: number;
+	height: number;
 };
 
 type Vec2 = { x: number; y: number };
 
-type MovementConfig = {
-  enabled: boolean;
-  unitCount: number;
-} & TerrainNavigationConfig & {
-  spacingTarget: number;
-};
+export class ClientGame
+{
+	private readonly config: GameConfig;
+	private hoveredProvinceId: number | null = null;
+	private selectedProvinceId: number | null = null;
+	private readonly provinceEntityById = new Map<number, number>();
+	private provinceEntitiesInitialized = false;
+	private selectionListeners = new Set<(provinceId: number | null) => void>();
 
-export class ClientGame {
-  private readonly config: GameConfig;
-  private hoveredProvinceId: number | null = null;
-  private selectedProvinceId: number | null = null;
-  private readonly provinceEntityById = new Map<number, number>();
-  private provinceEntitiesInitialized = false;
-  private selectionListeners = new Set<(provinceId: number | null) => void>();
+	private localPlayerId: number | null = null;
+	private selectedActorId: number | null = null;
+	private hoveredActorId: number | null = null;
+	private serverClockOffsetMs = 0;
+	private hasServerClockOffset = false;
+	private lastWorldSnapshotSeq = -1;
 
-  private localPlayerId: number | null = null;
-  private selectedActorId: number | null = null;
-  private hoveredActorId: number | null = null;
-  private movementTestConfig: MovementConfig = {
-    enabled: false,
-    unitCount: 8,
-    timePerFaceSeconds: 180,
-    lowlandThreshold: 10,
-    impassableThreshold: 28,
-    elevationPower: 0.8,
-    elevationGainK: 1,
-    riverPenalty: 0.8,
-    spacingTarget: 16,
-  };
-  private serverClockOffsetMs = 0;
-  private hasServerClockOffset = false;
-  private lastWorldSnapshotSeq = -1;
+	private readonly terrain: SharedTerrainRuntime;
+	private readonly r: GameRenderer;
+	private ticker: Ticker;
+	private readonly game: EcsGame;
+	private readonly clientPipeline: EcsPipeline;
 
-  private readonly terrain: SharedTerrainRuntime;
-  private readonly r: GameRenderer;
-  private ticker: Ticker;
-  private readonly game: EcsGame;
-  private readonly clientPipeline: EcsPipeline;
+	constructor(config: GameConfig)
+	{
+		this.config = config;
+		this.r = new GameRenderer();
+		this.ticker = this.r.app.ticker;
 
-  constructor(config: GameConfig) {
-    this.config = config;
-    this.r = new GameRenderer();
-    this.ticker = this.r.app.ticker;
+		this.terrain = new SharedTerrainRuntime({
+			width: config.width,
+			height: config.height,
+		});
+		this.game = createEcsGame();
+		this.clientPipeline = createClientPipeline(this.game);
+	}
 
-    this.terrain = new SharedTerrainRuntime({
-      width: config.width,
-      height: config.height,
-    });
-    this.game = createEcsGame();
-    this.clientPipeline = createClientPipeline(this.game);
-  }
+	async init(field: HTMLElement | null): Promise<void>
+	{
+		await this.r.init(this.config.width, this.config.height, window.devicePixelRatio || 1, field);
+		await this.r.hook(this.game);
 
-  async init(field: HTMLElement | null): Promise<void> {
-    await this.r.init(this.config.width, this.config.height, window.devicePixelRatio || 1, field);
-    await this.r.hook(this.game);
+		this.ticker = this.r.app.ticker;
 
-    this.ticker = this.r.app.ticker;
+		observe(this.game.world, onSet(TerrainLocationComponent), (eid, params) =>
+		{
+			const currentFacePoint = this.getFacePoint(params.faceId);
+			if (currentFacePoint)
+			{
+				RenderableComponent.x[eid] = currentFacePoint.x;
+				RenderableComponent.y[eid] = currentFacePoint.y;
+			}
+			return params;
+		});
 
-    observe(this.game.world, onSet(TerrainLocationComponent), (eid, params) => {
-      const currentFacePoint = this.getFacePoint(params.faceId);
-      if (currentFacePoint) {
-        RenderableComponent.x[eid] = currentFacePoint.x;
-        RenderableComponent.y[eid] = currentFacePoint.y;
-      }
-      return params;
-    });
+		this.ticker.add((ticker) =>
+		{
+			this.clientPipeline.tick(ticker.deltaTime);
+			this.r.renderView(this.game);
+		});
 
-    this.ticker.add((ticker) => {
-      this.clientPipeline.tick(ticker.deltaTime);
-      this.r.syncView(this.game);
-    });
+		this.r.bindCanvasEvent('pointermove', this.pointerMove);
+		this.r.bindCanvasEvent('pointerleave', this.pointerLeave);
+		this.r.bindCanvasEvent('pointerdown', this.pointerDown);
+		this.r.bindCanvasEvent('contextmenu', this.contextMenu);
+	}
 
-    this.r.bindCanvasEvent('pointermove', this.pointerMove);
-    this.r.bindCanvasEvent('pointerleave', this.pointerLeave);
-    this.r.bindCanvasEvent('pointerdown', this.pointerDown);
-    this.r.bindCanvasEvent('contextmenu', this.contextMenu);
-  }
+	setTerrainRenderControls(nextControls: TerrainRenderControls): void
+	{
+		const result = this.terrain.setTerrainRenderControls(nextControls);
+		const presentation = this.terrain.getPresentationState();
+		if (!presentation || !result.changed)
+		{
+			return;
+		}
+		if (result.refinementChanged)
+		{
+			this.r.renderTerrainStatic(presentation);
+		} else
+		{
+			this.r.rerenderProvinceBorders(presentation);
+		}
+	}
 
-  setTerrainRenderControls(nextControls: TerrainRenderControls): void {
-    const result = this.terrain.setTerrainRenderControls(nextControls);
-    const presentation = this.terrain.getPresentationState();
-    if (!presentation || !result.changed) {
-      return;
-    }
-    if (result.refinementChanged) {
-      this.r.renderTerrainStatic(presentation);
-    } else {
-      this.r.rerenderProvinceBorders(presentation);
-    }
-  }
+	bindUtilityTick(onFrame: (dt: number, fps: number) => void): void
+	{
+		this.ticker.add(
+			(ticker) =>
+			{
+				onFrame(ticker.deltaTime, ticker.FPS);
+			},
+			undefined,
+			UPDATE_PRIORITY.UTILITY
+		);
+	}
 
-  setMovementConfig(nextConfig: Partial<MovementConfig>): void {
-    const hasCostConfig =
-      typeof nextConfig.lowlandThreshold === 'number' ||
-      typeof nextConfig.impassableThreshold === 'number' ||
-      typeof nextConfig.elevationPower === 'number' ||
-      typeof nextConfig.elevationGainK === 'number' ||
-      typeof nextConfig.riverPenalty === 'number';
-    this.movementTestConfig = {
-      ...this.movementTestConfig,
-      ...nextConfig,
-    };
-    if (hasCostConfig) {
-      this.terrain.setNavigationConfig(nextConfig);
-    }
-  }
+	setLocalPlayerId(playerId: number | null): void
+	{
+		this.localPlayerId = playerId;
+	}
 
-  bindUtilityTick(onFrame: (dt: number, fps: number) => void): void {
-    this.ticker.add(
-      (ticker) => {
-        onFrame(ticker.deltaTime, ticker.FPS);
-      },
-      undefined,
-      UPDATE_PRIORITY.UTILITY
-    );
-  }
+	getTerrainVersion(): number
+	{
+		return this.terrain.state.lastTerrainVersion;
+	}
 
-  setLocalPlayerId(playerId: number | null): void {
-    this.localPlayerId = playerId;
-  }
+	onProvinceSelectionChange(listener: (provinceId: number | null) => void): () => void
+	{
+		this.selectionListeners.add(listener);
+		return () =>
+		{
+			this.selectionListeners.delete(listener);
+		};
+	}
 
-  getTerrainVersion(): number {
-    return this.terrain.state.lastTerrainVersion;
-  }
+	applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void
+	{
+		this.lastWorldSnapshotSeq = -1;
+		this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
+		const presentation = this.terrain.getPresentationState();
+		if (presentation)
+		{
+			this.r.renderTerrainStatic(presentation);
+			this.ensureProvinceEntities();
+		}
+	}
 
-  onProvinceSelectionChange(listener: (provinceId: number | null) => void): () => void {
-    this.selectionListeners.add(listener);
-    return () => {
-      this.selectionListeners.delete(listener);
-    };
-  }
+	applyWorldSnapshot(snapshot: WorldSnapshotMessage): void
+	{
+		if (!this.terrain.state.terrainState)
+		{
+			throw new Error('Received world snapshot before terrain snapshot.');
+		}
+		if (
+			!this.terrain.state.terrainState ||
+			snapshot.terrainVersion !== this.terrain.state.lastTerrainVersion
+		)
+		{
+			return;
+		}
+		if (snapshot.snapshotSeq <= this.lastWorldSnapshotSeq)
+		{
+			return;
+		}
+		this.lastWorldSnapshotSeq = snapshot.snapshotSeq;
+		const clientReceiveMs = Date.now();
+		this.updateServerClockOffset(snapshot.serverTime, clientReceiveMs);
+		const estimatedServerNow = this.getEstimatedServerNow(clientReceiveMs);
+		const liveActorIds = new Set<number>();
+		for (let i = 0; i < snapshot.actors.length; i += 1)
+		{
+			const actorSnapshot = snapshot.actors[i];
+			liveActorIds.add(actorSnapshot.actorId);
+			const actorEntity = ensureActorEntity(this.game.world, actorSnapshot.actorId, actorSnapshot.ownerId);
+			this.syncUnitFromSnapshot(actorEntity, actorSnapshot, estimatedServerNow, clientReceiveMs);
+		}
 
-  applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void {
-    this.lastWorldSnapshotSeq = -1;
-    this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
-    const presentation = this.terrain.getPresentationState();
-    if (!presentation) {
-      return;
-    }
-    this.r.renderTerrainStatic(presentation);
-    this.ensureProvinceEntities();
-  }
+		const staleActorIds: number[] = [];
+		void staleActorIds;
+	}
 
-  applyWorldSnapshot(snapshot: WorldSnapshotMessage): void {
-    if (!this.terrain.state.navigationGraph || !this.terrain.state.terrainState) {
-      throw new Error('Received world snapshot before terrain snapshot.');
-    }
-    if (
-      !this.terrain.state.navigationGraph ||
-      !this.terrain.state.terrainState ||
-      snapshot.terrainVersion !== this.terrain.state.lastTerrainVersion
-    ) {
-      return;
-    }
-    if (snapshot.snapshotSeq <= this.lastWorldSnapshotSeq) {
-      return;
-    }
-    this.lastWorldSnapshotSeq = snapshot.snapshotSeq;
-    const clientReceiveMs = Date.now();
-    this.updateServerClockOffset(snapshot.serverTime, clientReceiveMs);
-    const estimatedServerNow = this.getEstimatedServerNow(clientReceiveMs);
-    const liveActorIds = new Set<number>();
-    for (let i = 0; i < snapshot.actors.length; i += 1) {
-      const actorSnapshot = snapshot.actors[i];
-      liveActorIds.add(actorSnapshot.actorId);
-      const actorEntity = ensureActorEntity(this.game.world, actorSnapshot.actorId, actorSnapshot.ownerId);
-      this.syncUnitFromSnapshot(actorEntity, actorSnapshot, estimatedServerNow, clientReceiveMs);
-    }
+	public getPointerCanvasPosition(event: PointerEvent): Vec2
+	{
+		const canvas = this.r.app.canvas;
 
-    const staleActorIds: number[] = [];
-    void staleActorIds;
-  }
+		if (!canvas || !canvas.getBoundingClientRect)
+		{
+			return { x: 0, y: 0 };
+		}
 
-  public getPointerCanvasPosition(event: PointerEvent): Vec2 {
-    const canvas = this.r.app.canvas;
+		const rect = canvas.getBoundingClientRect();
+		if (rect.width === 0 || rect.height === 0)
+		{
+			return { x: 0, y: 0 };
+		}
 
-    if (!canvas || !canvas.getBoundingClientRect) {
-      return { x: 0, y: 0 };
-    }
+		const scaleX = this.config.width / rect.width;
+		const scaleY = this.config.height / rect.height;
 
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-      return { x: 0, y: 0 };
-    }
+		return {
+			x: (event.clientX - rect.left) * scaleX,
+			y: (event.clientY - rect.top) * scaleY,
+		};
+	}
 
-    const scaleX = this.config.width / rect.width;
-    const scaleY = this.config.height / rect.height;
+	private pointerMove = (event: PointerEvent) =>
+	{
+		const position = this.getPointerCanvasPosition(event);
+		const hoveredActorId = this.getActorIdAt(this.game.world, position.x, position.y);
+		const hoveredProvinceId = this.terrain.pickProvinceAt(position.x, position.y);
+		const resolution = resolveHoverTarget(hoveredActorId, hoveredProvinceId);
+		this.setHoveredActor(resolution.actorId);
+		this.setHoveredProvince(resolution.provinceId);
+	};
 
-    return {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY,
-    };
-  }
+	private pointerLeave = () =>
+	{
+		this.setHoveredActor(null);
+		this.setHoveredProvince(null);
+	};
 
-  private pointerMove = (event: PointerEvent) => {
-    const position = this.getPointerCanvasPosition(event);
-    const hoveredActorId = this.getActorIdAt(this.game.world, position.x, position.y);
-    const hoveredProvinceId = this.terrain.pickProvinceAt(position.x, position.y);
-    const resolution = resolveHoverTarget(hoveredActorId, hoveredProvinceId);
-    this.setHoveredActor(resolution.actorId);
-    this.setHoveredProvince(resolution.provinceId);
-  };
+	private pointerDown = (event: PointerEvent) =>
+	{
+		const position = this.getPointerCanvasPosition(event);
 
-  private pointerLeave = () => {
-    this.setHoveredActor(null);
-    this.setHoveredProvince(null);
-  };
+		if (event.button === 0)
+		{
+			const actorId = this.getActorIdAt(this.game.world, position.x, position.y);
+			const provinceId = this.terrain.pickProvinceAt(position.x, position.y);
+			const resolution = resolveSelectionTarget(actorId, provinceId);
+			this.setSelectedActor(resolution.actorId);
+			this.setSelectedProvince(resolution.provinceId);
+		}
+		if (event.button === 2)
+		{
+			return;
+		}
+	};
 
-  private pointerDown = (event: PointerEvent) => {
-    const position = this.getPointerCanvasPosition(event);
+	private setHoveredActor(hoveredActor: number | null): void
+	{
+		if (this.hoveredActorId !== null)
+		{
+			removeComponent(this.game.world, this.hoveredActorId, Hovered);
+		}
+		if (hoveredActor !== null)
+		{
+			addComponent(this.game.world, hoveredActor, Hovered);
+		}
+		this.hoveredActorId = hoveredActor;
+	}
 
-    if (event.button === 0) {
-      const actorId = this.getActorIdAt(this.game.world, position.x, position.y);
-      const provinceId = this.terrain.pickProvinceAt(position.x, position.y);
-      const resolution = resolveSelectionTarget(actorId, provinceId);
-      this.setSelectedActor(resolution.actorId);
-      this.setSelectedProvince(resolution.provinceId);
-    }
-    if (event.button === 2) {
-      return;
-    }
-  };
+	private setSelectedActor(selectedActor: number | null): void
+	{
+		if (this.selectedActorId !== null)
+		{
+			removeComponent(this.game.world, this.selectedActorId, Selected);
+		}
+		if (selectedActor !== null)
+		{
+			addComponent(this.game.world, selectedActor, Selected);
+		}
+		this.selectedActorId = selectedActor;
+	}
 
-  private setHoveredActor(hoveredActor: number | null): void {
-    if (this.hoveredActorId !== null) {
-      removeComponent(this.game.world, this.hoveredActorId, Hovered);
-    }
-    if (hoveredActor !== null) {
-      addComponent(this.game.world, hoveredActor, Hovered);
-    }
-    this.hoveredActorId = hoveredActor;
-  }
+	private setHoveredProvince(provinceId: number | null): void
+	{
+		if (this.hoveredProvinceId !== null)
+		{
+			const previousEntity = this.provinceEntityById.get(this.hoveredProvinceId);
+			if (previousEntity !== undefined)
+			{
+				removeComponent(this.game.world, previousEntity, Hovered);
+			}
+		}
+		if (provinceId !== null)
+		{
+			const nextEntity = this.provinceEntityById.get(provinceId);
+			if (nextEntity !== undefined)
+			{
+				addComponent(this.game.world, nextEntity, Hovered);
+			} else
+			{
+				provinceId = null;
+			}
+		}
+		this.hoveredProvinceId = provinceId;
+	}
 
-  private setSelectedActor(selectedActor: number | null): void {
-    if (this.selectedActorId !== null) {
-      removeComponent(this.game.world, this.selectedActorId, Selected);
-    }
-    if (selectedActor !== null) {
-      addComponent(this.game.world, selectedActor, Selected);
-    }
-    this.selectedActorId = selectedActor;
-  }
+	private setSelectedProvince(provinceId: number | null): void
+	{
+		if (this.selectedProvinceId !== null)
+		{
+			const previousEntity = this.provinceEntityById.get(this.selectedProvinceId);
+			if (previousEntity !== undefined)
+			{
+				removeComponent(this.game.world, previousEntity, Selected);
+			}
+		}
+		if (provinceId !== null)
+		{
+			const nextEntity = this.provinceEntityById.get(provinceId);
+			if (nextEntity !== undefined)
+			{
+				addComponent(this.game.world, nextEntity, Selected);
+			} else
+			{
+				provinceId = null;
+			}
+		}
+		this.selectedProvinceId = provinceId;
+		this.selectionListeners.forEach((listener) => listener(this.selectedProvinceId));
+	}
 
-  private setHoveredProvince(provinceId: number | null): void {
-    if (this.hoveredProvinceId !== null) {
-      const previousEntity = this.provinceEntityById.get(this.hoveredProvinceId);
-      if (previousEntity !== undefined) {
-        removeComponent(this.game.world, previousEntity, Hovered);
-      }
-    }
-    if (provinceId !== null) {
-      const nextEntity = this.provinceEntityById.get(provinceId);
-      if (nextEntity !== undefined) {
-        addComponent(this.game.world, nextEntity, Hovered);
-      } else {
-        provinceId = null;
-      }
-    }
-    this.hoveredProvinceId = provinceId;
-  }
+	private ensureProvinceEntities(): void
+	{
+		if (this.provinceEntitiesInitialized)
+		{
+			return;
+		}
+		const presentation = this.terrain.getPresentationState();
+		if (!presentation)
+		{
+			return;
+		}
+		for (let provinceId = 0; provinceId < presentation.overlay.provinceCount; provinceId += 1)
+		{
+			const entity = addEntity(this.game.world);
+			addComponent(this.game.world, entity, ProvinceComponent);
+			ProvinceComponent.provinceId[entity] = provinceId;
+			this.provinceEntityById.set(provinceId, entity);
+		}
+		this.provinceEntitiesInitialized = true;
+	}
 
-  private setSelectedProvince(provinceId: number | null): void {
-    if (this.selectedProvinceId !== null) {
-      const previousEntity = this.provinceEntityById.get(this.selectedProvinceId);
-      if (previousEntity !== undefined) {
-        removeComponent(this.game.world, previousEntity, Selected);
-      }
-    }
-    if (provinceId !== null) {
-      const nextEntity = this.provinceEntityById.get(provinceId);
-      if (nextEntity !== undefined) {
-        addComponent(this.game.world, nextEntity, Selected);
-      } else {
-        provinceId = null;
-      }
-    }
-    this.selectedProvinceId = provinceId;
-    this.selectionListeners.forEach((listener) => listener(this.selectedProvinceId));
-  }
+	getActorIdAt(world: World, worldX: number, worldY: number): number | null
+	{
+		const eids = query(world, [ActorComponent, RenderableComponent]);
 
-  private ensureProvinceEntities(): void {
-    if (this.provinceEntitiesInitialized) {
-      return;
-    }
-    const presentation = this.terrain.getPresentationState();
-    if (!presentation) {
-      return;
-    }
-    for (let provinceId = 0; provinceId < presentation.overlay.provinceCount; provinceId += 1) {
-      const entity = addEntity(this.game.world);
-      addComponent(this.game.world, entity, ProvinceComponent);
-      ProvinceComponent.provinceId[entity] = provinceId;
-      this.provinceEntityById.set(provinceId, entity);
-    }
-    this.provinceEntitiesInitialized = true;
-  }
+		const distancesSq: number[] = new Array(eids.length);
 
-  getActorIdAt(world: World, worldX: number, worldY: number): number | null {
-    const eids = query(world, [ActorComponent, RenderableComponent]);
+		for (let i = 0; i < eids.length; i++)
+		{
+			const eid = eids[i];
+			const dx = worldX - (RenderableComponent.x[eid] ?? 0);
+			const dy = worldY - (RenderableComponent.y[eid] ?? 0);
+			distancesSq[i] = dx * dx + dy * dy;
+		}
 
-    const distancesSq: number[] = new Array(eids.length);
+		const maxDistSq = 100;
+		let bestId: number | null = null;
+		let bestDistanceSq = Number.POSITIVE_INFINITY;
 
-    for (let i = 0; i < eids.length; i++) {
-      const eid = eids[i];
-      const dx = worldX - (RenderableComponent.x[eid] ?? 0);
-      const dy = worldY - (RenderableComponent.y[eid] ?? 0);
-      distancesSq[i] = dx * dx + dy * dy;
-    }
+		for (let i = 0; i < eids.length; i++)
+		{
+			const d = distancesSq[i];
+			if (d <= maxDistSq && d < bestDistanceSq)
+			{
+				bestDistanceSq = d;
+				bestId = eids[i];
+			}
+		}
 
-    const maxDistSq = 100;
-    let bestId: number | null = null;
-    let bestDistanceSq = Number.POSITIVE_INFINITY;
+		return bestId;
+	}
 
-    for (let i = 0; i < eids.length; i++) {
-      const d = distancesSq[i];
-      if (d <= maxDistSq && d < bestDistanceSq) {
-        bestDistanceSq = d;
-        bestId = eids[i];
-      }
-    }
+	private contextMenu = (event: MouseEvent) =>
+	{
+		event.preventDefault();
+	};
 
-    return bestId;
-  }
+	private syncUnitFromSnapshot(
+		eid: number,
+		snapshot: ActorSnapshot,
+		_estimatedServerNow: number,
+		_clientReceiveMs: number
+	): void
+	{
+		setComponent(this.game.world, eid, TerrainLocationComponent, { faceId: snapshot.currentFace });
+	}
 
-  private contextMenu = (event: MouseEvent) => {
-    event.preventDefault();
-  };
+	private getFacePoint(faceId: number): Vec2 | null
+	{
+		if (!this.terrain.state.terrainState)
+		{
+			return null;
+		}
+		const face = this.terrain.state.terrainState.mesh.mesh.faces[faceId];
+		if (!face)
+		{
+			return null;
+		}
+		return { x: face.point.x, y: face.point.y };
+	}
 
-  private syncUnitFromSnapshot(
-    eid: number,
-    snapshot: ActorSnapshot,
-    _estimatedServerNow: number,
-    _clientReceiveMs: number
-  ): void {
-    setComponent(this.game.world, eid, TerrainLocationComponent, { faceId: snapshot.currentFace });
-  }
+	private updateServerClockOffset(serverTimeMs: number, clientReceiveMs: number): void
+	{
+		if (!Number.isFinite(serverTimeMs) || !Number.isFinite(clientReceiveMs))
+		{
+			return;
+		}
+		const observedOffset = serverTimeMs - clientReceiveMs;
+		if (!this.hasServerClockOffset)
+		{
+			this.serverClockOffsetMs = observedOffset;
+			this.hasServerClockOffset = true;
+			return;
+		}
+		const alpha = 0.1;
+		this.serverClockOffsetMs = this.serverClockOffsetMs * (1 - alpha) + observedOffset * alpha;
+	}
 
-  private getFacePoint(faceId: number): Vec2 | null {
-    if (!this.terrain.state.navigationGraph) {
-      return null;
-    }
-    const node = this.terrain.state.navigationGraph.nodes[faceId];
-    if (!node) {
-      return null;
-    }
-    return { x: node.point.x, y: node.point.y };
-  }
-
-  private updateServerClockOffset(serverTimeMs: number, clientReceiveMs: number): void {
-    if (!Number.isFinite(serverTimeMs) || !Number.isFinite(clientReceiveMs)) {
-      return;
-    }
-    const observedOffset = serverTimeMs - clientReceiveMs;
-    if (!this.hasServerClockOffset) {
-      this.serverClockOffsetMs = observedOffset;
-      this.hasServerClockOffset = true;
-      return;
-    }
-    const alpha = 0.1;
-    this.serverClockOffsetMs = this.serverClockOffsetMs * (1 - alpha) + observedOffset * alpha;
-  }
-
-  private getEstimatedServerNow(clientNow: number): number {
-    if (!this.hasServerClockOffset) {
-      return clientNow;
-    }
-    return clientNow + this.serverClockOffsetMs;
-  }
+	private getEstimatedServerNow(clientNow: number): number
+	{
+		if (!this.hasServerClockOffset)
+		{
+			return clientNow;
+		}
+		return clientNow + this.serverClockOffsetMs;
+	}
 }

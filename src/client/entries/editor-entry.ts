@@ -31,22 +31,12 @@ export async function startClientEditor(): Promise<void> {
     height: GAME_HEIGHT,
     autoGenerateTerrain: true,
   });
-  const toMovementTestConfig = (movement: ReturnType<typeof layout.getMovementSettings>) => ({
-    timePerFaceSeconds: movement.timePerFaceSeconds,
-    lowlandThreshold: movement.lowlandThreshold,
-    impassableThreshold: movement.impassableThreshold,
-    elevationPower: movement.elevationPower,
-    elevationGainK: movement.elevationGainK,
-    riverPenalty: movement.riverPenalty,
-  });
 
   await engine.init(layout.field);
   const generationSettings = layout.getTerrainGenerationSettings();
   const renderSettings = layout.getTerrainRenderSettings();
-  const movementSettings = layout.getMovementSettings();
   engine.setTerrainGenerationControls(generationSettings);
   engine.setTerrainRenderControls(renderSettings);
-  engine.setMovementTestConfig(toMovementTestConfig(movementSettings));
 
   const syncSettingsAccess = (): void => {
     const hasSessionIdentity = state.playerId !== null && state.hostId !== null;
@@ -71,7 +61,6 @@ export async function startClientEditor(): Promise<void> {
   layout.onTerrainSettingsChange((nextSettings) => {
     engine.setTerrainGenerationControls(nextSettings.generation);
     engine.setTerrainRenderControls(nextSettings.render);
-    engine.setMovementTestConfig(toMovementTestConfig(nextSettings.movement));
     layout.setTerrainSyncStatus('Local changes');
   });
 
@@ -94,7 +83,6 @@ export async function startClientEditor(): Promise<void> {
       layout.setTerrainGenerationSettings(message.terrain.controls);
       engine.applyTerrainSnapshot(message.terrain, message.terrainVersion);
       engine.setTerrainRenderControls(layout.getTerrainRenderSettings());
-      engine.setMovementTestConfig(toMovementTestConfig(layout.getMovementSettings()));
       layout.setTerrainSyncStatus(`v${message.terrainVersion}`);
     },
     onWorldSnapshot: () => {},
