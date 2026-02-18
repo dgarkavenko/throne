@@ -43,7 +43,6 @@ import {
 	pickProvinceAt as pickProvinceFromModel,
 	type ProvincePickModel,
 } from './province-pick';
-import { resolveHoverTarget, resolveSelectionTarget } from './selection-policy';
 
 export type GameConfig = {
 	width: number;
@@ -57,12 +56,11 @@ export class ClientGame
 	private readonly config: GameConfig;
 	private hoveredProvinceId: number | null = null;
 	private selectedProvinceId: number | null = null;
-	private readonly provinceEntityById = new Map<number, number>();
 	private provinceEntitiesInitialized = false;
 	private selectionListeners = new Set<(provinceId: number | null) => void>();
 
 	private localPlayerId: number | null = null;
-	private selectedActorId: number | null = null;
+	private selectedEntity: number | null = null;
 	private hoveredActorId: number | null = null;
 	private serverClockOffsetMs = 0;
 	private hasServerClockOffset = false;
@@ -74,6 +72,9 @@ export class ClientGame
 	private ticker: Ticker;
 	private readonly game: EcsGame;
 	private readonly clientPipeline: EcsPipeline;
+
+	// province
+	private readonly provinceEntityById = new Map<number, number>();
 
 	constructor(config: GameConfig)
 	{
@@ -175,18 +176,27 @@ export class ClientGame
 	applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void
 	{
 		this.lastWorldSnapshotSeq = -1;
+		this.pickModel = null;
 		this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
-		this.rebuildPickModel();
 		const terrainState = this.terrain.state.terrainState;
+		
 		if (terrainState)
 		{
+			this.makeProvinceEntities();
+
+			this.pickModel = buildProvincePickModel(
+				{ width: this.terrain.mapWidth, height: this.terrain.mapHeight },
+				terrainState,
+				this.terrain.state.generationControls,
+				this.game.world
+			);
+
 			this.r.renderTerrain(
 				this.terrain.mapWidth,
 				this.terrain.mapHeight,
 				terrainState,
 				this.terrain.state.generationControls
-			);
-			this.ensureProvinceEntities();
+			);	
 		}
 	}
 
@@ -251,30 +261,27 @@ export class ClientGame
 	private pointerMove = (event: PointerEvent) =>
 	{
 		const position = this.getPointerCanvasPosition(event);
-		const hoveredActorId = this.getActorIdAt(this.game.world, position.x, position.y);
-		const hoveredProvinceId = this.pickProvinceAt(position.x, position.y);
-		const resolution = resolveHoverTarget(hoveredActorId, hoveredProvinceId);
-		this.setHoveredActor(resolution.actorId);
-		this.setHoveredProvince(resolution.provinceId);
+		let hoveredEntity : number | null;
+		
+		hoveredEntity = this.getActorIdAt(this.game.world, position.x, position.y) ?? this.pickProvinceAt(position.x, position.y);
+		this.setHoveredEntity(hoveredEntity);
 	};
 
 	private pointerLeave = () =>
 	{
-		this.setHoveredActor(null);
+		this.setHoveredEntity(null);
 		this.setHoveredProvince(null);
 	};
 
 	private pointerDown = (event: PointerEvent) =>
 	{
 		const position = this.getPointerCanvasPosition(event);
+		let hoveredEntity : number | null;
 
 		if (event.button === 0)
 		{
-			const actorId = this.getActorIdAt(this.game.world, position.x, position.y);
-			const provinceId = this.pickProvinceAt(position.x, position.y);
-			const resolution = resolveSelectionTarget(actorId, provinceId);
-			this.setSelectedActor(resolution.actorId);
-			this.setSelectedProvince(resolution.provinceId);
+			hoveredEntity = this.getActorIdAt(this.game.world, position.x, position.y) ?? this.pickProvinceAt(position.x, position.y);
+			this.setSelectedEntity(hoveredEntity);
 		}
 		if (event.button === 2)
 		{
@@ -282,30 +289,30 @@ export class ClientGame
 		}
 	};
 
-	private setHoveredActor(hoveredActor: number | null): void
+	private setHoveredEntity(hoveredEntity: number | null): void
 	{
 		if (this.hoveredActorId !== null)
 		{
 			removeComponent(this.game.world, this.hoveredActorId, Hovered);
 		}
-		if (hoveredActor !== null)
+		if (hoveredEntity !== null)
 		{
-			addComponent(this.game.world, hoveredActor, Hovered);
+			addComponent(this.game.world, hoveredEntity, Hovered);
 		}
-		this.hoveredActorId = hoveredActor;
+		this.hoveredActorId = hoveredEntity;
 	}
 
-	private setSelectedActor(selectedActor: number | null): void
+	private setSelectedEntity(selectedEntity: number | null): void
 	{
-		if (this.selectedActorId !== null)
+		if (this.selectedEntity !== null)
 		{
-			removeComponent(this.game.world, this.selectedActorId, Selected);
+			removeComponent(this.game.world, this.selectedEntity, Selected);
 		}
-		if (selectedActor !== null)
+		if (selectedEntity !== null)
 		{
-			addComponent(this.game.world, selectedActor, Selected);
+			addComponent(this.game.world, selectedEntity, Selected);
 		}
-		this.selectedActorId = selectedActor;
+		this.selectedEntity = selectedEntity;
 	}
 
 	private setHoveredProvince(provinceId: number | null): void
@@ -357,13 +364,13 @@ export class ClientGame
 		this.selectionListeners.forEach((listener) => listener(this.selectedProvinceId));
 	}
 
-	private ensureProvinceEntities(): void
+	private makeProvinceEntities(): void
 	{
-		if (this.provinceEntitiesInitialized)
+		if (this.provinceEntitiesInitialized || !this.terrain.state.terrainState)
 		{
 			return;
 		}
-		const provinceCount = this.terrain.state.terrainState?.provinces.faces.length;
+		const provinceCount = this.terrain.state.terrainState.provinces.faces.length;
 		if (provinceCount === undefined)
 		{
 			return;
@@ -373,6 +380,7 @@ export class ClientGame
 			const entity = addEntity(this.game.world);
 			addComponent(this.game.world, entity, ProvinceComponent);
 			ProvinceComponent.provinceId[entity] = provinceId;
+			ProvinceComponent.face[entity] = this.terrain.state.terrainState.provinces.faces[provinceId];
 			this.provinceEntityById.set(provinceId, entity);
 		}
 		this.provinceEntitiesInitialized = true;
@@ -464,27 +472,13 @@ export class ClientGame
 		return clientNow + this.serverClockOffsetMs;
 	}
 
-	private rebuildPickModel(): void
-	{
-		const terrainState = this.terrain.state.terrainState;
-		if (!terrainState)
-		{
-			this.pickModel = null;
-			return;
-		}
-		this.pickModel = buildProvincePickModel(
-			{ width: this.terrain.mapWidth, height: this.terrain.mapHeight },
-			terrainState,
-			this.terrain.state.generationControls
-		);
-	}
-
 	private pickProvinceAt(worldX: number, worldY: number): number | null
 	{
 		if (!this.pickModel)
 		{
 			return null;
 		}
+
 		return pickProvinceFromModel(this.pickModel, worldX, worldY);
 	}
 }

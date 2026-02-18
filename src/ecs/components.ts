@@ -1,3 +1,5 @@
+import { ProvinceFace } from "../terrain/core/political-core";
+
 export const ActorComponent = {
 	netId: [] as number[],
 	ownerId: [] as number[]
@@ -25,6 +27,7 @@ export const RenderableComponent = {
 
 export const ProvinceComponent = {
 	provinceId: [] as number[],
+	face: [] as ProvinceFace[]
 };
 
 export const Dirty = {}
