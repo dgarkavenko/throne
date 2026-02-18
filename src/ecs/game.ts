@@ -38,11 +38,11 @@ export function createServerPipeline(_game: EcsGame): EcsPipeline
 	};
 }
 
-export function findActorEntityById(world: World, actorId: number): number | null
+export function findActorEntityByNetId(world: World, netId: number): number | null
 {
 	for (const eid of query(world, [ActorComponent]))
 	{
-		if (ActorComponent.netId[eid] === actorId)
+		if (ActorComponent.netId[eid] === netId)
 		{
 			return eid;
 		}
@@ -50,9 +50,10 @@ export function findActorEntityById(world: World, actorId: number): number | nul
 	return null;
 }
 
-export function ensureActorEntity(world: World, actorId: number, ownerId: number): number
+export function ensureActorEntity(world: World, netId: number, ownerId: number): number
 {
-	const existing = findActorEntityById(world, actorId);
+	const existing = findActorEntityByNetId(world, netId);
+
 	if (existing !== null)
 	{
 		ActorComponent.ownerId[existing] = ownerId;
@@ -61,18 +62,13 @@ export function ensureActorEntity(world: World, actorId: number, ownerId: number
 
 	const entity = addEntity(world);
 	addComponents(world, entity, ActorComponent, TerrainLocationComponent, RenderableComponent);
-	ActorComponent.netId[entity] = actorId;
+	ActorComponent.netId[entity] = netId;
 	ActorComponent.ownerId[entity] = ownerId;
 	TerrainLocationComponent.faceId[entity] = 0;
 	RenderableComponent.content[entity] = 'unit_cb_02';
 	RenderableComponent.color[entity] = 0xffce54;
 	addComponent(world, entity, Dirty);
 	return entity;
-}
-
-export function removeActorEntity(world: World, eid: number): void
-{
-	removeEntity(world, eid);
 }
 
 export function collectActorSnapshots(world: World): ActorSnapshot[]

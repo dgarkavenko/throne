@@ -1,6 +1,6 @@
 import { observe, onAdd, onRemove, onSet, query } from "bitecs";
 import { Assets, Application, Container, Sprite } from "pixi.js";
-import { Dirty, RenderableComponent, TerrainLocationComponent } from "../../ecs/components";
+import { Dirty, Hovered, RenderableComponent, Selected, TerrainLocationComponent } from "../../ecs/components";
 import type { EcsGame } from "../../ecs/game";
 
 type Vec2 = { x: number; y: number };
@@ -93,11 +93,33 @@ export class GameRenderer
 		for (const eid of query(game.world, [RenderableComponent]))
 		{
 			const spr = this.sprites.get(eid);
-			if (!spr) continue;
-
-			spr.position.set(RenderableComponent.x[eid] ?? 0, RenderableComponent.y[eid] ?? 0);
-			spr.tint = RenderableComponent.color[eid] ?? 0xffffff;
+			if (spr) 
+			{
+				spr.position.set(RenderableComponent.x[eid] ?? 0, RenderableComponent.y[eid] ?? 0);
+				spr.tint = RenderableComponent.color[eid] ?? 0xffffff;
+			}
 		}
+
+		const hovered = query(game.world, [RenderableComponent, Hovered]); // Returns number[]
+		for (const eid of hovered)
+		{
+			const spr = this.sprites.get(eid);
+			if (spr) 
+			{
+				spr.tint = 0xff0000;
+			}
+		}
+
+		const seleted = query(game.world, [RenderableComponent, Selected]); // Returns number[]
+		for (const eid of seleted)
+		{
+			const spr = this.sprites.get(eid);
+			if (spr) 
+			{
+				spr.tint = 0x000000;
+			}
+		}
+
 	}
 
 	bindCanvasEvent(type: string, handler: (ev: any) => void): void

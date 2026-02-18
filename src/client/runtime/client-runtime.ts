@@ -5,18 +5,20 @@
  * - world snapshot acceptance gates (terrain version + sequence monotonicity)
  * - pointer interaction branch for actor selection vs province selection
  */
-import { observe, onSet, setComponent } from 'bitecs';
+import { addComponent, observe, onSet, query, removeComponent, setComponent, World } from 'bitecs';
 import { Container, Graphics, Ticker, UPDATE_PRIORITY } from 'pixi.js';
 import
 	{
 		createClientPipeline,
 		createEcsGame,
 		ensureActorEntity,
-		removeActorEntity,
+		
 		type EcsPipeline,
 		type EcsGame,
+		
+		findActorEntityByNetId,
 	} from '../../ecs/game';
-import { ActorComponent, RenderableComponent, TerrainLocationComponent } from '../../ecs/components';
+import { ActorComponent, Hovered, RenderableComponent, Selected, TerrainLocationComponent } from '../../ecs/components';
 import { GameRenderer } from '../rendering/game-renderer';
 import { DEFAULT_TERRAIN_RENDER_CONTROLS, type TerrainRenderControls } from '../terrain/render-controls';
 import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
@@ -71,7 +73,6 @@ export class ClientGame
 	private localPlayerId: number | null = null;
 	private selectedActorId: number | null = null;
 	private hoveredActorId: number | null = null;
-	private actorEntityById = new Map<number, number>();
 	private movementTestConfig: MovementConfig = {
 		enabled: false,
 		unitCount: 8,
@@ -179,10 +180,6 @@ export class ClientGame
 	setLocalPlayerId(playerId: number | null): void
 	{
 		this.localPlayerId = playerId;
-		if (this.selectedActorId !== null && this.getActorOwner(this.selectedActorId) !== this.localPlayerId)
-		{
-			this.selectedActorId = null;
-		}
 	}
 
 	getTerrainVersion(): number
@@ -235,40 +232,26 @@ export class ClientGame
 			const actorSnapshot = snapshot.actors[i];
 			liveActorIds.add(actorSnapshot.actorId);
 			const actorEntity = ensureActorEntity(this.game.world, actorSnapshot.actorId, actorSnapshot.ownerId);
-			this.actorEntityById.set(actorSnapshot.actorId, actorEntity);
 			this.syncUnitFromSnapshot(actorEntity, actorSnapshot, estimatedServerNow, clientReceiveMs);
 		}
+		
 		const staleActorIds: number[] = [];
-		this.actorEntityById.forEach((_, actorId) =>
-		{
-			if (!liveActorIds.has(actorId))
-			{
-				staleActorIds.push(actorId);
-			}
-		});
-		for (let i = 0; i < staleActorIds.length; i += 1)
-		{
-			this.removeReplicatedActor(staleActorIds[i]);
-		}
-		if (this.selectedActorId !== null && !this.actorEntityById.has(this.selectedActorId))
-		{
-			this.selectedActorId = null;
-		}
+
 	}
 
-	public getPointerCanvasPosition(event: PointerEvent): Vec2 | null
+	public getPointerCanvasPosition(event: PointerEvent): Vec2
 	{
 		const canvas = this.r.app.canvas;
 		
 		if (!canvas || !canvas.getBoundingClientRect)
 		{
-			return null;
+			return {x:0, y:0};
 		}
 
 		const rect = canvas.getBoundingClientRect();
 		if (rect.width === 0 || rect.height === 0)
 		{
-			return null;
+			return {x:0, y:0};
 		}
 
 		const scaleX = this.config.width / rect.width;
@@ -283,58 +266,85 @@ export class ClientGame
 	private pointerMove = (event: PointerEvent) =>
 	{
 		const position = this.getPointerCanvasPosition(event);
+		console.log("pointer move");
 
-		console.log("mouse", {ev: {x: event.clientX, y: event.clientY}, cv: position});
-
-		if (!position)
-		{
-			return;
-		}
-		const hoveredActorId = this.pickActorAt(position.x, position.y);
-		if (this.hoveredActorId !== hoveredActorId)
-		{
-			this.hoveredActorId = hoveredActorId;
-		}
-		if (hoveredActorId !== null)
-		{
-			this.setHoveredProvince(null);
-			return;
-		}
-		const nextHover = this.pickProvinceAt(position.x, position.y);
-		this.setHoveredProvince(nextHover);
+		const hoveredActorId = this.getActorIdAt(this.game.world, position.x, position.y);
+		this.setHoveredActor(hoveredActorId);		
 	};
 
 	private pointerLeave = () =>
 	{
-		this.hoveredActorId = null;
-		this.setHoveredProvince(null);
+		this.setHoveredActor(null);
 	};
 
 	private pointerDown = (event: PointerEvent) =>
 	{
 		const position = this.getPointerCanvasPosition(event);
-		if (!position)
-		{
-			return;
-		}
+
 		if (event.button === 0)
 		{
-			const actorId = this.pickActorAt(position.x, position.y);
-			if (actorId !== null && this.getActorOwner(actorId) === this.localPlayerId)
-			{
-				this.setSelectedActor(actorId);
-				this.setSelectedProvince(null);
-				return;
-			}
-			const nextSelection = this.pickProvinceAt(position.x, position.y);
-			this.setSelectedProvince(nextSelection);
-			return;
+			const actorId = this.getActorIdAt(this.game.world, position.x, position.y);
+			this.setSelectedActor(actorId);			
 		}
 		if (event.button === 2)
 		{
 			return;
 		}
 	};
+	
+	private setHoveredActor(hoveredActor: number | null)
+	{
+		if (this.hoveredActorId)
+			removeComponent(this.game.world, this.hoveredActorId, Hovered);
+
+		if (hoveredActor)
+			addComponent(this.game.world, hoveredActor, Hovered);
+
+		this.hoveredActorId = hoveredActor;
+	}
+	
+	private setSelectedActor(selectedActor: number | null): void
+	{
+		if (this.selectedActorId)
+			removeComponent(this.game.world, this.selectedActorId, Selected);
+
+		if (selectedActor)
+			addComponent(this.game.world, selectedActor, Selected);
+
+		this.selectedActorId = selectedActor;
+	}
+
+	getActorIdAt(world: World, worldX: number, worldY: number): number | null
+	{
+		const eids = query(world, [ActorComponent, RenderableComponent]);
+
+		const distancesSq: number[] = new Array(eids.length);
+
+		for (let i = 0; i < eids.length; i++)
+		{
+			const eid = eids[i];
+			const dx = worldX - (RenderableComponent.x[eid] ?? 0);
+			const dy = worldY - (RenderableComponent.y[eid] ?? 0);
+			distancesSq[i] = dx * dx + dy * dy;
+		}
+
+		const maxDistSq = 100;
+		let bestId: number | null = null;
+		let bestDistanceSq = Number.POSITIVE_INFINITY;
+
+		for (let i = 0; i < eids.length; i++)
+		{
+			const d = distancesSq[i];
+			if (d <= maxDistSq && d < bestDistanceSq)
+			{
+				bestDistanceSq = d;
+				bestId = eids[i];
+			}
+		}
+
+		return bestId;
+	}
+
 
 	private contextMenu = (event: MouseEvent) =>
 	{
@@ -626,24 +636,6 @@ export class ClientGame
 		return null;
 	}
 
-	private pickActorAt(worldX: number, worldY: number): number | null
-	{
-		let bestId: number | null = null;
-		let bestDistanceSq = Number.POSITIVE_INFINITY;
-		this.actorEntityById.forEach((eid, actorId) =>
-		{
-			const dx = worldX - (RenderableComponent.x[eid] ?? 0);
-			const dy = worldY - (RenderableComponent.y[eid] ?? 0);
-			const distanceSq = dx * dx + dy * dy;
-			if (distanceSq <= 100 && distanceSq < bestDistanceSq)
-			{
-				bestDistanceSq = distanceSq;
-				bestId = actorId;
-			}
-		});
-		return bestId;
-	}
-
 	private pickProvinceAt(worldX: number, worldY: number): number | null
 	{
 		const faceIndex = this.pickFaceAt(worldX, worldY);
@@ -676,51 +668,6 @@ export class ClientGame
 			}
 		}
 		return inside;
-	}
-
-	private setHoveredProvince(provinceId: number | null): void
-	{
-		if (this.hoveredProvinceId === provinceId)
-		{
-			return;
-		}
-		this.hoveredProvinceId = provinceId;
-		this.renderProvinceInteractionOverlay();
-	}
-
-	private setSelectedProvince(provinceId: number | null): void
-	{
-		if (this.selectedProvinceId === provinceId)
-		{
-			return;
-		}
-		this.selectedProvinceId = provinceId;
-		this.renderProvinceInteractionOverlay();
-		this.selectionListeners.forEach((listener) => listener(provinceId));
-	}
-
-	private setSelectedActor(actorId: number | null): void
-	{
-		if (actorId !== null && this.getActorOwner(actorId) !== this.localPlayerId)
-		{
-			return;
-		}
-		if (this.selectedActorId === actorId)
-		{
-			return;
-		}
-		this.selectedActorId = actorId;
-	}
-
-	private removeReplicatedActor(actorId: number): void
-	{
-		const eid = this.actorEntityById.get(actorId);
-		if (eid === undefined)
-		{
-			return;
-		}
-		this.actorEntityById.delete(actorId);
-		removeActorEntity(this.game.world, eid);
 	}
 
 	private syncUnitFromSnapshot(
@@ -771,15 +718,5 @@ export class ClientGame
 			return clientNow;
 		}
 		return clientNow + this.serverClockOffsetMs;
-	}
-
-	private getActorOwner(actorId: number): number | null
-	{
-		const eid = this.actorEntityById.get(actorId);
-		if (eid === undefined)
-		{
-			return null;
-		}
-		return ActorComponent.ownerId[eid] ?? null;
 	}
 }

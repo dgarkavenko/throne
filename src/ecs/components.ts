@@ -25,3 +25,7 @@ export const RenderableComponent = {
 
 export const Dirty = {}
 export const VisibleTag = {}
+
+export const Selected = {};
+export const Hovered = {};
+
