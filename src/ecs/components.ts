@@ -23,6 +23,10 @@ export const RenderableComponent = {
 	y: [] as number[],
 };
 
+export const ProvinceComponent = {
+	provinceId: [] as number[],
+};
+
 export const Dirty = {}
 export const VisibleTag = {}
 

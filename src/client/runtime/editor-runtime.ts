@@ -36,7 +36,6 @@ export class EditorGame {
     this.terrain = new SharedTerrainRuntime({
       width: config.width,
       height: config.height,
-      terrainLayer: this.r.terrainLayer,
       autoGenerateTerrain: config.autoGenerateTerrain,
     });
   }
@@ -48,10 +47,23 @@ export class EditorGame {
       window.devicePixelRatio || 1,
       field
     );
+    const presentation = this.terrain.getPresentationState();
+    if (presentation) {
+      this.r.renderTerrainStatic(presentation);
+    }
   }
 
   setTerrainRenderControls(nextControls: TerrainRenderControls): void {
-    this.terrain.setTerrainRenderControls(nextControls);
+    const result = this.terrain.setTerrainRenderControls(nextControls);
+    const presentation = this.terrain.getPresentationState();
+    if (!presentation || !result.changed) {
+      return;
+    }
+    if (result.refinementChanged) {
+      this.r.renderTerrainStatic(presentation);
+    } else {
+      this.r.rerenderProvinceBorders(presentation);
+    }
   }
 
   setMovementTestConfig(nextConfig: Partial<MovementTestConfig>): void {
@@ -64,10 +76,18 @@ export class EditorGame {
 
   setTerrainGenerationControls(nextControls: TerrainGenerationControls): void {
     this.terrain.setTerrainGenerationControls(nextControls, true);
+    const presentation = this.terrain.getPresentationState();
+    if (presentation) {
+      this.r.renderTerrainStatic(presentation);
+    }
   }
 
   applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void {
     this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
+    const presentation = this.terrain.getPresentationState();
+    if (presentation) {
+      this.r.renderTerrainStatic(presentation);
+    }
   }
 
   getTerrainSnapshotForReplication(): TerrainSnapshot {

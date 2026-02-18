@@ -1,4 +1,3 @@
-import type { Container } from 'pixi.js';
 import { MapSystem } from '../../terrain/runtime/map-system';
 import type {
   TerrainGenerationDirtyFlags,
@@ -11,9 +10,16 @@ import {
 } from '../../terrain/navigation/pathfinding';
 import {
   DEFAULT_TERRAIN_RENDER_CONTROLS,
+  hasRefinementControlChange,
+  normalizeTerrainRenderControls,
   type TerrainRenderControls,
 } from '../terrain/render-controls';
-import { TerrainRenderer } from '../terrain/renderer';
+import { TerrainRefinementCacheStore } from '../terrain/refinement-cache';
+import {
+  buildTerrainPresentationState,
+  pickProvinceAt as pickProvinceFromModel,
+} from '../terrain/presentation';
+import type { TerrainPresentationState } from '../terrain/types';
 import type { TerrainSnapshot } from '../../shared/protocol';
 
 export type TerrainNavigationConfig = {
@@ -28,7 +34,6 @@ export type TerrainNavigationConfig = {
 export type SharedTerrainRuntimeConfig = {
   width: number;
   height: number;
-  terrainLayer: Container;
   autoGenerateTerrain?: boolean;
 };
 
@@ -54,17 +59,15 @@ const DEFAULT_NAVIGATION_CONFIG: TerrainNavigationConfig = {
 export class SharedTerrainRuntime {
   private readonly config: SharedTerrainRuntimeConfig;
   private readonly mapSystem: MapSystem;
-  private readonly terrainRenderer: TerrainRenderer;
+  private readonly refinementCache = new TerrainRefinementCacheStore();
+  private presentationState: TerrainPresentationState | null = null;
+  private hasAcceptedTerrainSnapshot = false;
 
   public readonly state: SharedTerrainRuntimeState;
 
   constructor(config: SharedTerrainRuntimeConfig) {
     this.config = config;
     this.mapSystem = new MapSystem({ width: config.width, height: config.height });
-    this.terrainRenderer = new TerrainRenderer({
-      config: { width: config.width, height: config.height },
-      terrainLayer: config.terrainLayer,
-    });
     this.state = {
       hasTerrain: false,
       lastTerrainVersion: 0,
@@ -76,11 +79,19 @@ export class SharedTerrainRuntime {
     };
     if (config.autoGenerateTerrain) {
       this.regenerateAll();
+      this.hasAcceptedTerrainSnapshot = true;
     }
   }
 
-  getOverlayContainer(): any | null {
-    return this.terrainRenderer.getOverlayContainer();
+  getPresentationState(): TerrainPresentationState | null {
+    return this.presentationState;
+  }
+
+  pickProvinceAt(worldX: number, worldY: number): number | null {
+    if (!this.presentationState) {
+      return null;
+    }
+    return pickProvinceFromModel(this.presentationState.pick, worldX, worldY);
   }
 
   setTerrainGenerationControls(
@@ -99,12 +110,15 @@ export class SharedTerrainRuntime {
       this.regeneratePartial(result.dirty);
       return;
     }
-    if (this.state.terrainState) {
-      this.renderTerrainState(this.state.terrainState);
-    }
+    this.rebuildPresentationState();
   }
 
   applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void {
+    if (this.hasAcceptedTerrainSnapshot) {
+      console.warn('[SharedTerrainRuntime] ignoring terrain snapshot: terrain is immutable after first apply');
+      return;
+    }
+    this.hasAcceptedTerrainSnapshot = true;
     this.state.lastTerrainVersion = Math.max(0, Math.round(terrainVersion));
     this.setTerrainGenerationControls(snapshot.controls, true);
   }
@@ -117,17 +131,22 @@ export class SharedTerrainRuntime {
     };
   }
 
-  setTerrainRenderControls(next: TerrainRenderControls): void {
-    const result = this.terrainRenderer.setRenderControls(next);
-    this.state.renderControls = this.terrainRenderer.getRenderControls();
-    if (!this.state.hasTerrain || !this.state.terrainState || !result.changed) {
-      return;
+  setTerrainRenderControls(next: TerrainRenderControls): {
+    changed: boolean;
+    refinementChanged: boolean;
+  } {
+    const sanitized = normalizeTerrainRenderControls(next);
+    const prev = this.state.renderControls;
+    const changed = JSON.stringify(prev) !== JSON.stringify(sanitized);
+    const refinementChanged = hasRefinementControlChange(prev, sanitized);
+    this.state.renderControls = sanitized;
+    if (refinementChanged) {
+      this.refinementCache.clear();
     }
-    if (result.refinementChanged) {
-      this.renderTerrainState(this.state.terrainState);
-      return;
+    if (this.state.hasTerrain && changed) {
+      this.rebuildPresentationState();
     }
-    this.terrainRenderer.rerenderProvinceBorders(this.mapSystem.getGenerationControls());
+    return { changed, refinementChanged };
   }
 
   setNavigationConfig(next: Partial<TerrainNavigationConfig>): void {
@@ -153,7 +172,7 @@ export class SharedTerrainRuntime {
     this.state.generationControls = this.mapSystem.getGenerationControls();
     this.state.terrainState = state;
     this.rebuildNavigationGraph();
-    this.renderTerrainState(state);
+    this.rebuildPresentationState();
     this.state.hasTerrain = true;
   }
 
@@ -162,12 +181,27 @@ export class SharedTerrainRuntime {
     this.state.generationControls = this.mapSystem.getGenerationControls();
     this.state.terrainState = state;
     this.rebuildNavigationGraph();
-    this.renderTerrainState(state);
+    this.rebuildPresentationState();
     this.state.hasTerrain = true;
   }
 
-  private renderTerrainState(state: TerrainGenerationState): void {
-    this.terrainRenderer.render(state, this.mapSystem.getGenerationControls());
+  private rebuildPresentationState(): void {
+    if (!this.state.terrainState) {
+      this.presentationState = null;
+      return;
+    }
+    const refined = this.refinementCache.resolve(
+      this.state.terrainState,
+      this.state.generationControls,
+      this.state.renderControls
+    );
+    this.presentationState = buildTerrainPresentationState(
+      { width: this.config.width, height: this.config.height },
+      this.state.terrainState,
+      this.state.generationControls,
+      this.state.renderControls,
+      refined
+    );
   }
 
   private rebuildNavigationGraph(): void {
@@ -199,4 +233,3 @@ export class SharedTerrainRuntime {
     );
   }
 }
-
