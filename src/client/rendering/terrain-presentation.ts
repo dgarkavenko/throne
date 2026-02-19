@@ -1,4 +1,4 @@
-import type { ProvinceGraph } from '../../terrain/core/political-core';
+import type { ProvinceFace, ProvinceGraph } from '../../terrain/core/political-core';
 import type {
   TerrainMeshState,
   TerrainRefineResult,
@@ -26,15 +26,8 @@ export type TerrainStaticRenderModel = {
   refined: TerrainRefineResult;
 };
 
-export type ProvinceOverlayModel = {
-  provinceCount: number;
-  provinceCentroids: Array<Vec2 | null>;
-  provinceBorderPaths: Vec2[][][];
-};
-
 export type TerrainPresentationState = {
   staticRender: TerrainStaticRenderModel;
-  overlay: ProvinceOverlayModel;
 };
 
 export function buildTerrainStaticRenderModel(
@@ -62,54 +55,53 @@ export function buildTerrainStaticRenderModel(
   };
 }
 
-export function buildProvinceOverlayModel(terrainState: TerrainGenerationState): ProvinceOverlayModel {
-  const mesh = terrainState.mesh.mesh;
-  const provinces = terrainState.provinces;
-  const provinceCentroids: Array<Vec2 | null> = new Array(provinces.faces.length).fill(null);
-  provinces.faces.forEach((province, index) => {
-    if (!province.faces || province.faces.length === 0) {
-      provinceCentroids[index] = null;
-      return;
-    }
-    let sumX = 0;
-    let sumY = 0;
-    let count = 0;
-    province.faces.forEach((faceIndex) => {
-      const point = mesh.faces[faceIndex]?.point;
-      if (!point) {
-        return;
-      }
-      sumX += point.x;
-      sumY += point.y;
-      count += 1;
-    });
-    provinceCentroids[index] = count > 0 ? { x: sumX / count, y: sumY / count } : null;
-  });
+export function calculateProvinceCentroid(provinceId: number, terrainState: TerrainGenerationState): Vec2
+{
+	const province = terrainState.provinces.faces[provinceId];
+	let sumX = 0;
+	let sumY = 0;
+	let count = 0;
+	province.faces.forEach((faceIndex) =>
+	{
+		const point = terrainState.mesh.mesh.faces[faceIndex]?.point;
+		if (!point)
+		{
+			return {x:0, y:0};
+		}
+		sumX += point.x;
+		sumY += point.y;
+		count += 1;
+	});
 
-  const provinceBorderPaths: Vec2[][][] = new Array(provinces.faces.length);
-  provinces.faces.forEach((province, index) => {
-    const segments: Vec2[][] = [];
-    province.outerEdges.forEach((edgeIndex) => {
-      const outerEdge = provinces.outerEdges[edgeIndex];
-      const edge = mesh.edges[outerEdge.edge];
-      if (!edge) {
-        return;
-      }
-      const a = mesh.vertices[edge.vertices[0]]?.point;
-      const b = mesh.vertices[edge.vertices[1]]?.point;
-      if (!a || !b) {
-        return;
-      }
-      segments.push([a, b]);
-    });
-    provinceBorderPaths[index] = segments;
-  });
+	count = Math.max(1, count);
+	return { x: sumX / count, y: sumY / count };
+}
 
-  return {
-    provinceCount: provinces.faces.length,
-    provinceCentroids,
-    provinceBorderPaths,
-  };
+export function buildBorder(provinceId: number, terrainState: TerrainGenerationState): Vec2[][]
+{
+	const segments: Vec2[][] = [];
+	const provinces = terrainState.provinces;
+	const province = terrainState.provinces.faces[provinceId];
+	const mesh = terrainState.mesh.mesh;
+
+	province.outerEdges.forEach((edgeIndex) =>
+	{
+		const outerEdge = provinces.outerEdges[edgeIndex];
+		const edge = mesh.edges[outerEdge.edge];
+		if (!edge)
+		{
+			return;
+		}
+		const a = mesh.vertices[edge.vertices[0]]?.point;
+		const b = mesh.vertices[edge.vertices[1]]?.point;
+		if (!a || !b)
+		{
+			return;
+		}
+		segments.push([a, b]);
+	});
+
+	return segments;
 }
 
 export function buildTerrainPresentationState(
@@ -124,7 +116,6 @@ export function buildTerrainPresentationState(
       terrainState,
       renderControls,
       refined
-    ),
-    overlay: buildProvinceOverlayModel(terrainState),
+    )
   };
 }

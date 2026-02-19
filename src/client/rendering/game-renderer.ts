@@ -241,12 +241,12 @@ export class GameRenderer
 
 		for (let entity of query(game.world, [ProvinceComponent, Hovered]))
 		{
-			this.drawProvinceBorder(ProvinceComponent.provinceId[entity], this.terrainOveraly.graphics, 0xdcecff, 0.5, hoverWidth);
+			this.drawProvinceBorder(entity, this.terrainOveraly.graphics, 0xdcecff, 0.5, hoverWidth);
 		}
 
 		for (let entity of query(game.world, [ProvinceComponent, Selected]))
 		{			
-			this.drawProvinceBorder(ProvinceComponent.provinceId[entity], this.terrainOveraly.graphics, 0xdcecff, 0.5, selectedWidth);			
+			this.drawProvinceBorder(entity, this.terrainOveraly.graphics, 0xdcecff, 0.5, selectedWidth);			
 		}
 	}
 
@@ -265,19 +265,14 @@ export class GameRenderer
 	}
 
 	private drawProvinceBorder(
-		provinceId: number,
+		entity: number,
 		graphics: Graphics,
 		color: number,
 		alpha: number,
 		width: number
 	): void
-	{
-		if (!this.terrainState)
-			return;
-
-		const segments = this.terrainState.overlay.provinceBorderPaths[provinceId];
-
-		segments.forEach((segment) =>
+	{		
+		ProvinceComponent.provinceEdges[entity].forEach((segment) =>
 		{
 			if (!segment || segment.length < 2)
 			{

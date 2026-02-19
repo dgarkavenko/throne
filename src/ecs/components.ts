@@ -1,3 +1,4 @@
+import { Vec2 } from "../terrain/core/math";
 import { ProvinceFace } from "../terrain/core/political-core";
 
 export const ActorComponent = {
@@ -27,7 +28,9 @@ export const RenderableComponent = {
 
 export const ProvinceComponent = {
 	provinceId: [] as number[],
-	face: [] as ProvinceFace[]
+	face: [] as ProvinceFace[],
+	provinceCentroid: [] as Vec2[],
+	provinceEdges: [] as Vec2[][][]
 };
 
 export const Dirty = {}

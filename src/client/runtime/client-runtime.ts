@@ -15,6 +15,7 @@ import type { TerrainGenerationState } from '../../terrain/types';
 import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
 import { SharedTerrainRuntime } from './shared-terrain-runtime';
 import { buildProvincePickModel, pickProvinceAt as pickProvinceFromModel, type ProvincePickModel } from './province-pick';
+import { buildBorder as buildProvinceEdges, calculateProvinceCentroid } from '../rendering/terrain-presentation';
 
 export type GameConfig = {
 	width: number;
@@ -341,14 +342,18 @@ export class ClientGame
 		{
 			return;
 		}
+
 		for (let provinceId = 0; provinceId < provinceCount; provinceId += 1)
 		{
 			const entity = addEntity(this.game.world);
 			addComponent(this.game.world, entity, ProvinceComponent);
 			ProvinceComponent.provinceId[entity] = provinceId;
 			ProvinceComponent.face[entity] = this.terrainState.provinces.faces[provinceId];
+			ProvinceComponent.provinceCentroid[entity] = calculateProvinceCentroid(provinceId, this.terrainState);
+			ProvinceComponent.provinceEdges[entity] = buildProvinceEdges(provinceId, this.terrainState )
 			this.provinceEntityById.set(provinceId, entity);
 		}
+
 		this.provinceEntitiesInitialized = true;
 	}
 
