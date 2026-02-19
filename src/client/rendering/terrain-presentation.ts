@@ -1,4 +1,3 @@
-import type { TerrainGenerationControls } from '../../terrain/controls';
 import type { ProvinceGraph } from '../../terrain/core/political-core';
 import type {
   TerrainMeshState,
@@ -14,7 +13,8 @@ export type Vec2 = { x: number; y: number };
 
 export type TerrainStaticRenderModel = {
   config: { width: number; height: number };
-  generationControls: TerrainGenerationControls;
+  generationSeed: number;
+  generationSpacing: number;
   renderControls: TerrainRenderControls;
   base: {
     mesh: TerrainMeshState['mesh'];
@@ -40,13 +40,13 @@ export type TerrainPresentationState = {
 export function buildTerrainStaticRenderModel(
   size: TerrainSize,
   terrainState: TerrainGenerationState,
-  generationControls: TerrainGenerationControls,
   renderControls: TerrainRenderControls,
   refined: TerrainRenderRefinementState
 ): TerrainStaticRenderModel {
   return {
     config: { width: size.width, height: size.height },
-    generationControls: { ...generationControls },
+    generationSeed: terrainState.generationSeed,
+    generationSpacing: terrainState.generationSpacing,
     renderControls: { ...renderControls },
     base: {
       mesh: terrainState.mesh.mesh,
@@ -115,7 +115,6 @@ export function buildProvinceOverlayModel(terrainState: TerrainGenerationState):
 export function buildTerrainPresentationState(
   size: TerrainSize,
   terrainState: TerrainGenerationState,
-  generationControls: TerrainGenerationControls,
   renderControls: TerrainRenderControls,
   refined: TerrainRenderRefinementState
 ): TerrainPresentationState {
@@ -123,7 +122,6 @@ export function buildTerrainPresentationState(
     staticRender: buildTerrainStaticRenderModel(
       size,
       terrainState,
-      generationControls,
       renderControls,
       refined
     ),

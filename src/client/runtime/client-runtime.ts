@@ -105,8 +105,7 @@ export class ClientGame
 			this.r.renderTerrain(
 				this.terrainGen.mapWidth,
 				this.terrainGen.mapHeight,
-				this.terrainState,
-				this.terrainGen.getGenerationControls()
+				this.terrainState
 			);
 		} else
 		{
@@ -164,8 +163,7 @@ export class ClientGame
 			this.r.renderTerrain(
 				this.terrainGen.mapWidth,
 				this.terrainGen.mapHeight,
-				this.terrainState,
-				this.terrainGen.getGenerationControls()
+				this.terrainState
 			);	
 		}
 	}

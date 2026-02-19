@@ -231,5 +231,7 @@ export function toTerrainGenerationState(cache: TerrainGenerationCache): Terrain
     rivers: cache.rivers,
     provinces: cache.provinces,
     generationFingerprint: cache.generationFingerprint,
+    generationSeed: cache.controls.seed,
+    generationSpacing: cache.controls.spacing,
   };
 }

@@ -1,5 +1,5 @@
 import { buildRiverTraces, createStepRng, STEP_SEEDS, type TerrainMeshState, type TerrainWaterState } from '../core/terrain-core';
-import { toLegacyTerrainControls, type TerrainGenerationControls } from '../controls';
+import type { TerrainGenerationControls } from '../controls';
 
 export function runRiversStage(
   mesh: TerrainMeshState,
@@ -7,10 +7,9 @@ export function runRiversStage(
   controls: TerrainGenerationControls
 ) {
   const seed = controls.seed >>> 0;
-  const legacyControls = toLegacyTerrainControls(controls);
   return buildRiverTraces(
     mesh.mesh,
-    legacyControls,
+    controls,
     createStepRng(seed, STEP_SEEDS.river),
     water.isLand,
     water.oceanWater

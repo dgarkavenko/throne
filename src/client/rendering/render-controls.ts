@@ -1,3 +1,12 @@
+import type { TerrainGenerationState } from '../../terrain/types';
+import {
+  DEFAULT_TERRAIN_BORDER_CONTROLS,
+  DEFAULT_TERRAIN_REFINEMENT_CONTROLS,
+  type TerrainBorderControls,
+  type TerrainRefinementPassControls,
+  type TerrainRenderPassControls,
+} from '../../terrain/render-controls';
+
 export type TerrainRenderControls = {
   showPolygonGraph: boolean;
   showDualGraph: boolean;
@@ -20,14 +29,14 @@ export const DEFAULT_TERRAIN_RENDER_CONTROLS: TerrainRenderControls = {
   showCornerNodes: false,
   showCenterNodes: false,
   showInsertedPoints: false,
-  provinceBorderWidth: 6.5,
-  showLandBorders: true,
-  showShoreBorders: true,
-  intermediateSeed: 1337,
-  intermediateMaxIterations: 8,
-  intermediateThreshold: 5,
-  intermediateRelMagnitude: 0,
-  intermediateAbsMagnitude: 2,
+  provinceBorderWidth: DEFAULT_TERRAIN_BORDER_CONTROLS.provinceBorderWidth,
+  showLandBorders: DEFAULT_TERRAIN_BORDER_CONTROLS.showLandBorders,
+  showShoreBorders: DEFAULT_TERRAIN_BORDER_CONTROLS.showShoreBorders,
+  intermediateSeed: DEFAULT_TERRAIN_REFINEMENT_CONTROLS.intermediateSeed,
+  intermediateMaxIterations: DEFAULT_TERRAIN_REFINEMENT_CONTROLS.intermediateMaxIterations,
+  intermediateThreshold: DEFAULT_TERRAIN_REFINEMENT_CONTROLS.intermediateThreshold,
+  intermediateRelMagnitude: DEFAULT_TERRAIN_REFINEMENT_CONTROLS.intermediateRelMagnitude,
+  intermediateAbsMagnitude: DEFAULT_TERRAIN_REFINEMENT_CONTROLS.intermediateAbsMagnitude,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -116,4 +125,37 @@ export function fingerprintTerrainRefinementControls(controls: TerrainRenderCont
     controls.intermediateRelMagnitude,
     controls.intermediateAbsMagnitude,
   ]);
+}
+
+export function toTerrainRefinementControls(
+  controls: TerrainRenderControls,
+  generationSeed: number
+): TerrainRefinementPassControls {
+  return {
+    intermediateSeed: controls.intermediateSeed,
+    intermediateMaxIterations: controls.intermediateMaxIterations,
+    intermediateThreshold: controls.intermediateThreshold,
+    intermediateRelMagnitude: controls.intermediateRelMagnitude,
+    intermediateAbsMagnitude: controls.intermediateAbsMagnitude,
+    generationSeed,
+  };
+}
+
+export function toTerrainBorderControls(controls: TerrainRenderControls): TerrainBorderControls {
+  return {
+    provinceBorderWidth: controls.provinceBorderWidth,
+    showLandBorders: controls.showLandBorders,
+    showShoreBorders: controls.showShoreBorders,
+  };
+}
+
+export function toTerrainRenderPassControls(
+  controls: TerrainRenderControls,
+  generationState: Pick<TerrainGenerationState, 'generationSeed' | 'generationSpacing'>
+): TerrainRenderPassControls {
+  return {
+    generationSeed: generationState.generationSeed,
+    generationSpacing: generationState.generationSpacing,
+    ...toTerrainBorderControls(controls),
+  };
 }

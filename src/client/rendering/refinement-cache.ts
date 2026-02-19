@@ -1,8 +1,8 @@
 import { createRng, createStepRng, STEP_SEEDS, terrainRefine } from '../../terrain/core/terrain-core';
 import type { TerrainGenerationState } from '../../terrain/types';
-import { toLegacyTerrainControls, type TerrainGenerationControls } from '../../terrain/controls';
 import {
   fingerprintTerrainRefinementControls,
+  toTerrainRefinementControls,
   type TerrainRenderControls,
 } from './render-controls';
 
@@ -22,7 +22,6 @@ export class TerrainRefinementCacheStore {
 
   resolve(
     generationState: TerrainGenerationState,
-    generationControls: TerrainGenerationControls,
     renderControls: TerrainRenderControls
   ): TerrainRenderRefinementState {
     const generationFingerprint = generationState.generationFingerprint;
@@ -34,27 +33,16 @@ export class TerrainRefinementCacheStore {
     ) {
       return this.cache;
     }
-    const legacyControls = toLegacyTerrainControls(generationControls, {
-      showPolygonGraph: renderControls.showPolygonGraph,
-      showDualGraph: renderControls.showDualGraph,
-      showCornerNodes: renderControls.showCornerNodes,
-      showCenterNodes: renderControls.showCenterNodes,
-      showInsertedPoints: renderControls.showInsertedPoints,
-      provinceBorderWidth: renderControls.provinceBorderWidth,
-      showLandBorders: renderControls.showLandBorders,
-      showShoreBorders: renderControls.showShoreBorders,
-      intermediateSeed: renderControls.intermediateSeed,
-      intermediateMaxIterations: renderControls.intermediateMaxIterations,
-      intermediateThreshold: renderControls.intermediateThreshold,
-      intermediateRelMagnitude: renderControls.intermediateRelMagnitude,
-      intermediateAbsMagnitude: renderControls.intermediateAbsMagnitude,
-    });
+    const refinementControls = toTerrainRefinementControls(
+      renderControls,
+      generationState.generationSeed
+    );
     const intermediateRandom = createRng(renderControls.intermediateSeed >>> 0);
-    const riverRandom = createStepRng(generationControls.seed >>> 0, STEP_SEEDS.river);
+    const riverRandom = createStepRng(generationState.generationSeed >>> 0, STEP_SEEDS.river);
     const refined = terrainRefine(
       generationState.mesh.mesh,
       generationState.water.isLand,
-      legacyControls,
+      refinementControls,
       intermediateRandom,
       riverRandom,
       generationState.water.oceanWater,

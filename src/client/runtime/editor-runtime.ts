@@ -45,8 +45,7 @@ export class EditorGame {
       this.r.renderTerrain(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
-        this.terrainState,
-        this.terrain.getGenerationControls()
+        this.terrainState
       );
     }
   }
@@ -60,8 +59,7 @@ export class EditorGame {
       this.r.renderTerrain(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
-        this.terrainState,
-        this.terrain.getGenerationControls()
+        this.terrainState
       );
     } else {
       this.r.rerenderProvinceBorders();
@@ -78,8 +76,7 @@ export class EditorGame {
       this.r.renderTerrain(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
-        this.terrainState,
-        this.terrain.getGenerationControls()
+        this.terrainState
       );
     }
   }
@@ -90,8 +87,7 @@ export class EditorGame {
       this.r.renderTerrain(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
-        this.terrainState,
-        this.terrain.getGenerationControls()
+        this.terrainState
       );
     }
   }

@@ -1,4 +1,12 @@
 import { basegenPolitical } from './political-core';
+import type { TerrainGenerationControls } from '../controls';
+import type {
+	TerrainBorderControls,
+	TerrainRefinementControls,
+	TerrainRefinementPassControls,
+	TerrainRenderPassControls,
+	TerrainRiverGenerationControls,
+} from '../render-controls';
 import {
 	clamp,
 	lerp,
@@ -13,53 +21,6 @@ import {
 	type Vec2,
 } from './math';
 import { Graphics, Container } from "pixi.js";
-
-export type TerrainControls = {
-	spacing: number;
-	showPolygonGraph: boolean;
-	showDualGraph: boolean;
-	showCornerNodes: boolean;
-	showCenterNodes: boolean;
-	showInsertedPoints: boolean;
-	provinceCount: number;
-	provinceBorderWidth: number;
-	provinceSizeVariance: number;
-	provincePassageElevation: number;
-	provinceRiverPenalty: number;
-	provinceSmallIslandMultiplier: number;
-	provinceArchipelagoMultiplier: number;
-	provinceIslandSingleMultiplier: number;
-	provinceArchipelagoRadiusMultiplier: number;
-	showLandBorders: boolean;
-	showShoreBorders: boolean;
-	seed: number;
-	intermediateSeed: number;
-	intermediateMaxIterations: number;
-	intermediateThreshold: number;
-	intermediateRelMagnitude: number;
-	intermediateAbsMagnitude: number;
-	waterLevel: number;
-	waterRoughness: number;
-	waterNoiseScale: number;
-	waterNoiseStrength: number;
-	waterNoiseOctaves: number;
-	waterWarpScale: number;
-	waterWarpStrength: number;
-	riverDensity: number;
-	riverBranchChance: number;
-	riverClimbChance: number;
-	landRelief: number;
-	ridgeStrength: number;
-	ridgeCount: number;
-	plateauStrength: number;
-	ridgeDistribution: number;
-	ridgeSeparation: number;
-	ridgeContinuity: number;
-	ridgeContinuityThreshold: number;
-	oceanPeakClamp: number;
-	ridgeWidth: number;
-	ridgeOceanClamp: number;
-};
 
 // Land generation controls:
 // landRelief: scales inland elevation (0..1).
@@ -206,9 +167,13 @@ export type TerrainRefineResult = {
 	rivers: RiverPath[];
 };
 
+type DrawVoronoiTerrainControls = TerrainGenerationControls &
+	TerrainRefinementControls &
+	TerrainBorderControls;
+
 export function generateMesh(
 	config: TerrainConfig,
-	controls: TerrainControls,
+	controls: TerrainGenerationControls,
 	random: () => number
 ): TerrainMeshState {
 	const padding = 0;
@@ -225,7 +190,7 @@ export function generateWater(
 	config: TerrainConfig,
 	mesh: MeshGraph,
 	baseCells: Vec2[][],
-	controls: TerrainControls,
+	controls: TerrainGenerationControls,
 	random: () => number
 ): TerrainWaterState {
 	const width = config.width;
@@ -405,7 +370,7 @@ export function generateWater(
 export function applyMountains(
 	mesh: MeshGraph,
 	waterState: TerrainWaterState,
-	controls: TerrainControls,
+	controls: TerrainGenerationControls,
 	random: () => number
 ): TerrainMountainState {
 	const faceCount = mesh.faces.length;
@@ -620,7 +585,7 @@ export function applyMountains(
 
 export function terrainBasegen(
 	config: TerrainConfig,
-	controls: TerrainControls,
+	controls: TerrainGenerationControls,
 	random: () => number
 ): TerrainBasegenResult {
 	const meshState = generateMesh(config, controls, random);
@@ -637,23 +602,25 @@ export function terrainBasegen(
 export function terrainRefine(
 	mesh: MeshGraph,
 	isLand: boolean[],
-	controls: TerrainControls,
+	controls: TerrainRefinementPassControls,
 	intermediateRandom: () => number,
 	riverRandom: () => number,
 	oceanWater: boolean[],
 	riverTraces?: RiverTrace[]
 ): TerrainRefineResult {
 	const refinedGeometry = buildRefinedGeometry(mesh, isLand, controls, intermediateRandom);
+	void riverRandom;
+	void oceanWater;
 	const rivers =
 		riverTraces && riverTraces.length > 0
 			? materializeRiverPaths(mesh, refinedGeometry, controls, riverTraces)
-			: buildRivers(mesh, refinedGeometry, controls, riverRandom, isLand, oceanWater);
+			: [];
 	return { refinedGeometry, rivers };
 }
 
 export function renderTerrain(
 	config: TerrainConfig,
-	controls: TerrainControls,
+	controls: TerrainRenderPassControls,
 	terrainLayer: any,
 	base: TerrainBasegenResult,
 	provinceGraph: ProvinceGraph,
@@ -676,7 +643,7 @@ export function renderTerrain(
 	waterTint.fill({ color: 0x0d1a2e, alpha: 0.18 });
 	baseLayer.addChild(waterTint);
 
-	const seed = controls.seed >>> 0;
+	const seed = controls.generationSeed >>> 0;
 	const { mesh, baseCells } = base;
 	const { refinedGeometry, rivers } = refined;
 	const maxLandElevation = MAX_LAND_ELEVATION;
@@ -763,7 +730,7 @@ export function renderTerrain(
 
 export function drawVoronoiTerrain(
 	config: TerrainConfig,
-	controls: TerrainControls,
+	controls: DrawVoronoiTerrainControls,
 	terrainLayer: any
 ): void {
 	if (!terrainLayer)
@@ -802,7 +769,19 @@ export function drawVoronoiTerrain(
 		controls,
 		intermediateRandom
 	);
-	const rivers = materializeRiverPaths(meshState.mesh, refinedGeometry, controls, riverTraceResult.traces);
+	const rivers = materializeRiverPaths(
+		meshState.mesh,
+		refinedGeometry,
+		{
+			intermediateSeed: controls.intermediateSeed,
+			intermediateMaxIterations: controls.intermediateMaxIterations,
+			intermediateThreshold: controls.intermediateThreshold,
+			intermediateRelMagnitude: controls.intermediateRelMagnitude,
+			intermediateAbsMagnitude: controls.intermediateAbsMagnitude,
+			generationSeed: controls.seed,
+		},
+		riverTraceResult.traces
+	);
 	const base = {
 		mesh: meshState.mesh,
 		baseCells: meshState.baseCells,
@@ -810,7 +789,20 @@ export function drawVoronoiTerrain(
 		oceanWater: waterState.oceanWater,
 	};
 	const refined = { refinedGeometry, rivers };
-	renderTerrain(config, controls, terrainLayer, base, provinceResult, refined);
+	renderTerrain(
+		config,
+		{
+			generationSeed: controls.seed,
+			generationSpacing: controls.spacing,
+			provinceBorderWidth: controls.provinceBorderWidth,
+			showLandBorders: controls.showLandBorders,
+			showShoreBorders: controls.showShoreBorders,
+		},
+		terrainLayer,
+		base,
+		provinceResult,
+		refined
+	);
 }
 
 function generateIntermediate(
@@ -867,7 +859,7 @@ function generateIntermediate(
 function buildRefinedGeometry(
 	mesh: MeshGraph,
 	isLand: boolean[],
-	controls: TerrainControls,
+	controls: TerrainRefinementControls,
 	random: () => number
 ): RefinedGeometry {
 	const { edgePolylines, insertedPoints } = buildEdgePolylines(mesh, isLand, controls, random);
@@ -878,7 +870,7 @@ function buildRefinedGeometry(
 function buildEdgePolylines(
 	mesh: MeshGraph,
 	isLand: boolean[],
-	controls: TerrainControls,
+	controls: TerrainRefinementControls,
 	random: () => number
 ): { edgePolylines: EdgePolyline[]; insertedPoints: Vec2[] } {
 	const edgePolylines: EdgePolyline[] = new Array(mesh.edges.length);
@@ -988,24 +980,9 @@ type RiverCandidate = {
 	nextElevation: number;
 };
 
-function buildRivers(
-	mesh: MeshGraph,
-	refinedGeometry: RefinedGeometry,
-	controls: TerrainControls,
-	random: () => number,
-	isLand: boolean[],
-	oceanWater: boolean[]
-): RiverPath[] {
-	const traceResult = buildRiverTraces(mesh, controls, random, isLand, oceanWater);
-	if (traceResult.traces.length === 0) {
-		return [];
-	}
-	return materializeRiverPaths(mesh, refinedGeometry, controls, traceResult.traces);
-}
-
 export function buildRiverTraces(
 	mesh: MeshGraph,
-	controls: TerrainControls,
+	controls: TerrainRiverGenerationControls,
 	random: () => number,
 	isLand: boolean[],
 	oceanWater: boolean[]
@@ -1360,13 +1337,13 @@ export function buildRiverTraces(
 export function materializeRiverPaths(
 	mesh: MeshGraph,
 	refinedGeometry: RefinedGeometry,
-	controls: TerrainControls,
+	controls: TerrainRefinementPassControls,
 	traces: RiverTrace[]
 ): RiverPath[] {
 	if (traces.length === 0) {
 		return [];
 	}
-	const riverSeed = (controls.seed ^ 0x9e3779b9) >>> 0;
+	const riverSeed = (controls.generationSeed ^ 0x9e3779b9) >>> 0;
 	const riverPolylineCache = new Map<number, Vec2[]>();
 	const paths: RiverPath[] = [];
 	for (let i = 0; i < traces.length; i += 1) {
@@ -1484,7 +1461,7 @@ function computeTraceVertexDistances(
 	trace: RiverTrace,
 	mesh: MeshGraph,
 	refinedGeometry: RefinedGeometry,
-	controls: TerrainControls,
+	controls: TerrainRefinementPassControls,
 	riverSeed: number,
 	riverPolylineCache: Map<number, Vec2[]>
 ): number[] {
@@ -1713,7 +1690,7 @@ function traceRiverPathRaw(
 function traceRiverPath(
 	mesh: MeshGraph,
 	refinedGeometry: RefinedGeometry,
-	controls: TerrainControls,
+	controls: TerrainRefinementPassControls,
 	riverSeed: number,
 	riverPolylineCache: Map<number, Vec2[]>,
 	riverClimbChance: number,
@@ -1909,7 +1886,7 @@ function collectRiverCandidates(
 function getRiverBasePolyline(
 	mesh: MeshGraph,
 	refinedGeometry: RefinedGeometry,
-	controls: TerrainControls,
+	controls: TerrainRefinementPassControls,
 	riverSeed: number,
 	riverPolylineCache: Map<number, Vec2[]>,
 	edgeIndex: number
@@ -1962,7 +1939,7 @@ function getRiverBasePolyline(
 function collectRiverEdgePolyline(
 	mesh: MeshGraph,
 	refinedGeometry: RefinedGeometry,
-	controls: TerrainControls,
+	controls: TerrainRefinementPassControls,
 	riverSeed: number,
 	riverPolylineCache: Map<number, Vec2[]>,
 	edgeIndex: number,
@@ -2022,7 +1999,7 @@ function computePathLength(points: Vec2[]): number {
 	return length;
 }
 
-function renderRivers(riverLayer: any, rivers: RiverPath[], controls: TerrainControls): void {
+function renderRivers(riverLayer: any, rivers: RiverPath[], controls: TerrainRenderPassControls): void {
 	if (!riverLayer || rivers.length === 0) {
 		return;
 	}
@@ -2032,7 +2009,7 @@ function renderRivers(riverLayer: any, rivers: RiverPath[], controls: TerrainCon
 	const strokeCaps = { cap: 'round', join: 'round' } as const;
 	const profiles = rivers.map((river) => {
 		const totalLength = computePathLength(river.points);
-		const lengthT = clamp(totalLength / (controls.spacing * 12), 0, 1);
+		const lengthT = clamp(totalLength / (controls.generationSpacing * 12), 0, 1);
 		const mouthWidth = lerp(2.2, 7.0, smoothstep(lengthT));
 		const headWidth = Math.max(0.6, mouthWidth * 0.28);
 		return { totalLength, mouthWidth, headWidth };
@@ -2074,7 +2051,7 @@ function renderRivers(riverLayer: any, rivers: RiverPath[], controls: TerrainCon
 		}
 	}
 
-	const boostFalloff = Math.max(12, controls.spacing * 2.5);
+	const boostFalloff = Math.max(12, controls.generationSpacing * 2.5);
 
 	for (let i = 0; i < rivers.length; i += 1) {
 		const river = rivers[i];
@@ -3422,7 +3399,7 @@ function clearLayerChildren(layer: any): void {
 	}
 }
 
-export function updateProvinceBorders(terrainLayer: any, controls: TerrainControls): void {
+export function updateProvinceBorders(terrainLayer: any, controls: TerrainBorderControls): void {
 	if (!terrainLayer) {
 		return;
 	}
@@ -3497,7 +3474,7 @@ function renderProvinceBorders(
 	baseCells: Vec2[][],
 	provinceAssignment: ProvinceGraph,
 	config: TerrainConfig,
-	controls: TerrainControls,
+	controls: TerrainBorderControls,
 	provinceLayer: any
 ): void {
 	const lineWidth = clamp(controls.provinceBorderWidth ?? 6.5, 1, 24);

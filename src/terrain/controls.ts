@@ -1,5 +1,3 @@
-import type { TerrainControls as LegacyTerrainControls } from './core/terrain-core';
-
 export type TerrainGenerationControls = {
   spacing: number;
   provinceCount: number;
@@ -34,25 +32,6 @@ export type TerrainGenerationControls = {
   ridgeWidth: number;
 };
 
-type LegacyRenderOverrides = Partial<
-  Pick<
-    LegacyTerrainControls,
-    | 'showPolygonGraph'
-    | 'showDualGraph'
-    | 'showCornerNodes'
-    | 'showCenterNodes'
-    | 'showInsertedPoints'
-    | 'provinceBorderWidth'
-    | 'showLandBorders'
-    | 'showShoreBorders'
-    | 'intermediateSeed'
-    | 'intermediateMaxIterations'
-    | 'intermediateThreshold'
-    | 'intermediateRelMagnitude'
-    | 'intermediateAbsMagnitude'
-  >
->;
-
 export const DEFAULT_TERRAIN_GENERATION_CONTROLS: TerrainGenerationControls = {
   spacing: 16,
   provinceCount: 8,
@@ -85,22 +64,6 @@ export const DEFAULT_TERRAIN_GENERATION_CONTROLS: TerrainGenerationControls = {
   oceanPeakClamp: 0.05,
   ridgeOceanClamp: 0.5,
   ridgeWidth: 1,
-};
-
-const DEFAULT_LEGACY_RENDER_OVERRIDES: Required<LegacyRenderOverrides> = {
-  showPolygonGraph: false,
-  showDualGraph: false,
-  showCornerNodes: false,
-  showCenterNodes: false,
-  showInsertedPoints: false,
-  provinceBorderWidth: 6.5,
-  showLandBorders: true,
-  showShoreBorders: true,
-  intermediateSeed: 1337,
-  intermediateMaxIterations: 8,
-  intermediateThreshold: 5,
-  intermediateRelMagnitude: 0,
-  intermediateAbsMagnitude: 2,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -172,62 +135,6 @@ export function normalizeTerrainGenerationControls(
     oceanPeakClamp: clamp(readNumber(controls.oceanPeakClamp, defaults.oceanPeakClamp), 0, 1),
     ridgeOceanClamp: clamp(readNumber(controls.ridgeOceanClamp, defaults.ridgeOceanClamp), 0, 1),
     ridgeWidth: clamp(readNumber(controls.ridgeWidth, defaults.ridgeWidth), 0, 1),
-  };
-}
-
-export function toLegacyTerrainControls(
-  generationControls: TerrainGenerationControls,
-  renderOverrides?: LegacyRenderOverrides
-): LegacyTerrainControls {
-  const render = {
-    ...DEFAULT_LEGACY_RENDER_OVERRIDES,
-    ...(renderOverrides ?? {}),
-  };
-  return {
-    spacing: generationControls.spacing,
-    showPolygonGraph: render.showPolygonGraph,
-    showDualGraph: render.showDualGraph,
-    showCornerNodes: render.showCornerNodes,
-    showCenterNodes: render.showCenterNodes,
-    showInsertedPoints: render.showInsertedPoints,
-    provinceCount: generationControls.provinceCount,
-    provinceBorderWidth: render.provinceBorderWidth,
-    provinceSizeVariance: generationControls.provinceSizeVariance,
-    provincePassageElevation: generationControls.provincePassageElevation,
-    provinceRiverPenalty: generationControls.provinceRiverPenalty,
-    provinceSmallIslandMultiplier: generationControls.provinceSmallIslandMultiplier,
-    provinceArchipelagoMultiplier: generationControls.provinceArchipelagoMultiplier,
-    provinceIslandSingleMultiplier: generationControls.provinceIslandSingleMultiplier,
-    provinceArchipelagoRadiusMultiplier: generationControls.provinceArchipelagoRadiusMultiplier,
-    showLandBorders: render.showLandBorders,
-    showShoreBorders: render.showShoreBorders,
-    seed: generationControls.seed,
-    intermediateSeed: render.intermediateSeed,
-    intermediateMaxIterations: render.intermediateMaxIterations,
-    intermediateThreshold: render.intermediateThreshold,
-    intermediateRelMagnitude: render.intermediateRelMagnitude,
-    intermediateAbsMagnitude: render.intermediateAbsMagnitude,
-    waterLevel: generationControls.waterLevel,
-    waterRoughness: generationControls.waterRoughness,
-    waterNoiseScale: generationControls.waterNoiseScale,
-    waterNoiseStrength: generationControls.waterNoiseStrength,
-    waterNoiseOctaves: generationControls.waterNoiseOctaves,
-    waterWarpScale: generationControls.waterWarpScale,
-    waterWarpStrength: generationControls.waterWarpStrength,
-    riverDensity: generationControls.riverDensity,
-    riverBranchChance: generationControls.riverBranchChance,
-    riverClimbChance: generationControls.riverClimbChance,
-    landRelief: generationControls.landRelief,
-    ridgeStrength: generationControls.ridgeStrength,
-    ridgeCount: generationControls.ridgeCount,
-    plateauStrength: generationControls.plateauStrength,
-    ridgeDistribution: generationControls.ridgeDistribution,
-    ridgeSeparation: generationControls.ridgeSeparation,
-    ridgeContinuity: generationControls.ridgeContinuity,
-    ridgeContinuityThreshold: generationControls.ridgeContinuityThreshold,
-    oceanPeakClamp: generationControls.oceanPeakClamp,
-    ridgeWidth: generationControls.ridgeWidth,
-    ridgeOceanClamp: generationControls.ridgeOceanClamp,
   };
 }
 

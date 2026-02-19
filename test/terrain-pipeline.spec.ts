@@ -7,6 +7,7 @@ import {
   buildTerrainGeneration,
   computeGenerationDirty,
   iterateTerrainGeneration,
+  toTerrainGenerationState,
 } from '../src/terrain/pipeline';
 
 const CONFIG = { width: 512, height: 512 };
@@ -78,5 +79,16 @@ describe('terrain generation pipeline', () => {
     expect(computedByStage.get('rivers')).toBe(false);
     expect(computedByStage.get('provinces')).toBe(true);
   });
-});
 
+  it('includes generation render context in generation state', () => {
+    const controls: TerrainGenerationControls = {
+      ...DEFAULT_TERRAIN_GENERATION_CONTROLS,
+      seed: 9988,
+      spacing: 72,
+    };
+    const cache = buildTerrainGeneration({ config: CONFIG, controls });
+    const state = toTerrainGenerationState(cache);
+    expect(state.generationSeed).toBe(controls.seed);
+    expect(state.generationSpacing).toBe(controls.spacing);
+  });
+});

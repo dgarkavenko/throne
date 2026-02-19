@@ -11,13 +11,14 @@ import
 	} from '../../ecs/components';
 import type { EcsGame } from '../../ecs/game';
 import { renderTerrain, updateProvinceBorders } from '../../terrain/core/terrain-core';
-import { toLegacyTerrainControls, type TerrainGenerationControls } from '../../terrain/controls';
 import type { TerrainGenerationState } from '../../terrain/types';
 import {
 	DEFAULT_TERRAIN_RENDER_CONTROLS,
 	fingerprintTerrainRenderControls,
 	hasRefinementControlChange,
 	normalizeTerrainRenderControls,
+	toTerrainBorderControls,
+	toTerrainRenderPassControls,
 	type TerrainRenderControls,
 } from './render-controls';
 import { TerrainRefinementCacheStore } from './refinement-cache';
@@ -55,7 +56,6 @@ export class GameRenderer
 	private readonly refinementCache = new TerrainRefinementCacheStore();
 	private renderControls: TerrainRenderControls = { ...DEFAULT_TERRAIN_RENDER_CONTROLS };
 	private lastTerrainState: TerrainGenerationState | null = null;
-	private lastGenerationControls: TerrainGenerationControls | null = null;
 	private lastMapWidth = 0;
 	private lastMapHeight = 0;
 	private terrainState: TerrainPresentationState | null = null;
@@ -144,45 +144,24 @@ export class GameRenderer
 	renderTerrain(
 		mapWidth: number,
 		mapHeight: number,
-		terrainState: TerrainGenerationState,
-		generationControls: TerrainGenerationControls
+		terrainState: TerrainGenerationState
 	): void
 	{
 		this.lastTerrainState = terrainState;
-		this.lastGenerationControls = { ...generationControls };
 		this.lastMapWidth = mapWidth;
 		this.lastMapHeight = mapHeight;
-		const refined = this.refinementCache.resolve(
-			terrainState,
-			generationControls,
-			this.renderControls
-		);
+		const refined = this.refinementCache.resolve(terrainState, this.renderControls);
 		this.terrainState = buildTerrainPresentationState(
 			{ width: mapWidth, height: mapHeight },
 			terrainState,
-			generationControls,
 			this.renderControls,
 			refined
 		);
 		const staticRender = this.terrainState.staticRender;
-		const legacyControls = toLegacyTerrainControls(staticRender.generationControls, {
-			showPolygonGraph: this.renderControls.showPolygonGraph,
-			showDualGraph: this.renderControls.showDualGraph,
-			showCornerNodes: this.renderControls.showCornerNodes,
-			showCenterNodes: this.renderControls.showCenterNodes,
-			showInsertedPoints: this.renderControls.showInsertedPoints,
-			provinceBorderWidth: this.renderControls.provinceBorderWidth,
-			showLandBorders: this.renderControls.showLandBorders,
-			showShoreBorders: this.renderControls.showShoreBorders,
-			intermediateSeed: this.renderControls.intermediateSeed,
-			intermediateMaxIterations: this.renderControls.intermediateMaxIterations,
-			intermediateThreshold: this.renderControls.intermediateThreshold,
-			intermediateRelMagnitude: this.renderControls.intermediateRelMagnitude,
-			intermediateAbsMagnitude: this.renderControls.intermediateAbsMagnitude,
-		});
+		const passControls = toTerrainRenderPassControls(this.renderControls, terrainState);
 		renderTerrain(
 			staticRender.config,
-			legacyControls,
+			passControls,
 			this.terrainLayer,
 			staticRender.base,
 			staticRender.provinces,
@@ -200,41 +179,19 @@ export class GameRenderer
 
 	rerenderProvinceBorders(): void
 	{
-		if (!this.lastTerrainState || !this.lastGenerationControls)
+		if (!this.lastTerrainState)
 		{
 			return;
 		}
 		const terrainState = this.lastTerrainState;
-		const generationControls = this.lastGenerationControls;
-		const refined = this.refinementCache.resolve(
-			terrainState,
-			generationControls,
-			this.renderControls
-		);
+		const refined = this.refinementCache.resolve(terrainState, this.renderControls);
 		this.terrainState = buildTerrainPresentationState(
 			{ width: this.lastMapWidth, height: this.lastMapHeight },
 			terrainState,
-			generationControls,
 			this.renderControls,
 			refined
 		);
-		const staticRender = this.terrainState.staticRender;
-		const legacyControls = toLegacyTerrainControls(staticRender.generationControls, {
-			showPolygonGraph: this.renderControls.showPolygonGraph,
-			showDualGraph: this.renderControls.showDualGraph,
-			showCornerNodes: this.renderControls.showCornerNodes,
-			showCenterNodes: this.renderControls.showCenterNodes,
-			showInsertedPoints: this.renderControls.showInsertedPoints,
-			provinceBorderWidth: this.renderControls.provinceBorderWidth,
-			showLandBorders: this.renderControls.showLandBorders,
-			showShoreBorders: this.renderControls.showShoreBorders,
-			intermediateSeed: this.renderControls.intermediateSeed,
-			intermediateMaxIterations: this.renderControls.intermediateMaxIterations,
-			intermediateThreshold: this.renderControls.intermediateThreshold,
-			intermediateRelMagnitude: this.renderControls.intermediateRelMagnitude,
-			intermediateAbsMagnitude: this.renderControls.intermediateAbsMagnitude,
-		});
-		updateProvinceBorders(this.terrainLayer, legacyControls);
+		updateProvinceBorders(this.terrainLayer, toTerrainBorderControls(this.renderControls));
 		this.setGraphOverlayVisibility();
 		this.repositionProvinceOverlay();
 	}

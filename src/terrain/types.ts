@@ -43,6 +43,8 @@ export type TerrainGenerationState = {
   rivers: TerrainRiverTopologyState;
   provinces: ProvinceGraph;
   generationFingerprint: string;
+  generationSeed: number;
+  generationSpacing: number;
 };
 
 export type TerrainGenerationIteration = {

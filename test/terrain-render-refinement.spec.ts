@@ -23,8 +23,8 @@ describe('terrain refinement cache', () => {
     const renderControls = { ...DEFAULT_TERRAIN_RENDER_CONTROLS };
     const generationState = buildState(generationControls);
     const cache = new TerrainRefinementCacheStore();
-    const first = cache.resolve(generationState, generationControls, renderControls);
-    const second = cache.resolve(generationState, generationControls, renderControls);
+    const first = cache.resolve(generationState, renderControls);
+    const second = cache.resolve(generationState, renderControls);
     expect(second).toBe(first);
   });
 
@@ -33,13 +33,13 @@ describe('terrain refinement cache', () => {
     const generationState = buildState(generationControls);
     const cache = new TerrainRefinementCacheStore();
     const baseRender = { ...DEFAULT_TERRAIN_RENDER_CONTROLS };
-    const first = cache.resolve(generationState, generationControls, baseRender);
+    const first = cache.resolve(generationState, baseRender);
     const toggledRender: TerrainRenderControls = {
       ...baseRender,
       showDualGraph: !baseRender.showDualGraph,
       provinceBorderWidth: baseRender.provinceBorderWidth + 1,
     };
-    const second = cache.resolve(generationState, generationControls, toggledRender);
+    const second = cache.resolve(generationState, toggledRender);
     expect(second).toBe(first);
   });
 
@@ -47,12 +47,12 @@ describe('terrain refinement cache', () => {
     const generationControls = { ...DEFAULT_TERRAIN_GENERATION_CONTROLS, seed: 1338 };
     const generationState = buildState(generationControls);
     const cache = new TerrainRefinementCacheStore();
-    const first = cache.resolve(generationState, generationControls, { ...DEFAULT_TERRAIN_RENDER_CONTROLS });
+    const first = cache.resolve(generationState, { ...DEFAULT_TERRAIN_RENDER_CONTROLS });
     const changedRender: TerrainRenderControls = {
       ...DEFAULT_TERRAIN_RENDER_CONTROLS,
       intermediateMaxIterations: DEFAULT_TERRAIN_RENDER_CONTROLS.intermediateMaxIterations + 1,
     };
-    const second = cache.resolve(generationState, generationControls, changedRender);
+    const second = cache.resolve(generationState, changedRender);
     expect(second).not.toBe(first);
   });
 
@@ -63,8 +63,8 @@ describe('terrain refinement cache', () => {
     const stateB = buildState(controlsB);
     const cache = new TerrainRefinementCacheStore();
     const renderControls = { ...DEFAULT_TERRAIN_RENDER_CONTROLS };
-    const first = cache.resolve(stateA, controlsA, renderControls);
-    const second = cache.resolve(stateB, controlsB, renderControls);
+    const first = cache.resolve(stateA, renderControls);
+    const second = cache.resolve(stateB, renderControls);
     expect(second).not.toBe(first);
   });
 });

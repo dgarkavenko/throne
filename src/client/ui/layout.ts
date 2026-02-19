@@ -630,12 +630,20 @@ export function createPageLayout(): PageLayout {
 		debugPaths: settings.agentDebugPaths,
 	});
 
+	const readGenerationSettings = (): TerrainGenerationControls =>
+		toGenerationSettings(readTerrainSettings());
+
+	const readRenderSettings = (): TerrainRenderControls =>
+		toRenderSettings(readTerrainSettings());
+
+	const readMovementSettings = (): MovementSettings =>
+		toMovementSettings(readTerrainSettings());
+
 	const readTerrainSettingsPayload = (): TerrainSettingsPayload => {
-		const settings = readTerrainSettings();
 		return {
-			generation: toGenerationSettings(settings),
-			render: toRenderSettings(settings),
-			movement: toMovementSettings(settings),
+			generation: readGenerationSettings(),
+			render: readRenderSettings(),
+			movement: readMovementSettings(),
 		};
 	};
 
@@ -1062,32 +1070,30 @@ export function createPageLayout(): PageLayout {
 			setAgentSettingsInternal(settings);
 		},
 		getTerrainGenerationSettings() {
-			return readTerrainSettingsPayload().generation;
+			return readGenerationSettings();
 		},
 		getTerrainRenderSettings() {
-			return readTerrainSettingsPayload().render;
+			return readRenderSettings();
 		},
 		getMovementSettings() {
-			return readTerrainSettingsPayload().movement;
+			return readMovementSettings();
 		},
 		onTerrainSettingsChange(onChange) {
 			const notify = () => {
 				syncTerrainLabels();
-				const settings = readTerrainSettings();
 				onChange({
-					generation: toGenerationSettings(settings),
-					render: toRenderSettings(settings),
-					movement: toMovementSettings(settings),
+					generation: readGenerationSettings(),
+					render: readRenderSettings(),
+					movement: readMovementSettings(),
 				});
 			};
 			const reset = () => {
 				applyDefaultSettings();
 				syncTerrainLabels();
-				const settings = readTerrainSettings();
 				onChange({
-					generation: toGenerationSettings(settings),
-					render: toRenderSettings(settings),
-					movement: toMovementSettings(settings),
+					generation: readGenerationSettings(),
+					render: readRenderSettings(),
+					movement: readMovementSettings(),
 				});
 			};
 			terrainSpacingInput?.addEventListener('input', notify);

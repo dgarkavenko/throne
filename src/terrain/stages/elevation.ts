@@ -1,5 +1,5 @@
 import { applyMountains, createStepRng, STEP_SEEDS, type TerrainMeshState, type TerrainWaterState } from '../core/terrain-core';
-import { toLegacyTerrainControls, type TerrainGenerationControls } from '../controls';
+import type { TerrainGenerationControls } from '../controls';
 
 export function runElevationStage(
   mesh: TerrainMeshState,
@@ -7,6 +7,5 @@ export function runElevationStage(
   controls: TerrainGenerationControls
 ) {
   const seed = controls.seed >>> 0;
-  const legacyControls = toLegacyTerrainControls(controls);
-  return applyMountains(mesh.mesh, water, legacyControls, createStepRng(seed, STEP_SEEDS.mountain));
+  return applyMountains(mesh.mesh, water, controls, createStepRng(seed, STEP_SEEDS.mountain));
 }
