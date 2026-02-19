@@ -37,10 +37,17 @@ type MeshOverlay = {
 	insertedNodes: Graphics;
 };
 
-type ProvinceSelectionOverlay = {
+class OverlayContainer {
+
 	container: Container;
-	hoverGraphics: Graphics;
-	selectedGraphics: Graphics;
+	graphics: Graphics;
+
+	constructor()
+	{
+		this.container = new Container();
+		this.graphics = new Graphics();
+		this.container.addChild(this.graphics);
+	}
 };
 
 export class GameRenderer
@@ -48,6 +55,7 @@ export class GameRenderer
 	public readonly app: Application;
 
 	public readonly terrainLayer: Container = new Container();
+	public readonly terrainOveraly: OverlayContainer = new OverlayContainer();
 	public readonly unitsLayer: Container = new Container();
 	public readonly uiLayer: Container = new Container();
 
@@ -60,7 +68,6 @@ export class GameRenderer
 	private lastMapHeight = 0;
 	private terrainState: TerrainPresentationState | null = null;
 	private meshOverlay: MeshOverlay | null = null;
-	private provinceSelectionOverlay: ProvinceSelectionOverlay | null = null;
 
 	constructor()
 	{
@@ -83,7 +90,7 @@ export class GameRenderer
 			field.appendChild(this.app.canvas ?? this.app.view);
 		}
 
-		this.app.stage.addChild(this.terrainLayer, this.unitsLayer, this.uiLayer);
+		this.app.stage.addChild(this.terrainLayer, this.terrainOveraly.container, this.unitsLayer, this.uiLayer);
 	}
 
 	async hookGame(game: EcsGame): Promise<void>
@@ -156,7 +163,7 @@ export class GameRenderer
 			terrainState,
 			this.renderControls,
 			refined
-		);
+		); 
 		const staticRender = this.terrainState.staticRender;
 		const passControls = toTerrainRenderPassControls(this.renderControls, terrainState);
 		renderTerrain(
@@ -174,7 +181,6 @@ export class GameRenderer
 			overlay
 		);
 		this.setGraphOverlayVisibility();
-		this.repositionProvinceOverlay();
 	}
 
 	rerenderProvinceBorders(): void
@@ -193,7 +199,6 @@ export class GameRenderer
 		);
 		updateProvinceBorders(this.terrainLayer, toTerrainBorderControls(this.renderControls));
 		this.setGraphOverlayVisibility();
-		this.repositionProvinceOverlay();
 	}
 
 	renderView(game: EcsGame): void
@@ -228,47 +233,20 @@ export class GameRenderer
 				spr.tint = 0x000000;
 			}
 		}
+		
+		this.terrainOveraly.graphics.clear();
 
-		this.syncProvinceSelectionOverlay(game);
-	}
+		const hoverWidth = 1.0;
+		const selectedWidth = 2.1;
 
-	syncProvinceSelectionOverlay(game: EcsGame): void
-	{
-		const overlay = this.ensureProvinceSelectionOverlay();
-		overlay.hoverGraphics.clear();
-		overlay.selectedGraphics.clear();
-		if (!this.terrainState)
+		for (let entity of query(game.world, [ProvinceComponent, Hovered]))
 		{
-			return;
+			this.drawProvinceBorder(ProvinceComponent.provinceId[entity], this.terrainOveraly.graphics, 0xdcecff, 0.5, hoverWidth);
 		}
 
-		const borderWidth = this.terrainState.staticRender.renderControls.provinceBorderWidth;
-		const hoverWidth = Math.max(1, borderWidth * 0.6);
-		const selectedWidth = Math.max(2, borderWidth * 0.95);
-
-		const hoveredProvinces = query(game.world, [ProvinceComponent, Hovered]);
-		const selectedProvinces = query(game.world, [ProvinceComponent, Selected]);
-		const hoveredProvinceId =
-			hoveredProvinces.length > 0 ? ProvinceComponent.provinceId[hoveredProvinces[0]] : null;
-		const selectedProvinceId =
-			selectedProvinces.length > 0 ? ProvinceComponent.provinceId[selectedProvinces[0]] : null;
-
-		if (hoveredProvinceId !== null && hoveredProvinceId >= 0)
-		{
-			const segments = this.terrainState.overlay.provinceBorderPaths[hoveredProvinceId];
-			if (segments && segments.length > 0)
-			{
-				this.drawProvinceBorder(overlay.hoverGraphics, segments, 0xdcecff, 0.5, hoverWidth);
-			}
-		}
-
-		if (selectedProvinceId !== null && selectedProvinceId >= 0)
-		{
-			const segments = this.terrainState.overlay.provinceBorderPaths[selectedProvinceId];
-			if (segments && segments.length > 0)
-			{
-				this.drawProvinceBorder(overlay.selectedGraphics, segments, 0xffffff, 0.95, selectedWidth);
-			}
+		for (let entity of query(game.world, [ProvinceComponent, Selected]))
+		{			
+			this.drawProvinceBorder(ProvinceComponent.provinceId[entity], this.terrainOveraly.graphics, 0xdcecff, 0.5, selectedWidth);			
 		}
 	}
 
@@ -287,13 +265,18 @@ export class GameRenderer
 	}
 
 	private drawProvinceBorder(
+		provinceId: number,
 		graphics: Graphics,
-		segments: Vec2[][],
 		color: number,
 		alpha: number,
 		width: number
 	): void
 	{
+		if (!this.terrainState)
+			return;
+
+		const segments = this.terrainState.overlay.provinceBorderPaths[provinceId];
+
 		segments.forEach((segment) =>
 		{
 			if (!segment || segment.length < 2)
@@ -306,53 +289,8 @@ export class GameRenderer
 				graphics.lineTo(segment[i].x, segment[i].y);
 			}
 		});
+	
 		graphics.stroke({ width, color, alpha });
-	}
-
-	private ensureProvinceSelectionOverlay(): ProvinceSelectionOverlay
-	{
-		if (this.provinceSelectionOverlay)
-		{
-			this.repositionProvinceOverlay();
-			return this.provinceSelectionOverlay;
-		}
-		const container = new Container();
-		const hoverGraphics = new Graphics();
-		const selectedGraphics = new Graphics();
-		container.addChild(hoverGraphics);
-		container.addChild(selectedGraphics);
-		this.terrainLayer.addChild(container);
-		this.provinceSelectionOverlay = {
-			container,
-			hoverGraphics,
-			selectedGraphics,
-		};
-		this.repositionProvinceOverlay();
-		return this.provinceSelectionOverlay;
-	}
-
-	private repositionProvinceOverlay(): void
-	{
-		if (!this.provinceSelectionOverlay)
-		{
-			return;
-		}
-
-		if (!this.meshOverlay)
-		{
-			this.terrainLayer.setChildIndex(
-				this.provinceSelectionOverlay.container,
-				this.terrainLayer.children.length - 1
-			);
-			return;
-		}
-		const meshIndex = this.terrainLayer.children.indexOf(this.meshOverlay.container);
-		if (meshIndex < 0)
-		{
-			return;
-		}
-		const targetIndex = Math.max(0, meshIndex - 1);
-		this.terrainLayer.setChildIndex(this.provinceSelectionOverlay.container, targetIndex);
 	}
 
 	private ensureMeshOverlay(): MeshOverlay

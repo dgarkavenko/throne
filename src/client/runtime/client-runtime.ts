@@ -189,11 +189,9 @@ export class ClientGame
 		const clientReceiveMs = Date.now();
 		this.updateServerClockOffset(snapshot.serverTime, clientReceiveMs);
 		const estimatedServerNow = this.getEstimatedServerNow(clientReceiveMs);
-		const liveActorIds = new Set<number>();
 		for (let i = 0; i < snapshot.actors.length; i += 1)
 		{
 			const actorSnapshot = snapshot.actors[i];
-			liveActorIds.add(actorSnapshot.actorId);
 			const actorEntity = ensureActorEntity(this.game.world, actorSnapshot.actorId, actorSnapshot.ownerId);
 			this.syncUnitFromSnapshot(actorEntity, actorSnapshot, estimatedServerNow, clientReceiveMs);
 		}
