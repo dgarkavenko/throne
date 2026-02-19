@@ -86,6 +86,7 @@ export class ClientGame
 		{
 			this.clientPipeline.tick(ticker.deltaTime);
 			this.r.renderView(this.game);
+			this.r.renderDebug(this.terrainState)
 		});
 
 		this.r.bindCanvasEvent('pointermove', this.pointerMove);

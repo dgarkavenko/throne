@@ -28,25 +28,18 @@ import {
 	type Vec2,
 } from './terrain-presentation';
 
-type MeshOverlay = {
-	container: Container;
-	polygonGraph: Graphics;
-	dualGraph: Graphics;
-	cornerNodes: Graphics;
-	centerNodes: Graphics;
-	insertedNodes: Graphics;
-};
-
 class OverlayContainer {
 
 	container: Container;
-	graphics: Graphics;
+	selectioin: Graphics;
+	debug: Graphics;
 
 	constructor()
 	{
 		this.container = new Container();
-		this.graphics = new Graphics();
-		this.container.addChild(this.graphics);
+		this.selectioin = new Graphics();
+		this.debug = new Graphics();
+		this.container.addChild(this.debug, this.selectioin);
 	}
 };
 
@@ -67,7 +60,6 @@ export class GameRenderer
 	private lastMapWidth = 0;
 	private lastMapHeight = 0;
 	private terrainState: TerrainPresentationState | null = null;
-	private meshOverlay: MeshOverlay | null = null;
 
 	constructor()
 	{
@@ -145,6 +137,7 @@ export class GameRenderer
 		{
 			this.refinementCache.clear();
 		}
+
 		return { changed, refinementChanged };
 	}
 
@@ -166,6 +159,7 @@ export class GameRenderer
 		); 
 		const staticRender = this.terrainState.staticRender;
 		const passControls = toTerrainRenderPassControls(this.renderControls, terrainState);
+		
 		renderTerrain(
 			staticRender.config,
 			passControls,
@@ -174,13 +168,6 @@ export class GameRenderer
 			staticRender.provinces,
 			staticRender.refined
 		);
-		const overlay = this.ensureMeshOverlay();
-		this.renderMeshOverlay(
-			staticRender.base.mesh,
-			staticRender.refined.refinedGeometry.insertedPoints,
-			overlay
-		);
-		this.setGraphOverlayVisibility();
 	}
 
 	rerenderProvinceBorders(): void
@@ -198,12 +185,10 @@ export class GameRenderer
 			refined
 		);
 		updateProvinceBorders(this.terrainLayer, toTerrainBorderControls(this.renderControls));
-		this.setGraphOverlayVisibility();
 	}
 
 	renderView(game: EcsGame): void
 	{
-
 		for (const eid of query(game.world, [RenderableComponent]))
 		{
 			const spr = this.sprites.get(eid);
@@ -234,22 +219,22 @@ export class GameRenderer
 			}
 		}
 		
-		this.terrainOveraly.graphics.clear();
+		this.terrainOveraly.selectioin.clear();
 
 		const hoverWidth = 1.0;
 		const selectedWidth = 2.1;
 
 		for (let entity of query(game.world, [ProvinceComponent, Hovered]))
 		{
-			this.drawProvinceBorder(entity, this.terrainOveraly.graphics, 0xdcecff, 0.5, hoverWidth);
+			this.drawProvinceBorder(entity, this.terrainOveraly.selectioin, 0xdcecff, 0.5, hoverWidth);
 		}
 
 		for (let entity of query(game.world, [ProvinceComponent, Selected]))
 		{			
-			this.drawProvinceBorder(entity, this.terrainOveraly.graphics, 0xdcecff, 0.5, selectedWidth);			
+			this.drawProvinceBorder(entity, this.terrainOveraly.selectioin, 0xdcecff, 0.5, selectedWidth);			
 		}
 	}
-
+	
 	bindCanvasEvent(type: string, handler: (ev: any) => void): void
 	{
 		const canvas = this.app.canvas;
@@ -288,106 +273,84 @@ export class GameRenderer
 		graphics.stroke({ width, color, alpha });
 	}
 
-	private ensureMeshOverlay(): MeshOverlay
+	public renderDebug(terrain: TerrainGenerationState | null)
 	{
-		if (this.meshOverlay)
+		if (terrain)
 		{
-			this.terrainLayer.setChildIndex(this.meshOverlay.container, this.terrainLayer.children.length - 1);
-			return this.meshOverlay;
+			this.renderDebug_internal(
+				this.terrainOveraly.debug,
+				this.renderControls,
+				terrain
+			);
 		}
-		const container = new Container();
-		const polygonGraph = new Graphics();
-		const dualGraph = new Graphics();
-		const cornerNodes = new Graphics();
-		const centerNodes = new Graphics();
-		const insertedNodes = new Graphics();
-		container.addChild(polygonGraph);
-		container.addChild(dualGraph);
-		container.addChild(cornerNodes);
-		container.addChild(centerNodes);
-		container.addChild(insertedNodes);
-		this.terrainLayer.addChild(container);
-		this.meshOverlay = { container, polygonGraph, dualGraph, cornerNodes, centerNodes, insertedNodes };
-		return this.meshOverlay;
 	}
 
-	private setGraphOverlayVisibility(): void
-	{
-		if (!this.meshOverlay || !this.terrainState)
-		{
-			return;
-		}
-		const controls = this.terrainState.staticRender.renderControls;
-		this.meshOverlay.polygonGraph.visible = controls.showPolygonGraph;
-		this.meshOverlay.dualGraph.visible = controls.showDualGraph;
-		this.meshOverlay.cornerNodes.visible = controls.showCornerNodes;
-		this.meshOverlay.centerNodes.visible = controls.showCenterNodes;
-		this.meshOverlay.insertedNodes.visible = controls.showInsertedPoints;
-		this.meshOverlay.container.visible =
-			controls.showPolygonGraph ||
-			controls.showDualGraph ||
-			controls.showCornerNodes ||
-			controls.showCenterNodes ||
-			controls.showInsertedPoints;
-	}
-
-	private renderMeshOverlay(
-		mesh: any,
-		insertedPoints: Array<{ x: number; y: number }>,
-		overlay: MeshOverlay
+	private renderDebug_internal(
+		target: Graphics,
+		controls: TerrainRenderControls,
+		terrainState: TerrainGenerationState,
+		//insertedPoints: Array<{ x: number; y: number }>,
 	): void
 	{
-		overlay.polygonGraph.clear();
-		overlay.dualGraph.clear();
-		overlay.cornerNodes.clear();
-		overlay.centerNodes.clear();
-		overlay.insertedNodes.clear();
+		const mesh = terrainState.mesh.mesh;
 
-		const polygonGraph = overlay.polygonGraph;
-		mesh.edges.forEach((edge: any) =>
-		{
-			const vertexA = mesh.vertices[edge.vertices[0]].point;
-			const vertexB = mesh.vertices[edge.vertices[1]].point;
-			polygonGraph.moveTo(vertexA.x, vertexA.y);
-			polygonGraph.lineTo(vertexB.x, vertexB.y);
-		});
-		polygonGraph.stroke({ width: 1.3, color: 0xff4d4f, alpha: 0.75 });
+		target.clear();
 
-		const dualGraph = overlay.dualGraph;
-		mesh.edges.forEach((edge: any) =>
+		if (controls.showPolygonGraph)
 		{
-			const [faceA, faceB] = edge.faces;
-			if (faceA < 0 || faceB < 0)
+			mesh.edges.forEach((edge: any) =>
 			{
-				return;
-			}
-			const a = mesh.faces[faceA].point;
-			const b = mesh.faces[faceB].point;
-			dualGraph.moveTo(a.x, a.y);
-			dualGraph.lineTo(b.x, b.y);
-		});
-		dualGraph.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
-
-		const cornerNodes = overlay.cornerNodes;
-		mesh.vertices.forEach((vertex: any) =>
-		{
-			cornerNodes.circle(vertex.point.x, vertex.point.y, 1.8);
-		});
-		cornerNodes.fill({ color: 0xf3fff7, alpha: 0.9 });
-
-		const centerNodes = overlay.centerNodes;
-		mesh.faces.forEach((face: any) =>
-		{
-			centerNodes.circle(face.point.x, face.point.y, 2.3);
-		});
-		centerNodes.fill({ color: 0xff00c9, alpha: 0.95 });
-
-		const overlayInsertedNodes = overlay.insertedNodes;
-		for (let i = 0; i < insertedPoints.length; i += 1)
-		{
-			const point = insertedPoints[i];
-			overlayInsertedNodes.circle(point.x, point.y, 2.2);
+				const vertexA = mesh.vertices[edge.vertices[0]].point;
+				const vertexB = mesh.vertices[edge.vertices[1]].point;
+				target.moveTo(vertexA.x, vertexA.y);
+				target.lineTo(vertexB.x, vertexB.y);
+			});
+			target.stroke({ width: 1.3, color: 0xff4d4f, alpha: 0.75 });
 		}
-		overlayInsertedNodes.fill({ color: 0xffe56b, alpha: 0.9 });
+
+		if (controls.showDualGraph)
+		{
+			mesh.edges.forEach((edge: any) =>
+			{
+				const [faceA, faceB] = edge.faces;
+				if (faceA < 0 || faceB < 0)
+				{
+					return;
+				}
+				const a = mesh.faces[faceA].point;
+				const b = mesh.faces[faceB].point;
+				target.moveTo(a.x, a.y);
+				target.lineTo(b.x, b.y);
+			});
+			target.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
+		}
+
+		if (controls.showCornerNodes)
+		{
+			mesh.vertices.forEach((vertex: any) =>
+			{
+				target.circle(vertex.point.x, vertex.point.y, 1.8);
+			});
+			target.fill({ color: 0xf3fff7, alpha: 0.9 });
+		}
+
+		if (controls.showCenterNodes)
+		{
+			mesh.faces.forEach((face: any) =>
+			{
+				target.circle(face.point.x, face.point.y, 2.3);
+			});
+			target.fill({ color: 0xff00c9, alpha: 0.95 });
+		}
+		
+		if (controls.showInsertedPoints)
+		{
+			// for (let i = 0; i < insertedPoints.length; i += 1)
+			// {
+			// 	const point = insertedPoints[i];
+			// 	target.circle(point.x, point.y, 2.2);
+			// }
+			// target.fill({ color: 0xffe56b, alpha: 0.9 });
+		}
 	}
 }
