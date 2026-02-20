@@ -26,10 +26,13 @@ export async function startClientEditor(): Promise<void> {
 
   setRoomRouteLink('game-link', '/game');
 
+  const rendererType = new URLSearchParams(window.location.search).get('renderer') === 'pixi' ? 'pixi' : 'three';
+
   const engine = new EditorGame({
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
     autoGenerateTerrain: true,
+    rendererType,
   });
 
   await engine.init(layout.field);

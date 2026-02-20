@@ -526,6 +526,12 @@ export const editorHtml = `<!doctype html>
                 Inserted Points
               </label>
             </div>
+            <div class="control">
+              <label for="terrain-camera-fov">
+                Camera FOV <span id="terrain-camera-fov-value">55</span>
+              </label>
+              <input id="terrain-camera-fov" type="range" min="25" max="100" step="1" value="55" />
+            </div>
             <div class="control toggle" id="agent-debug-paths-control">
               <label for="agent-debug-paths">
                 <input id="agent-debug-paths" type="checkbox" checked />
@@ -551,6 +557,7 @@ export const editorHtml = `<!doctype html>
 	{
 		"imports": {
 			"pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.16.0/dist/pixi.min.mjs",
+			"three": "https://cdn.jsdelivr.net/npm/three@0.167.1/build/three.module.js",
 			"bitecs": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/core/index.min.mjs",
 			"bitecs/serialization": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/serialization/index.min.mjs",
 			"bitecs/legacy": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/legacy/index.min.mjs"
@@ -816,6 +823,12 @@ export const gameHtml = `<!doctype html>
                 Inserted Points
               </label>
             </div>
+            <div class="control">
+              <label for="terrain-camera-fov">
+                Camera FOV <span id="terrain-camera-fov-value">55</span>
+              </label>
+              <input id="terrain-camera-fov" type="range" min="25" max="100" step="1" value="55" />
+            </div>
             <div class="control toggle" id="agent-debug-paths-control">
               <label for="agent-debug-paths">
                 <input id="agent-debug-paths" type="checkbox" checked />
@@ -876,6 +889,7 @@ export const gameHtml = `<!doctype html>
 	{
 		"imports": {
 			"pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.16.0/dist/pixi.min.mjs",
+			"three": "https://cdn.jsdelivr.net/npm/three@0.167.1/build/three.module.js",
 			"bitecs": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/core/index.min.mjs",
 			"bitecs/serialization": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/serialization/index.min.mjs",
 			"bitecs/legacy": "https://cdn.jsdelivr.net/npm/bitecs@0.4.0/dist/legacy/index.min.mjs"

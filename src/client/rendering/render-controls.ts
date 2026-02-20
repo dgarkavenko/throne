@@ -21,6 +21,7 @@ export type TerrainRenderControls = {
   intermediateThreshold: number;
   intermediateRelMagnitude: number;
   intermediateAbsMagnitude: number;
+  cameraFov: number;
 };
 
 export const DEFAULT_TERRAIN_RENDER_CONTROLS: TerrainRenderControls = {
@@ -37,6 +38,7 @@ export const DEFAULT_TERRAIN_RENDER_CONTROLS: TerrainRenderControls = {
   intermediateThreshold: DEFAULT_TERRAIN_REFINEMENT_CONTROLS.intermediateThreshold,
   intermediateRelMagnitude: DEFAULT_TERRAIN_REFINEMENT_CONTROLS.intermediateRelMagnitude,
   intermediateAbsMagnitude: DEFAULT_TERRAIN_REFINEMENT_CONTROLS.intermediateAbsMagnitude,
+  cameraFov: 55,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -83,6 +85,7 @@ export function normalizeTerrainRenderControls(
       0,
       10
     ),
+    cameraFov: clamp(readNumber(controls.cameraFov, defaults.cameraFov), 25, 100),
   };
 }
 
@@ -101,6 +104,7 @@ export function fingerprintTerrainRenderControls(controls: TerrainRenderControls
     controls.intermediateThreshold,
     controls.intermediateRelMagnitude,
     controls.intermediateAbsMagnitude,
+    controls.cameraFov,
   ]);
 }
 
