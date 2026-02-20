@@ -11,7 +11,8 @@ export {
 } from '../rendering/terrain-presentation';
 export {
   buildProvincePickModel,
-  pickProvinceAt,
+  pickFaceAt,
+  pickProvinceIndexAt as pickProvinceAt,
   type ProvincePickModel,
 } from '../runtime/province-pick';
 

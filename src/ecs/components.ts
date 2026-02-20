@@ -33,9 +33,21 @@ export const ProvinceComponent = {
 	provinceEdges: [] as Vec2[][][]
 };
 
+export const MoveRequestComponent = 
+{
+	toFace: [] as number[],
+}
+
+export const PathComponent = 
+{
+	path: [] as number[][]
+}
+
 export const Dirty = {}
 export const VisibleTag = {}
 
 export const Selected = {};
 export const Hovered = {};
+export const Owned = {};
+
 

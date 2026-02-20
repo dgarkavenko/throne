@@ -5,6 +5,7 @@ import
 		ActorComponent,
 		Dirty,
 		Hovered,
+		PathComponent,
 		ProvinceComponent,
 		RenderableComponent,
 		Selected,
@@ -31,15 +32,15 @@ import { Vec2 } from '../../terrain/core/math';
 class OverlayContainer {
 
 	container: Container;
-	selectioin: Graphics;
+	selection: Graphics;
 	debug: Graphics;
 
 	constructor()
 	{
 		this.container = new Container();
-		this.selectioin = new Graphics();
+		this.selection = new Graphics();
 		this.debug = new Graphics();
-		this.container.addChild(this.debug, this.selectioin);
+		this.container.addChild(this.debug, this.selection);
 	}
 };
 
@@ -224,17 +225,48 @@ export class GameRenderer
 		const hoverWidth = 1.0;
 		const selectedWidth = 2.1;
 
-		this.terrainOveraly.selectioin.clear();
+		this.terrainOveraly.selection.clear();
 
 		for (let entity of query(game.world, [ProvinceComponent, Hovered]))
 		{
-			this.drawProvinceBorder(entity, this.terrainOveraly.selectioin, 0xdcecff, 0.5, hoverWidth);
+			this.drawProvinceBorder(entity, this.terrainOveraly.selection, 0xdcecff, 0.5, hoverWidth);
 		}
 
 		for (let entity of query(game.world, [ProvinceComponent, Selected]))
 		{			
-			this.drawProvinceBorder(entity, this.terrainOveraly.selectioin, 0xdcecff, 0.5, selectedWidth);			
+			this.drawProvinceBorder(entity, this.terrainOveraly.selection, 0xdcecff, 0.5, selectedWidth);			
 		}
+
+		for (let entity of query(game.world, [PathComponent]))
+		{
+			this.drawPath(PathComponent.path[entity], this.terrainOveraly.selection, 0xffec00, 0.5, 1.5);
+		}
+	}
+
+	drawPath(path: number[], targetGraphics: Graphics, color: number, alpha: number, width: number)
+	{
+		if (path.length < 2)
+		{
+			return;
+		}
+
+		const mesh = this.terrainStaticRenderModel ? this.terrainStaticRenderModel.base.mesh : null;
+		if (mesh == null)
+		{
+			return;
+		}
+
+		const startingPoint = mesh.faces[path[0]].point;
+		targetGraphics.moveTo(startingPoint.x, startingPoint.y);
+
+		path.forEach(face =>
+		{
+			const point = mesh.faces[face].point;
+			targetGraphics.lineTo(point.x, point.y);
+		});
+
+		targetGraphics.stroke({ width, color, alpha });
+
 	}
 	
 	bindCanvasEvent(type: string, handler: (ev: any) => void): void
@@ -307,9 +339,9 @@ export class GameRenderer
 		graphics.stroke({ width, color, alpha });
 	}
 
-	public renderDebug(terrain: TerrainGenerationState | null)
+	public renderDebug(terrain: TerrainGenerationState)
 	{
-		if (terrain && this.debugControlsDirty)
+		if (this.debugControlsDirty)
 		{
 			this.terrainOveraly.debug.clear();
 			this.renderDebug_internal(
@@ -326,7 +358,6 @@ export class GameRenderer
 		target: Graphics,
 		controls: TerrainRenderControls,
 		terrainState: TerrainGenerationState,
-		//insertedPoints: Array<{ x: number; y: number }>,
 	): void
 	{
 		const mesh = terrainState.mesh;
@@ -393,7 +424,7 @@ export class GameRenderer
 				}
 			});
 			target.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
-
 		}
+		
 	}
 }

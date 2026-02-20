@@ -52,7 +52,7 @@ export type MeshFace = {
 	// Adjacent face indices that share an edge with this face.
 	adjacentFaces: number[];
 	// index into mesh edges matching adjacent faces
-	sharedEdge: number[];
+	sharedEdges: number[];
 	// Indices into mesh.edges that border this face.
 	edges: number[];
 };
@@ -2525,7 +2525,8 @@ function buildMeshGraph(sites: Vec2[], cells: Vec2[][]): MeshGraph {
 		point: site,
 		vertices: [],
 		adjacentFaces: [],
-		edges: [],
+		sharedEdges: [],
+		edges: []
 	}));
 	const vertices: MeshVertex[] = [];
 	const edges: MeshEdge[] = [];
@@ -2610,8 +2611,16 @@ function buildMeshGraph(sites: Vec2[], cells: Vec2[][]): MeshGraph {
 			pushUnique(faces[faceB].edges, edge.index);
 		}
 		if (faceA >= 0 && faceB >= 0) {
-			pushUnique(faces[faceA].adjacentFaces, faceB);
-			pushUnique(faces[faceB].adjacentFaces, faceA);
+	
+			if (pushUnique(faces[faceA].adjacentFaces, faceB) > 0)
+			{
+				faces[faceA].sharedEdges.push(edge.index);
+			}
+
+			if (pushUnique(faces[faceB].adjacentFaces, faceA) > 0)
+			{
+				faces[faceB].sharedEdges.push(edge.index);
+			}
 		}
 	});
 
@@ -3364,10 +3373,15 @@ function drawPath(graphics: any, path: Vec2[]): void {
 	}
 }
 
-function pushUnique(values: number[], value: number): void {
-	if (!values.includes(value)) {
+function pushUnique(values: number[], value: number): number
+{
+	if (!values.includes(value))
+	{
 		values.push(value);
+		return 1;
 	}
+
+	return 0;
 }
 
 

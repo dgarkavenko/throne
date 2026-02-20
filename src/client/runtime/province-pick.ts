@@ -138,25 +138,44 @@ export function buildProvincePickModel(
 	};
 }
 
-export function pickProvinceAt(
+export function pickProvinceIndexAt(
 	model: ProvincePickModel,
 	worldX: number,
 	worldY: number
 ): number | null
+{
+	const faceIndex = pickFaceIndexAt(model, worldX, worldY);
+	if (faceIndex === null)
+	{
+		return null;
+	}
+	if (!model.isLand[faceIndex])
+	{
+		return null;
+	}
+	const provinceId = model.provinceLUT[faceIndex];
+	return provinceId >= 0 ? provinceId : null;
+}
+
+export function pickFaceIndexAt(
+	model: ProvincePickModel,
+	worldX: number,
+	worldY: number
+): number
 {
 	const gridX = Math.floor(worldX / model.gridSize);
 	const gridY = Math.floor(worldY / model.gridSize);
 
 	if (gridX < 0 || gridY < 0 || gridX >= model.gridColumns || gridY >= model.gridRows)
 	{
-		return null;
+		return -1;
 	}
 
 	const key = gridX + gridY * model.gridColumns;
 	const candidates = model.grid.get(key);
 	if (!candidates || candidates.length === 0)
 	{
-		return null;
+		return -1;
 	}
 	for (let i = 0; i < candidates.length; i += 1)
 	{
@@ -180,12 +199,8 @@ export function pickProvinceAt(
 		{
 			continue;
 		}
-		if (!model.isLand[faceIndex])
-		{
-			return null;
-		}
-		const provinceId = model.provinceLUT[faceIndex];
-		return provinceId >= 0 ? provinceId : null;
+		return faceIndex;
 	}
-	return null;
+
+	return -1;
 }

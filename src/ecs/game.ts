@@ -1,6 +1,6 @@
 import { addComponent, addComponents, addEntity, createWorld, query, removeEntity, type World } from 'bitecs';
 import type { ActorSnapshot } from '../shared/protocol';
-import { ActorComponent, Dirty, RenderableComponent, TerrainLocationComponent } from './components';
+import { ActorComponent, Dirty, Owned, RenderableComponent, TerrainLocationComponent } from './components';
 
 export type EcsGame = {
 	world: World;
@@ -61,12 +61,13 @@ export function ensureActorEntity(world: World, netId: number, ownerId: number):
 	}
 
 	const entity = addEntity(world);
-	addComponents(world, entity, ActorComponent, TerrainLocationComponent, RenderableComponent);
+	addComponents(world, entity, ActorComponent, TerrainLocationComponent, RenderableComponent, Owned);
 	ActorComponent.netId[entity] = netId;
 	ActorComponent.ownerId[entity] = ownerId;
 	TerrainLocationComponent.faceId[entity] = 0;
 	RenderableComponent.content[entity] = 'unit_cb_02';
 	RenderableComponent.color[entity] = 0xffce54;
+	
 	addComponent(world, entity, Dirty);
 	return entity;
 }

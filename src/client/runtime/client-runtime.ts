@@ -5,17 +5,19 @@
  * - world snapshot acceptance gates (terrain version + sequence monotonicity)
  * - pointer interaction branch for actor selection vs province selection
  */
-import { addComponent, addEntity, observe, onSet, query, removeComponent, setComponent, World } from 'bitecs';
+import { addComponent, addEntity, hasComponent, observe, onSet, query, removeComponent, removeEntity, setComponent, World } from 'bitecs';
 import { Ticker, UPDATE_PRIORITY } from 'pixi.js';
 import { createClientPipeline, createEcsGame, ensureActorEntity, type EcsPipeline, type EcsGame } from '../../ecs/game';
-import { ActorComponent, Hovered, ProvinceComponent, RenderableComponent, Selected, TerrainLocationComponent } from '../../ecs/components';
+import { ActorComponent, Hovered, Owned, MoveRequestComponent, ProvinceComponent, RenderableComponent, Selected, TerrainLocationComponent, PathComponent } from '../../ecs/components';
 import { GameRenderer } from '../rendering/game-renderer';
 import type { TerrainRenderControls } from '../rendering/render-controls';
 import type { TerrainGenerationState } from '../../terrain/types';
 import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
 import { SharedTerrainRuntime } from './shared-terrain-runtime';
-import { buildProvincePickModel, pickProvinceAt as pickProvinceFromModel, type ProvincePickModel } from './province-pick';
+import { buildProvincePickModel, pickFaceIndexAt, pickProvinceIndexAt as pickProvinceFromModel, type ProvincePickModel } from './province-pick';
 import { buildBorder as buildProvinceEdges, calculateProvinceCentroid } from '../rendering/terrain-presentation';
+import { TerrainMeshState } from '../../terrain/core/terrain-core';
+import { vec2Dist, vec2Len } from '../../terrain/core/math';
 
 export type GameConfig = {
 	width: number;
@@ -30,7 +32,6 @@ export class ClientGame
 	private hoveredProvinceId: number | null = null;
 	private selectedProvinceId: number | null = null;
 	private provinceEntitiesInitialized = false;
-	private selectionListeners = new Set<(provinceId: number | null) => void>();
 
 	private localPlayerId: number | null = null;
 	private selectedEntity: number | null = null;
@@ -79,7 +80,8 @@ export class ClientGame
 				RenderableComponent.x[eid] = currentFacePoint.x;
 				RenderableComponent.y[eid] = currentFacePoint.y;
 			}
-			return params;
+
+			TerrainLocationComponent.faceId[eid] = params.faceId;
 		});
 
 		this.ticker.add((ticker) =>
@@ -88,9 +90,36 @@ export class ClientGame
 			this.r.renderView(this.game);
 		});
 
+		//TODO move into runtime navigation module
+		this.ticker.add((ticker) =>
+		{
+			if (!this.terrainState)
+				return;
+
+			for (const eid of query(this.game.world, [MoveRequestComponent, TerrainLocationComponent]))
+			{
+				let path = this.findPath(this.terrainState.mesh, TerrainLocationComponent.faceId[eid], MoveRequestComponent.toFace[eid]);
+				console.log("Pathfinding from {} to {}", TerrainLocationComponent.faceId[eid], MoveRequestComponent.toFace[eid], path);
+				if (path)
+				{
+					if (!hasComponent(this.game.world, eid, PathComponent))
+					{
+						addComponent(this.game.world, eid, PathComponent)
+					}
+
+					PathComponent.path[eid] = path;
+				}
+
+				removeComponent(this.game.world, eid, MoveRequestComponent);
+			}
+		});		
+
 		this.ticker.add((ticker) =>
 			{
-				this.r.renderDebug(this.terrainState)
+				if (this.terrainState)
+				{
+					this.r.renderDebug(this.terrainState)
+				}				
 			},
 			undefined,
 			UPDATE_PRIORITY.UTILITY,
@@ -140,15 +169,6 @@ export class ClientGame
 		return this.terrainGen.getTerrainVersion();
 	}
 
-	onProvinceSelectionChange(listener: (provinceId: number | null) => void): () => void
-	{
-		this.selectionListeners.add(listener);
-		return () =>
-		{
-			this.selectionListeners.delete(listener);
-		};
-	}
-
 	applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void
 	{
 		this.lastWorldSnapshotSeq = -1;
@@ -193,12 +213,12 @@ export class ClientGame
 		this.lastWorldSnapshotSeq = snapshot.snapshotSeq;
 		const clientReceiveMs = Date.now();
 		this.updateServerClockOffset(snapshot.serverTime, clientReceiveMs);
-		const estimatedServerNow = this.getEstimatedServerNow(clientReceiveMs);
+
 		for (let i = 0; i < snapshot.actors.length; i += 1)
 		{
 			const actorSnapshot = snapshot.actors[i];
 			const actorEntity = ensureActorEntity(this.game.world, actorSnapshot.actorId, actorSnapshot.ownerId);
-			this.syncUnitFromSnapshot(actorEntity, actorSnapshot, estimatedServerNow, clientReceiveMs);
+			setComponent(this.game.world, actorEntity, TerrainLocationComponent, { faceId: actorSnapshot.currentFace });
 		}
 
 		const staleActorIds: number[] = [];
@@ -241,7 +261,6 @@ export class ClientGame
 	private pointerLeave = () =>
 	{
 		this.setHoveredEntity(null);
-		this.setHoveredProvince(null);
 	};
 
 	private pointerDown = (event: PointerEvent) =>
@@ -254,9 +273,18 @@ export class ClientGame
 			hoveredEntity = this.getActorIdAt(this.game.world, position.x, position.y) ?? this.pickProvinceAt(position.x, position.y);
 			this.setSelectedEntity(hoveredEntity);
 		}
+
 		if (event.button === 2)
 		{
-			return;
+			const targetFace = this.pickModel ? pickFaceIndexAt(this.pickModel, position.x, position.y) : -1;
+			if (targetFace > -1)
+			{
+				for (const entity of query(this.game.world, [Selected, TerrainLocationComponent, ActorComponent, Owned]))
+				{
+					addComponent(this.game.world, entity, MoveRequestComponent);
+					MoveRequestComponent.toFace[entity] = targetFace;
+				}
+			}
 		}
 	};
 
@@ -284,55 +312,6 @@ export class ClientGame
 			addComponent(this.game.world, selectedEntity, Selected);
 		}
 		this.selectedEntity = selectedEntity;
-	}
-
-	private setHoveredProvince(provinceId: number | null): void
-	{
-		if (this.hoveredProvinceId !== null)
-		{
-			const previousEntity = this.provinceEntityById.get(this.hoveredProvinceId);
-			if (previousEntity !== undefined)
-			{
-				removeComponent(this.game.world, previousEntity, Hovered);
-			}
-		}
-		if (provinceId !== null)
-		{
-			const nextEntity = this.provinceEntityById.get(provinceId);
-			if (nextEntity !== undefined)
-			{
-				addComponent(this.game.world, nextEntity, Hovered);
-			} else
-			{
-				provinceId = null;
-			}
-		}
-		this.hoveredProvinceId = provinceId;
-	}
-
-	private setSelectedProvince(provinceId: number | null): void
-	{
-		if (this.selectedProvinceId !== null)
-		{
-			const previousEntity = this.provinceEntityById.get(this.selectedProvinceId);
-			if (previousEntity !== undefined)
-			{
-				removeComponent(this.game.world, previousEntity, Selected);
-			}
-		}
-		if (provinceId !== null)
-		{
-			const nextEntity = this.provinceEntityById.get(provinceId);
-			if (nextEntity !== undefined)
-			{
-				addComponent(this.game.world, nextEntity, Selected);
-			} else
-			{
-				provinceId = null;
-			}
-		}
-		this.selectedProvinceId = provinceId;
-		this.selectionListeners.forEach((listener) => listener(this.selectedProvinceId));
 	}
 
 	private makeProvinceEntities(): void
@@ -397,16 +376,6 @@ export class ClientGame
 		event.preventDefault();
 	};
 
-	private syncUnitFromSnapshot(
-		eid: number,
-		snapshot: ActorSnapshot,
-		_estimatedServerNow: number,
-		_clientReceiveMs: number
-	): void
-	{
-		setComponent(this.game.world, eid, TerrainLocationComponent, { faceId: snapshot.currentFace });
-	}
-
 	private getFacePoint(faceId: number): Vec2 | null
 	{
 		if (!this.terrainState)
@@ -455,5 +424,112 @@ export class ClientGame
 		}
 
 		return pickProvinceFromModel(this.pickModel, worldX, worldY);
+	}
+
+	private heuristic(mesh: TerrainMeshState, fromFace: number, toFace: number) : number
+	{
+		return vec2Dist(mesh.faces[fromFace].point, mesh.faces[toFace].point);
+	}
+
+	private transitionCost(
+		mesh: TerrainMeshState,
+		fromFace: number,
+		toFace: number,
+	): number
+	{
+		const geometric = vec2Dist(mesh.faces[fromFace].point, mesh.faces[toFace].point);
+
+		//const facePenalty = costModel?.faceEnterCost?.(toFace) ?? 0;
+		//const edgePenalty = costModel?.edgeCrossCost?.(viaEdge, fromFace, toFace) ?? 0;
+		const facePenalty = 0;
+		const edgePenalty = 0;
+		return geometric + facePenalty + edgePenalty;
+	}
+
+	private findPath(mesh: TerrainMeshState, fromFace: number, toFace:number) : number[] | null
+	{
+		if (fromFace == toFace)
+		{
+			return null;
+		}
+
+		const n = mesh.faces.length;
+		const gScore = new Float64Array(n);
+		const fScore = new Float64Array(n);
+		
+		const cameFrom = new Int32Array(n);
+		const inOpen = new Uint8Array(n);
+
+		for (let i = 0; i < n; i++)
+		{
+			gScore[i] = fScore[i] = Infinity;
+			cameFrom[i] = -1;
+		}
+
+		gScore[fromFace] = 0;
+		fScore[fromFace] = this.heuristic(mesh, fromFace, toFace);  
+
+		const openList: number[] = [fromFace];
+  		inOpen[fromFace] = 1;
+
+		while (openList.length > 0)
+		{
+			let bestIdx = 0;
+			let current = openList[0];
+			for (let i = 1; i < openList.length; i++)
+			{
+				const candidate = openList[i];
+				if (fScore[candidate] < fScore[current])
+				{
+					current = candidate;
+					bestIdx = i;
+				}
+			}
+
+			openList.splice(bestIdx, 1);
+			inOpen[current] = 0;
+
+			if (current == toFace)
+			{
+				return this.constructPath(toFace, cameFrom);
+			}
+
+			let adjacentCount = mesh.faces[current].adjacentFaces.length;
+			for (let adjacentId = 0; adjacentId < adjacentCount; adjacentId++)
+			{
+				const adjacentFace = mesh.faces[current].adjacentFaces[adjacentId];
+				//const adEdge = mesh.faces[current].sharedEdges[adjacentId];
+				const tentativeG = gScore[current] + this.transitionCost(mesh, fromFace, adjacentFace);
+
+				if (tentativeG < gScore[adjacentFace])
+				{
+					cameFrom[adjacentFace] = current;
+					gScore[adjacentFace] = tentativeG;
+					fScore[adjacentFace] = tentativeG + this.heuristic(mesh, adjacentFace, toFace);
+
+					if (!inOpen[adjacentFace])
+					{
+						openList.push(adjacentFace);
+						inOpen[adjacentFace] = 1;
+					}
+				}
+			}
+		}
+		
+		return null;
+	}
+
+	private constructPath(toFace: number, cameFrom: Int32Array<ArrayBuffer>)
+	{
+		const path: number[] = [];
+		let currentStep = toFace;
+		while (currentStep !== -1)
+		{
+			path.push(currentStep);
+			currentStep = cameFrom[currentStep];
+		}
+
+		path.reverse();
+		return path;
 	}
 }

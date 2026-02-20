@@ -29,6 +29,11 @@ export const vec2LenSq = (v: Vec2): number => v.x * v.x + v.y * v.y;
 
 export const vec2Len = (v: Vec2): number => Math.hypot(v.x, v.y);
 
+export const vec2Dist = (v1: Vec2, v2: Vec2) => {
+	const dV = vec2Sub(v1, v2);
+	return Math.hypot(dV.x, dV.y);
+};
+
 export const vec2Normalize = (v: Vec2): Vec2 => {
 	const length = vec2Len(v);
 	if (length <= 0) {
