@@ -86,8 +86,15 @@ export class ClientGame
 		{
 			this.clientPipeline.tick(ticker.deltaTime);
 			this.r.renderView(this.game);
-			this.r.renderDebug(this.terrainState)
 		});
+
+		this.ticker.add((ticker) =>
+			{
+				this.r.renderDebug(this.terrainState)
+			},
+			undefined,
+			UPDATE_PRIORITY.UTILITY,
+		);
 
 		this.r.bindCanvasEvent('pointermove', this.pointerMove);
 		this.r.bindCanvasEvent('pointerleave', this.pointerLeave);
@@ -104,14 +111,10 @@ export class ClientGame
 		}
 		if (result.refinementChanged)
 		{
-			this.r.renderTerrain(
+			this.r.renderTerrainOnce(
 				this.terrainGen.mapWidth,
 				this.terrainGen.mapHeight,
-				this.terrainState
-			);
-		} else
-		{
-			this.r.rerenderProvinceBorders();
+				this.terrainState);
 		}
 	}
 
@@ -162,7 +165,7 @@ export class ClientGame
 				this.game.world
 			);
 
-			this.r.renderTerrain(
+			this.r.renderTerrainOnce(
 				this.terrainGen.mapWidth,
 				this.terrainGen.mapHeight,
 				this.terrainState

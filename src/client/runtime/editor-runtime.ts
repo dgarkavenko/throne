@@ -42,7 +42,7 @@ export class EditorGame {
       field
     );
     if (this.terrainState) {
-      this.r.renderTerrain(
+      this.r.renderTerrainOnce(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
         this.terrainState
@@ -56,7 +56,7 @@ export class EditorGame {
       return;
     }
     if (result.refinementChanged) {
-      this.r.renderTerrain(
+      this.r.renderTerrainOnce(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
         this.terrainState
@@ -73,7 +73,7 @@ export class EditorGame {
   setTerrainGenerationControls(nextControls: TerrainGenerationControls): void {
     this.terrainState = this.terrain.setTerrainGenerationControls(nextControls, true);
     if (this.terrainState) {
-      this.r.renderTerrain(
+      this.r.renderTerrainOnce(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
         this.terrainState
@@ -84,7 +84,7 @@ export class EditorGame {
   applyTerrainSnapshot(snapshot: TerrainSnapshot, terrainVersion: number): void {
     this.terrainState = this.terrain.applyTerrainSnapshot(snapshot, terrainVersion);
     if (this.terrainState) {
-      this.r.renderTerrain(
+      this.r.renderTerrainOnce(
         this.terrain.mapWidth,
         this.terrain.mapHeight,
         this.terrainState

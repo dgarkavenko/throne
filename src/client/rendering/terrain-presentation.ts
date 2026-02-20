@@ -26,10 +26,6 @@ export type TerrainStaticRenderModel = {
   refined: TerrainRefineResult;
 };
 
-export type TerrainPresentationState = {
-  staticRender: TerrainStaticRenderModel;
-};
-
 export function buildTerrainStaticRenderModel(
   size: TerrainSize,
   terrainState: TerrainGenerationState,
@@ -105,17 +101,17 @@ export function buildBorder(provinceId: number, terrainState: TerrainGenerationS
 }
 
 export function buildTerrainPresentationState(
-  size: TerrainSize,
-  terrainState: TerrainGenerationState,
-  renderControls: TerrainRenderControls,
-  refined: TerrainRenderRefinementState
-): TerrainPresentationState {
-  return {
-    staticRender: buildTerrainStaticRenderModel(
-      size,
-      terrainState,
-      renderControls,
-      refined
-    )
-  };
+	size: TerrainSize,
+	terrainState: TerrainGenerationState,
+	renderControls: TerrainRenderControls,
+	refined: TerrainRenderRefinementState
+): TerrainStaticRenderModel
+{
+	return buildTerrainStaticRenderModel(
+		size,
+		terrainState,
+		renderControls,
+		refined
+	);
 }
+

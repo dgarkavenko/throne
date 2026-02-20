@@ -24,9 +24,9 @@ import {
 import { TerrainRefinementCacheStore } from './refinement-cache';
 import {
 	buildTerrainPresentationState,
-	type TerrainPresentationState,
-	type Vec2,
+	TerrainStaticRenderModel,
 } from './terrain-presentation';
+import { Vec2 } from '../../terrain/core/math';
 
 class OverlayContainer {
 
@@ -55,11 +55,13 @@ export class GameRenderer
 	private readonly sprites = new Map<number, Sprite>();
 	private canvasHandlers = new Map<string, EventListener>();
 	private readonly refinementCache = new TerrainRefinementCacheStore();
-	private renderControls: TerrainRenderControls = { ...DEFAULT_TERRAIN_RENDER_CONTROLS };
 	private lastTerrainState: TerrainGenerationState | null = null;
 	private lastMapWidth = 0;
 	private lastMapHeight = 0;
-	private terrainState: TerrainPresentationState | null = null;
+	private terrainStaticRenderModel: TerrainStaticRenderModel | null = null;
+
+	private renderControls: TerrainRenderControls = { ...DEFAULT_TERRAIN_RENDER_CONTROLS };
+	private debugControlsDirty: boolean = true;
 
 	constructor()
 	{
@@ -129,7 +131,7 @@ export class GameRenderer
 	{
 		const sanitized = normalizeTerrainRenderControls(next);
 		const prev = this.renderControls;
-		const changed =
+		this.debugControlsDirty =
 			fingerprintTerrainRenderControls(prev) !== fingerprintTerrainRenderControls(sanitized);
 		const refinementChanged = hasRefinementControlChange(prev, sanitized);
 		this.renderControls = sanitized;
@@ -138,10 +140,10 @@ export class GameRenderer
 			this.refinementCache.clear();
 		}
 
-		return { changed, refinementChanged };
+		return { changed: this.debugControlsDirty, refinementChanged };
 	}
 
-	renderTerrain(
+	renderTerrainOnce(
 		mapWidth: number,
 		mapHeight: number,
 		terrainState: TerrainGenerationState
@@ -151,15 +153,15 @@ export class GameRenderer
 		this.lastMapWidth = mapWidth;
 		this.lastMapHeight = mapHeight;
 		const refined = this.refinementCache.resolve(terrainState, this.renderControls);
-		this.terrainState = buildTerrainPresentationState(
+		this.terrainStaticRenderModel = buildTerrainPresentationState(
 			{ width: mapWidth, height: mapHeight },
 			terrainState,
 			this.renderControls,
 			refined
 		); 
-		const staticRender = this.terrainState.staticRender;
+		const staticRender = this.terrainStaticRenderModel;
 		const passControls = toTerrainRenderPassControls(this.renderControls, terrainState);
-		
+	
 		renderTerrain(
 			staticRender.config,
 			passControls,
@@ -178,7 +180,7 @@ export class GameRenderer
 		}
 		const terrainState = this.lastTerrainState;
 		const refined = this.refinementCache.resolve(terrainState, this.renderControls);
-		this.terrainState = buildTerrainPresentationState(
+		this.terrainStaticRenderModel = buildTerrainPresentationState(
 			{ width: this.lastMapWidth, height: this.lastMapHeight },
 			terrainState,
 			this.renderControls,
@@ -217,12 +219,12 @@ export class GameRenderer
 			{
 				spr.tint = 0x000000;
 			}
-		}
-		
-		this.terrainOveraly.selectioin.clear();
+		}		
 
 		const hoverWidth = 1.0;
 		const selectedWidth = 2.1;
+
+		this.terrainOveraly.selectioin.clear();
 
 		for (let entity of query(game.world, [ProvinceComponent, Hovered]))
 		{
@@ -256,7 +258,39 @@ export class GameRenderer
 		alpha: number,
 		width: number
 	): void
-	{		
+	{
+		if (this.terrainStaticRenderModel)
+		{
+			const edgePolylines = this.terrainStaticRenderModel.refined.refinedGeometry.edgePolylines;
+			const outerEdges = this.terrainStaticRenderModel.provinces.outerEdges;
+
+			//Outer edges shall be real edges ID
+			//and then =>
+			ProvinceComponent.face[entity].outerEdges.forEach((outerEdgeId) =>
+			{
+				const edgeId = outerEdges[outerEdgeId].edge;
+				let edgePolyline = edgePolylines[edgeId];
+				graphics.moveTo(edgePolyline[0].x, edgePolyline[0].y);
+				for (let i = 1; i < edgePolyline.length; i += 1)
+				{
+					graphics.lineTo(edgePolyline[i].x, edgePolyline[i].y);
+				}
+			});
+			graphics.stroke({ width, color, alpha });			
+		}
+		else
+		{
+			this.drawSimplifiedProvinceBorder(entity, graphics, color, alpha, width);
+		}	
+	}
+
+	private drawSimplifiedProvinceBorder(entity: number,
+		graphics: Graphics,
+		color: number,
+		alpha: number,
+		width: number
+	): void
+	{
 		ProvinceComponent.provinceEdges[entity].forEach((segment) =>
 		{
 			if (!segment || segment.length < 2)
@@ -269,19 +303,22 @@ export class GameRenderer
 				graphics.lineTo(segment[i].x, segment[i].y);
 			}
 		});
-	
+
 		graphics.stroke({ width, color, alpha });
 	}
 
 	public renderDebug(terrain: TerrainGenerationState | null)
 	{
-		if (terrain)
+		if (terrain && this.debugControlsDirty)
 		{
+			this.terrainOveraly.debug.clear();
 			this.renderDebug_internal(
 				this.terrainOveraly.debug,
 				this.renderControls,
 				terrain
 			);
+
+			this.debugControlsDirty = false;
 		}
 	}
 
@@ -293,8 +330,6 @@ export class GameRenderer
 	): void
 	{
 		const mesh = terrainState.mesh.mesh;
-
-		target.clear();
 
 		if (controls.showPolygonGraph)
 		{
@@ -343,14 +378,22 @@ export class GameRenderer
 			target.fill({ color: 0xff00c9, alpha: 0.95 });
 		}
 		
-		if (controls.showInsertedPoints)
+		if (controls.showInsertedPoints && this.terrainStaticRenderModel)
 		{
-			// for (let i = 0; i < insertedPoints.length; i += 1)
-			// {
-			// 	const point = insertedPoints[i];
-			// 	target.circle(point.x, point.y, 2.2);
-			// }
-			// target.fill({ color: 0xffe56b, alpha: 0.9 });
+			const edgePolylines = this.terrainStaticRenderModel.refined.refinedGeometry.edgePolylines;
+			const outerEdges = this.terrainStaticRenderModel.provinces.outerEdges;
+
+			outerEdges.forEach((outerEdge) =>
+			{
+				let edgePolyline = edgePolylines[outerEdge.edge];
+				target.moveTo(edgePolyline[0].x, edgePolyline[0].y);
+				for (let i = 1; i < edgePolyline.length; i += 1)
+				{
+					target.lineTo(edgePolyline[i].x, edgePolyline[i].y);
+				}
+			});
+			target.stroke({ width: 0.9, color: 0x4da3ff, alpha: 0.8 });
+
 		}
 	}
 }
