@@ -5,10 +5,10 @@
  * - world snapshot acceptance gates (terrain version + sequence monotonicity)
  * - pointer interaction branch for actor selection vs province selection
  */
-import { addComponent, addEntity, hasComponent, observe, onSet, query, removeComponent, removeEntity, setComponent, World } from 'bitecs';
+import { addComponent, addEntity, observe, onSet, query, removeComponent, removeEntity, setComponent, World } from 'bitecs';
 import { Ticker, UPDATE_PRIORITY } from 'pixi.js';
 import { createClientPipeline, createEcsGame, ensureActorEntity, type EcsPipeline, type EcsGame } from '../../ecs/game';
-import { ActorComponent, Hovered, Owned, MoveRequestComponent, ProvinceComponent, RenderableComponent, Selected, TerrainLocationComponent, PathComponent } from '../../ecs/components';
+import { ActorComponent, Hovered, MoveRequestComponent, Owned, ProvinceComponent, RenderableComponent, Selected, TerrainLocationComponent } from '../../ecs/components';
 import { GameRenderer } from '../rendering/game-renderer';
 import type { TerrainRenderControls } from '../rendering/render-controls';
 import type { TerrainGenerationState } from '../../terrain/types';
@@ -16,8 +16,7 @@ import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../..
 import { SharedTerrainRuntime } from './shared-terrain-runtime';
 import { buildProvincePickModel, pickFaceIndexAt, pickProvinceIndexAt as pickProvinceFromModel, type ProvincePickModel } from './province-pick';
 import { buildBorder as buildProvinceEdges, calculateProvinceCentroid } from '../rendering/terrain-presentation';
-import { TerrainMeshState } from '../../terrain/core/terrain-core';
-import { vec2Dist, vec2Len } from '../../terrain/core/math';
+import { createPathfindingRuntime } from './pathfinding-runtime';
 
 export type GameConfig = {
 	width: number;
@@ -47,6 +46,7 @@ export class ClientGame
 	private ticker: Ticker;
 	private readonly game: EcsGame;
 	private readonly clientPipeline: EcsPipeline;
+	private readonly pathfindingRuntime = createPathfindingRuntime();
 
 	// province
 	private readonly provinceEntityById = new Map<number, number>();
@@ -90,29 +90,10 @@ export class ClientGame
 			this.r.renderView(this.game);
 		});
 
-		//TODO move into runtime navigation module
-		this.ticker.add((ticker) =>
+		this.ticker.add(() =>
 		{
-			if (!this.terrainState)
-				return;
-
-			for (const eid of query(this.game.world, [MoveRequestComponent, TerrainLocationComponent]))
-			{
-				let path = this.findPath(this.terrainState.mesh, TerrainLocationComponent.faceId[eid], MoveRequestComponent.toFace[eid]);
-				console.log("Pathfinding from {} to {}", TerrainLocationComponent.faceId[eid], MoveRequestComponent.toFace[eid], path);
-				if (path)
-				{
-					if (!hasComponent(this.game.world, eid, PathComponent))
-					{
-						addComponent(this.game.world, eid, PathComponent)
-					}
-
-					PathComponent.path[eid] = path;
-				}
-
-				removeComponent(this.game.world, eid, MoveRequestComponent);
-			}
-		});		
+			this.pathfindingRuntime.processMoveRequests(this.game.world);
+		});
 
 		this.ticker.add((ticker) =>
 			{
@@ -174,6 +155,7 @@ export class ClientGame
 		this.lastWorldSnapshotSeq = -1;
 		this.pickModel = null;
 		this.terrainState = this.terrainGen.applyTerrainSnapshot(snapshot, terrainVersion);
+		this.pathfindingRuntime.setTerrainState(this.terrainState);
 		
 		if (this.terrainState)
 		{
@@ -424,112 +406,5 @@ export class ClientGame
 		}
 
 		return pickProvinceFromModel(this.pickModel, worldX, worldY);
-	}
-
-	private heuristic(mesh: TerrainMeshState, fromFace: number, toFace: number) : number
-	{
-		return vec2Dist(mesh.faces[fromFace].point, mesh.faces[toFace].point);
-	}
-
-	private transitionCost(
-		mesh: TerrainMeshState,
-		fromFace: number,
-		toFace: number,
-	): number
-	{
-		const geometric = vec2Dist(mesh.faces[fromFace].point, mesh.faces[toFace].point);
-
-		//const facePenalty = costModel?.faceEnterCost?.(toFace) ?? 0;
-		//const edgePenalty = costModel?.edgeCrossCost?.(viaEdge, fromFace, toFace) ?? 0;
-		const facePenalty = 0;
-		const edgePenalty = 0;
-		return geometric + facePenalty + edgePenalty;
-	}
-
-	private findPath(mesh: TerrainMeshState, fromFace: number, toFace:number) : number[] | null
-	{
-		if (fromFace == toFace)
-		{
-			return null;
-		}
-
-		const n = mesh.faces.length;
-		const gScore = new Float64Array(n);
-		const fScore = new Float64Array(n);
-		
-		const cameFrom = new Int32Array(n);
-		const inOpen = new Uint8Array(n);
-
-		for (let i = 0; i < n; i++)
-		{
-			gScore[i] = fScore[i] = Infinity;
-			cameFrom[i] = -1;
-		}
-
-		gScore[fromFace] = 0;
-		fScore[fromFace] = this.heuristic(mesh, fromFace, toFace);  
-
-		const openList: number[] = [fromFace];
-  		inOpen[fromFace] = 1;
-
-		while (openList.length > 0)
-		{
-			let bestIdx = 0;
-			let current = openList[0];
-			for (let i = 1; i < openList.length; i++)
-			{
-				const candidate = openList[i];
-				if (fScore[candidate] < fScore[current])
-				{
-					current = candidate;
-					bestIdx = i;
-				}
-			}
-
-			openList.splice(bestIdx, 1);
-			inOpen[current] = 0;
-
-			if (current == toFace)
-			{
-				return this.constructPath(toFace, cameFrom);
-			}
-
-			let adjacentCount = mesh.faces[current].adjacentFaces.length;
-			for (let adjacentId = 0; adjacentId < adjacentCount; adjacentId++)
-			{
-				const adjacentFace = mesh.faces[current].adjacentFaces[adjacentId];
-				//const adEdge = mesh.faces[current].sharedEdges[adjacentId];
-				const tentativeG = gScore[current] + this.transitionCost(mesh, fromFace, adjacentFace);
-
-				if (tentativeG < gScore[adjacentFace])
-				{
-					cameFrom[adjacentFace] = current;
-					gScore[adjacentFace] = tentativeG;
-					fScore[adjacentFace] = tentativeG + this.heuristic(mesh, adjacentFace, toFace);
-
-					if (!inOpen[adjacentFace])
-					{
-						openList.push(adjacentFace);
-						inOpen[adjacentFace] = 1;
-					}
-				}
-			}
-		}
-		
-		return null;
-	}
-
-	private constructPath(toFace: number, cameFrom: Int32Array<ArrayBuffer>)
-	{
-		const path: number[] = [];
-		let currentStep = toFace;
-		while (currentStep !== -1)
-		{
-			path.push(currentStep);
-			currentStep = cameFrom[currentStep];
-		}
-
-		path.reverse();
-		return path;
 	}
 }

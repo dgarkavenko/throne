@@ -1,0 +1,163 @@
+import { addComponent, hasComponent, query, removeComponent, type World } from 'bitecs';
+import { MoveRequestComponent, PathComponent, TerrainLocationComponent } from '../../ecs/components';
+import { type TerrainMeshState } from '../../terrain/core/terrain-core';
+import { vec2Dist } from '../../terrain/core/math';
+import type { TerrainGenerationState } from '../../terrain/types';
+
+export type ClientPathfindingRuntime = {
+	setTerrainState: (state: TerrainGenerationState | null) => void;
+	processMoveRequests: (world: World) => void;
+	findPath: (fromFace: number, toFace: number) => number[] | null;
+};
+
+export function createPathfindingRuntime(): ClientPathfindingRuntime
+{
+	let terrainState: TerrainGenerationState | null = null;
+
+	// Future home for pathfinding caches and lookup tables.
+	return {
+		setTerrainState(state: TerrainGenerationState | null): void
+		{
+			terrainState = state;
+		},
+
+		processMoveRequests(world: World): void
+		{
+			if (!terrainState)
+			{
+				return;
+			}
+
+			for (const eid of query(world, [MoveRequestComponent, TerrainLocationComponent]))
+			{
+				const path = findPathOnMesh(
+					terrainState.mesh,
+					TerrainLocationComponent.faceId[eid],
+					MoveRequestComponent.toFace[eid]
+				);
+				if (path)
+				{
+					if (!hasComponent(world, eid, PathComponent))
+					{
+						addComponent(world, eid, PathComponent);
+					}
+
+					PathComponent.path[eid] = path;
+				}
+
+				removeComponent(world, eid, MoveRequestComponent);
+			}
+		},
+
+		findPath(fromFace: number, toFace: number): number[] | null
+		{
+			if (!terrainState)
+			{
+				return null;
+			}
+
+			return findPathOnMesh(terrainState.mesh, fromFace, toFace);
+		},
+	};
+}
+
+function heuristic(mesh: TerrainMeshState, fromFace: number, toFace: number): number
+{
+	return vec2Dist(mesh.faces[fromFace].point, mesh.faces[toFace].point);
+}
+
+function transitionCost(mesh: TerrainMeshState, fromFace: number, toFace: number): number
+{
+	const geometric = vec2Dist(mesh.faces[fromFace].point, mesh.faces[toFace].point);
+
+	// const facePenalty = costModel?.faceEnterCost?.(toFace) ?? 0;
+	// const edgePenalty = costModel?.edgeCrossCost?.(viaEdge, fromFace, toFace) ?? 0;
+	const facePenalty = 0;
+	const edgePenalty = 0;
+	return geometric + facePenalty + edgePenalty;
+}
+
+function findPathOnMesh(mesh: TerrainMeshState, fromFace: number, toFace: number): number[] | null
+{
+	if (fromFace === toFace)
+	{
+		return null;
+	}
+
+	const n = mesh.faces.length;
+	const gScore = new Float64Array(n);
+	const fScore = new Float64Array(n);
+	const cameFrom = new Int32Array(n);
+	const inOpen = new Uint8Array(n);
+
+	for (let i = 0; i < n; i += 1)
+	{
+		gScore[i] = fScore[i] = Infinity;
+		cameFrom[i] = -1;
+	}
+
+	gScore[fromFace] = 0;
+	fScore[fromFace] = heuristic(mesh, fromFace, toFace);
+
+	const openList: number[] = [fromFace];
+	inOpen[fromFace] = 1;
+
+	while (openList.length > 0)
+	{
+		let bestIdx = 0;
+		let current = openList[0];
+		for (let i = 1; i < openList.length; i += 1)
+		{
+			const candidate = openList[i];
+			if (fScore[candidate] < fScore[current])
+			{
+				current = candidate;
+				bestIdx = i;
+			}
+		}
+
+		openList.splice(bestIdx, 1);
+		inOpen[current] = 0;
+
+		if (current === toFace)
+		{
+			return constructPath(toFace, cameFrom);
+		}
+
+		const adjacentCount = mesh.faces[current].adjacentFaces.length;
+		for (let adjacentId = 0; adjacentId < adjacentCount; adjacentId += 1)
+		{
+			const adjacentFace = mesh.faces[current].adjacentFaces[adjacentId];
+			const tentativeG = gScore[current] + transitionCost(mesh, fromFace, adjacentFace);
+
+			if (tentativeG < gScore[adjacentFace])
+			{
+				cameFrom[adjacentFace] = current;
+				gScore[adjacentFace] = tentativeG;
+				fScore[adjacentFace] = tentativeG + heuristic(mesh, adjacentFace, toFace);
+
+				if (!inOpen[adjacentFace])
+				{
+					openList.push(adjacentFace);
+					inOpen[adjacentFace] = 1;
+				}
+			}
+		}
+	}
+
+	return null;
+}
+
+function constructPath(toFace: number, cameFrom: Int32Array<ArrayBuffer>): number[]
+{
+	const path: number[] = [];
+	let currentStep = toFace;
+	while (currentStep !== -1)
+	{
+		path.push(currentStep);
+		currentStep = cameFrom[currentStep];
+	}
+
+	path.reverse();
+	return path;
+}

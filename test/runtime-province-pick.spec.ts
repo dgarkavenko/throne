@@ -94,7 +94,7 @@ describe('runtime province pick', () => {
       if (!point) {
         continue;
       }
-      if (pickFaceIndexAt(pickModel, point.x, point.y) === null) {
+      if (pickProvinceIndexAt(pickModel, point.x, point.y) === null) {
         matchedWater = true;
         break;
       }
@@ -126,9 +126,9 @@ describe('runtime province pick', () => {
     if (!pickModel) {
       return;
     }
-    const before = pickProvinceAt(pickModel, point.x, point.y);
+    const before = pickProvinceIndexAt(pickModel, point.x, point.y);
     void runtime.getTerrainSnapshotForReplication();
-    const after = pickProvinceAt(pickModel, point.x, point.y);
+    const after = pickProvinceIndexAt(pickModel, point.x, point.y);
     expect(after).toBe(before);
   });
 
@@ -160,7 +160,7 @@ describe('runtime province pick', () => {
       if (!point) {
         continue;
       }
-      const pickedFace = pickFaceAt(pickModel, point.x, point.y);
+      const pickedFace = pickFaceIndexAt(pickModel, point.x, point.y);
       if (pickedFace !== i) {
         continue;
       }
@@ -217,7 +217,7 @@ describe('runtime province pick', () => {
       if (!point) {
         continue;
       }
-      if (pickFaceAt(pickModel, point.x, point.y) === i) {
+      if (pickFaceIndexAt(pickModel, point.x, point.y) === i) {
         targetFace = i;
         game.getPointerCanvasPosition = () => ({ x: point.x, y: point.y });
         break;
