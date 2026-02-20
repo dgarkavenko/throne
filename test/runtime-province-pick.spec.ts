@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { addComponent, addEntity, createWorld, type World } from 'bitecs';
 import { SharedTerrainRuntime } from '../src/client/runtime/shared-terrain-runtime';
 import { DEFAULT_TERRAIN_GENERATION_CONTROLS } from '../src/terrain/controls';
-import { buildProvincePickModel, pickFaceAt, pickProvinceAt } from '../src/client/runtime/province-pick';
+import { buildProvincePickModel, pickFaceIndexAt, pickProvinceIndexAt} from '../src/client/runtime/province-pick';
 import { ActorComponent, MoveRequestComponent, Owned, ProvinceComponent, Selected, TerrainLocationComponent } from '../src/ecs/components';
 import type { TerrainGenerationState } from '../src/terrain/types';
 import { ClientGame } from '../src/client/runtime/client-runtime';
@@ -74,7 +74,7 @@ describe('runtime province pick', () => {
         continue;
       }
       const expectedProvinceId = terrainState.provinces.provinceByFace[i];
-      const pickedProvinceEntity = pickProvinceAt(pickModel, point.x, point.y);
+      const pickedProvinceEntity = pickProvinceIndexAt(pickModel, point.x, point.y);
       if (
         pickedProvinceEntity !== null &&
         ProvinceComponent.provinceId[pickedProvinceEntity] === expectedProvinceId
@@ -94,7 +94,7 @@ describe('runtime province pick', () => {
       if (!point) {
         continue;
       }
-      if (pickProvinceAt(pickModel, point.x, point.y) === null) {
+      if (pickFaceIndexAt(pickModel, point.x, point.y) === null) {
         matchedWater = true;
         break;
       }
