@@ -200,6 +200,7 @@ describe('runtime province pick', () => {
 
     const game = new ClientGame(SIZE) as any;
     game.pickModel = pickModel;
+    game.terrainState = terrainState;
 
     const actor = addEntity(game.game.world);
     addComponent(game.game.world, actor, Selected);
@@ -232,5 +233,47 @@ describe('runtime province pick', () => {
     MoveRequestComponent.toFace[actor] = -1;
     game.pointerDown({ button: 2 } as PointerEvent);
     expect(MoveRequestComponent.toFace[actor]).toBe(-1);
+  });
+
+  it('binds pointer handlers only after terrain pick model is created', () => {
+    const game = new ClientGame(SIZE) as any;
+    const boundEvents: string[] = [];
+
+    game.r.bindCanvasEvent = (type: string) => {
+      boundEvents.push(type);
+    };
+    game.r.renderTerrainOnce = () => {
+      // No-op for unit test lifecycle check.
+    };
+
+    expect(boundEvents).toEqual([]);
+
+    game.applyTerrainSnapshot(
+      {
+        controls: {
+          ...DEFAULT_TERRAIN_GENERATION_CONTROLS,
+          seed: 999,
+        },
+        mapWidth: SIZE.width,
+        mapHeight: SIZE.height,
+      },
+      1
+    );
+
+    expect(boundEvents).toEqual(['pointermove', 'pointerleave', 'pointerdown', 'contextmenu']);
+
+    game.applyTerrainSnapshot(
+      {
+        controls: {
+          ...DEFAULT_TERRAIN_GENERATION_CONTROLS,
+          seed: 1000,
+        },
+        mapWidth: SIZE.width,
+        mapHeight: SIZE.height,
+      },
+      2
+    );
+
+    expect(boundEvents).toEqual(['pointermove', 'pointerleave', 'pointerdown', 'contextmenu']);
   });
 });

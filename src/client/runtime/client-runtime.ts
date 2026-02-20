@@ -16,7 +16,7 @@ import type { ActorSnapshot, TerrainSnapshot, WorldSnapshotMessage } from '../..
 import { SharedTerrainRuntime } from './shared-terrain-runtime';
 import { buildProvincePickModel, pickFaceIndexAt, pickProvinceIndexAt as pickProvinceFromModel, type ProvincePickModel } from './province-pick';
 import { buildBorder as buildProvinceEdges, calculateProvinceCentroid } from '../rendering/terrain-presentation';
-import { createPathfindingRuntime } from './pathfinding-runtime';
+import { createPathfindingRuntime, type ClientPathfindingRuntime } from './pathfinding-runtime';
 
 export type GameConfig = {
 	width: number;
@@ -46,7 +46,8 @@ export class ClientGame
 	private ticker: Ticker;
 	private readonly game: EcsGame;
 	private readonly clientPipeline: EcsPipeline;
-	private readonly pathfindingRuntime = createPathfindingRuntime();
+	private pathfindingRuntime: ClientPathfindingRuntime | null = null;
+	private pointerHandlersBound = false;
 
 	// province
 	private readonly provinceEntityById = new Map<number, number>();
@@ -92,7 +93,7 @@ export class ClientGame
 
 		this.ticker.add(() =>
 		{
-			this.pathfindingRuntime.processMoveRequests(this.game.world);
+			this.pathfindingRuntime?.processMoveRequests(this.game.world);
 		});
 
 		this.ticker.add((ticker) =>
@@ -106,10 +107,6 @@ export class ClientGame
 			UPDATE_PRIORITY.UTILITY,
 		);
 
-		this.r.bindCanvasEvent('pointermove', this.pointerMove);
-		this.r.bindCanvasEvent('pointerleave', this.pointerLeave);
-		this.r.bindCanvasEvent('pointerdown', this.pointerDown);
-		this.r.bindCanvasEvent('contextmenu', this.contextMenu);
 	}
 
 	setTerrainRenderControls(nextControls: TerrainRenderControls): void
@@ -155,7 +152,7 @@ export class ClientGame
 		this.lastWorldSnapshotSeq = -1;
 		this.pickModel = null;
 		this.terrainState = this.terrainGen.applyTerrainSnapshot(snapshot, terrainVersion);
-		this.pathfindingRuntime.setTerrainState(this.terrainState);
+		this.pathfindingRuntime = this.terrainState ? createPathfindingRuntime(this.terrainState) : null;
 		
 		if (this.terrainState)
 		{
@@ -166,6 +163,7 @@ export class ClientGame
 				this.terrainState,
 				this.game.world
 			);
+			this.bindPointerHandlersOnce();
 
 			this.r.renderTerrainOnce(
 				this.terrainGen.mapWidth,
@@ -258,14 +256,12 @@ export class ClientGame
 
 		if (event.button === 2)
 		{
-			const targetFace = this.pickModel ? pickFaceIndexAt(this.pickModel, position.x, position.y) : -1;
-			if (targetFace > -1)
+			const targetFace = pickFaceIndexAt(this.pickModel!, position.x, position.y);
+
+			for (const entity of query(this.game.world, [Selected, TerrainLocationComponent, ActorComponent, Owned]))
 			{
-				for (const entity of query(this.game.world, [Selected, TerrainLocationComponent, ActorComponent, Owned]))
-				{
-					addComponent(this.game.world, entity, MoveRequestComponent);
-					MoveRequestComponent.toFace[entity] = targetFace;
-				}
+				addComponent(this.game.world, entity, MoveRequestComponent);
+				MoveRequestComponent.toFace[entity] = targetFace;
 			}
 		}
 	};
@@ -358,6 +354,20 @@ export class ClientGame
 		event.preventDefault();
 	};
 
+	private bindPointerHandlersOnce(): void
+	{
+		if (this.pointerHandlersBound)
+		{
+			return;
+		}
+
+		this.r.bindCanvasEvent('pointermove', this.pointerMove);
+		this.r.bindCanvasEvent('pointerleave', this.pointerLeave);
+		this.r.bindCanvasEvent('pointerdown', this.pointerDown);
+		this.r.bindCanvasEvent('contextmenu', this.contextMenu);
+		this.pointerHandlersBound = true;
+	}
+
 	private getFacePoint(faceId: number): Vec2 | null
 	{
 		if (!this.terrainState)
@@ -400,11 +410,6 @@ export class ClientGame
 
 	private pickProvinceAt(worldX: number, worldY: number): number | null
 	{
-		if (!this.pickModel)
-		{
-			return null;
-		}
-
-		return pickProvinceFromModel(this.pickModel, worldX, worldY);
+		return pickProvinceFromModel(this.pickModel!, worldX, worldY);
 	}
 }
