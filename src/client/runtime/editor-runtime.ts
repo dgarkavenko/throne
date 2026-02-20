@@ -5,6 +5,7 @@
  * - terrain rendering/debug controls
  */
 import { GameRenderer } from '../rendering/game-renderer';
+import { ThreeJsRenderer } from '../rendering/threejs-renderer';
 import type { TerrainGenerationControls } from '../../terrain/controls';
 import type { TerrainGenerationState } from '../../terrain/types';
 import type { TerrainSnapshot, WorldSnapshotMessage } from '../../shared/protocol';
@@ -14,17 +15,18 @@ import { SharedTerrainRuntime } from './shared-terrain-runtime';
 export type GameConfig = {
   width: number;
   height: number;
+  rendererType?: 'pixi' | 'three';
 };
 
 export class EditorGame {
   private readonly config: GameConfig;
   private readonly terrain: SharedTerrainRuntime;
   private terrainState: TerrainGenerationState | null = null;
-  private readonly r: GameRenderer;
+  private readonly r: GameRenderer | ThreeJsRenderer;
 
   constructor(config: GameConfig & { autoGenerateTerrain?: boolean }) {
     this.config = config;
-    this.r = new GameRenderer();
+    this.r = config.rendererType === 'three' ? new ThreeJsRenderer() : new GameRenderer();
     this.terrain = new SharedTerrainRuntime({
       width: config.width,
       height: config.height,

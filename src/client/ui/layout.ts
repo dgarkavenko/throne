@@ -43,6 +43,7 @@ type TerrainSettings = {
 	intermediateThreshold: number;
 	intermediateRelMagnitude: number;
 	intermediateAbsMagnitude: number;
+	cameraFov: number;
 	waterLevel: number;
 	waterRoughness: number;
 	waterNoiseScale: number;
@@ -137,6 +138,7 @@ export function createPageLayout(): PageLayout {
 	const terrainGraphCornersInput = document.getElementById('terrain-graph-corners') as HTMLInputElement | null;
 	const terrainGraphCentersInput = document.getElementById('terrain-graph-centers') as HTMLInputElement | null;
 	const terrainGraphInsertedInput = document.getElementById('terrain-graph-inserted') as HTMLInputElement | null;
+	const terrainCameraFovInput = document.getElementById('terrain-camera-fov') as HTMLInputElement | null;
 	const agentTimePerFaceInput = document.getElementById('agent-time-per-face') as HTMLInputElement | null;
 	const agentLowlandThresholdInput = document.getElementById('agent-lowland-threshold') as HTMLInputElement | null;
 	const agentImpassableThresholdInput = document.getElementById('agent-impassable-threshold') as HTMLInputElement | null;
@@ -199,6 +201,7 @@ export function createPageLayout(): PageLayout {
 	const terrainIntermediateDistanceValue = document.getElementById('terrain-intermediate-distance-value');
 	const terrainIntermediateRelMagnitudeValue = document.getElementById('terrain-intermediate-rel-magnitude-value');
 	const terrainIntermediateAbsMagnitudeValue = document.getElementById('terrain-intermediate-abs-magnitude-value');
+	const terrainCameraFovValue = document.getElementById('terrain-camera-fov-value');
 	const terrainWaterLevelValue = document.getElementById('terrain-water-level-value');
 	const terrainWaterRoughnessValue = document.getElementById('terrain-water-roughness-value');
 	const terrainWaterNoiseScaleValue = document.getElementById('terrain-water-noise-scale-value');
@@ -391,6 +394,9 @@ export function createPageLayout(): PageLayout {
 		if (terrainGraphInsertedInput) {
 			terrainGraphInsertedInput.checked = terrainGraphInsertedInput.defaultChecked;
 		}
+		if (terrainCameraFovInput) {
+			terrainCameraFovInput.value = terrainCameraFovInput.defaultValue;
+		}
 		if (agentTimePerFaceInput) {
 			agentTimePerFaceInput.value = agentTimePerFaceInput.defaultValue;
 		}
@@ -503,6 +509,7 @@ export function createPageLayout(): PageLayout {
 		const showCornerNodes = Boolean(terrainGraphCornersInput?.checked);
 		const showCenterNodes = Boolean(terrainGraphCentersInput?.checked);
 		const showInsertedPoints = Boolean(terrainGraphInsertedInput?.checked);
+		const cameraFov = clamp(parseFloatWithFallback(terrainCameraFovInput?.value, 55), 25, 100);
 		const agentTimePerFaceSeconds = clamp(parseIntWithFallback(agentTimePerFaceInput?.value, 180), 1, 600);
 		const agentLowlandThreshold = clamp(parseIntWithFallback(agentLowlandThresholdInput?.value, 10), 1, 31);
 		const agentImpassableThresholdInputValue = clamp(
@@ -522,6 +529,7 @@ export function createPageLayout(): PageLayout {
 			showCornerNodes,
 			showCenterNodes,
 			showInsertedPoints,
+			cameraFov,
 			provinceCount,
 			provinceBorderWidth,
 			provinceSizeVariance,
@@ -618,6 +626,7 @@ export function createPageLayout(): PageLayout {
 		intermediateThreshold: settings.intermediateThreshold,
 		intermediateRelMagnitude: settings.intermediateRelMagnitude,
 		intermediateAbsMagnitude: settings.intermediateAbsMagnitude,
+		cameraFov: settings.cameraFov,
 	});
 
 	const toMovementSettings = (settings: TerrainSettings): MovementSettings => ({
@@ -759,6 +768,9 @@ export function createPageLayout(): PageLayout {
 		}
 		if (terrainIntermediateAbsMagnitudeValue) {
 			terrainIntermediateAbsMagnitudeValue.textContent = settings.intermediateAbsMagnitude.toString();
+		}
+		if (terrainCameraFovValue) {
+			terrainCameraFovValue.textContent = settings.cameraFov.toFixed(0);
 		}
 		if (terrainWaterLevelValue) {
 			terrainWaterLevelValue.textContent = settings.waterLevel.toString();
@@ -1103,6 +1115,7 @@ export function createPageLayout(): PageLayout {
 			terrainIntermediateDistanceInput?.addEventListener('input', notify);
 			terrainIntermediateRelMagnitudeInput?.addEventListener('input', notify);
 			terrainIntermediateAbsMagnitudeInput?.addEventListener('input', notify);
+			terrainCameraFovInput?.addEventListener('input', notify);
 			terrainWaterLevelInput?.addEventListener('input', notify);
 			terrainWaterRoughnessInput?.addEventListener('input', notify);
 			terrainWaterNoiseScaleInput?.addEventListener('input', notify);
