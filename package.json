@@ -14,7 +14,9 @@
 		"dev": "wrangler dev",
 		"dev:standalone": "wrangler dev --local",
 		"start": "wrangler dev",
-		"test": "vitest",
+		"test": "vitest --project unit",
+		"test:workers": "vitest --project workers --run",
+		"test:all": "vitest --project unit --project workers --run",
 		"check:boundaries": "node scripts/check-terrain-boundaries.mjs",
 		"cf-typegen": "wrangler types"
 	},

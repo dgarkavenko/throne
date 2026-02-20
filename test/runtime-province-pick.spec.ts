@@ -28,7 +28,6 @@ function buildRuntimePickModel(runtime: SharedTerrainRuntime, terrainState: Terr
   return buildProvincePickModel(
     { width: runtime.mapWidth, height: runtime.mapHeight },
     terrainState,
-    runtime.getGenerationControls(),
     world
   );
 }
@@ -69,7 +68,7 @@ describe('runtime province pick', () => {
       if (!terrainState.water.isLand[i]) {
         continue;
       }
-      const point = terrainState.mesh.mesh.faces[i]?.point;
+      const point = terrainState.mesh.faces[i]?.point;
       if (!point) {
         continue;
       }
@@ -90,7 +89,7 @@ describe('runtime province pick', () => {
       if (terrainState.water.isLand[i]) {
         continue;
       }
-      const point = terrainState.mesh.mesh.faces[i]?.point;
+      const point = terrainState.mesh.faces[i]?.point;
       if (!point) {
         continue;
       }
@@ -116,7 +115,7 @@ describe('runtime province pick', () => {
       1
     );
 
-    const point = terrainState?.mesh.mesh.faces[0]?.point;
+    const point = terrainState?.mesh.faces[0]?.point;
     expect(point).toBeDefined();
     if (!point) {
       return;

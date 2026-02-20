@@ -4,7 +4,6 @@ type MeshFace = {
 	index: number;
 	point: Vec2;
 	adjacentFaces: number[];
-	elevation: number;
 };
 
 type MeshEdge = {
@@ -88,6 +87,7 @@ export function basegenPolitical(
 	mesh: MeshGraph,
 	controls: PoliticalControls,
 	random: () => number,
+	faceElevation: number[],
 	isLandOverride?: boolean[],
 	riverEdges?: boolean[]
 ): ProvinceGraph {
@@ -118,7 +118,7 @@ export function basegenPolitical(
 			: new Array<boolean>(faceCount).fill(false);
 	if (!isLandOverride || isLandOverride.length !== faceCount) {
 		mesh.faces.forEach((face) => {
-			if (face.elevation >= 1) {
+			if (faceElevation[face.index] >= 1) {
 				isLand[face.index] = true;
 				landFaces.push(face.index);
 			}
@@ -253,17 +253,18 @@ export function basegenPolitical(
 		for (let j = 0; j < groupFaces.length; j += 1) {
 			groupIsLand[groupFaces[j]] = true;
 		}
-		const assignment = growProvinceRegions(
-			mesh,
-			groupIsLand,
-			groupFaces,
-			seeds,
-			actualSeedCount,
-			controls,
-			random,
-			faceNeighborEdges,
-			riverEdgeMask
-		);
+			const assignment = growProvinceRegions(
+				mesh,
+				groupIsLand,
+				groupFaces,
+				seeds,
+				actualSeedCount,
+				controls,
+				random,
+				faceElevation,
+				faceNeighborEdges,
+				riverEdgeMask
+			);
 		for (let j = 0; j < groupFaces.length; j += 1) {
 			const faceIndex = groupFaces[j];
 			const localProvince = assignment.provinceByFace[faceIndex];
@@ -723,6 +724,7 @@ function growProvinceRegions(
 	provinceCount: number,
 	controls: PoliticalControls,
 	random: () => number,
+	faceElevation: number[],
 	faceNeighborEdges: Map<number, number>[],
 	riverEdges: boolean[]
 ): ProvinceSeedState {
@@ -771,7 +773,7 @@ function growProvinceRegions(
 			if (!isLand[neighbor] || provinceByFace[neighbor] >= 0) {
 				continue;
 			}
-			const elevationDelta = Math.abs(mesh.faces[seedFace].elevation - mesh.faces[neighbor].elevation);
+			const elevationDelta = Math.abs(faceElevation[seedFace] - faceElevation[neighbor]);
 			if (elevationDelta > passageThreshold) {
 				continue;
 			}
@@ -798,7 +800,7 @@ function growProvinceRegions(
 			if (!isLand[neighbor] || provinceByFace[neighbor] >= 0) {
 				continue;
 			}
-			const elevationDelta = Math.abs(mesh.faces[entry.faceId].elevation - mesh.faces[neighbor].elevation);
+			const elevationDelta = Math.abs(faceElevation[entry.faceId] - faceElevation[neighbor]);
 			if (elevationDelta > passageThreshold) {
 				continue;
 			}

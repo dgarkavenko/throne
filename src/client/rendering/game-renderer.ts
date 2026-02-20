@@ -329,7 +329,7 @@ export class GameRenderer
 		//insertedPoints: Array<{ x: number; y: number }>,
 	): void
 	{
-		const mesh = terrainState.mesh.mesh;
+		const mesh = terrainState.mesh;
 
 		if (controls.showPolygonGraph)
 		{

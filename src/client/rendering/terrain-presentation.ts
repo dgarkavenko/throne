@@ -1,9 +1,5 @@
-import type { ProvinceFace, ProvinceGraph } from '../../terrain/core/political-core';
-import type {
-  TerrainMeshState,
-  TerrainRefineResult,
-  TerrainWaterState,
-} from '../../terrain/core/terrain-core';
+import type { ProvinceGraph } from '../../terrain/core/political-core';
+import type { TerrainBasegenResult, TerrainRefineResult } from '../../terrain/core/terrain-core';
 import type { TerrainGenerationState } from '../../terrain/types';
 import type { TerrainRenderRefinementState } from './refinement-cache';
 import type { TerrainRenderControls } from './render-controls';
@@ -16,12 +12,7 @@ export type TerrainStaticRenderModel = {
   generationSeed: number;
   generationSpacing: number;
   renderControls: TerrainRenderControls;
-  base: {
-    mesh: TerrainMeshState['mesh'];
-    baseCells: TerrainMeshState['baseCells'];
-    isLand: TerrainWaterState['isLand'];
-    oceanWater: TerrainWaterState['oceanWater'];
-  };
+  base: TerrainBasegenResult;
   provinces: ProvinceGraph;
   refined: TerrainRefineResult;
 };
@@ -38,10 +29,12 @@ export function buildTerrainStaticRenderModel(
     generationSpacing: terrainState.generationSpacing,
     renderControls: { ...renderControls },
     base: {
-      mesh: terrainState.mesh.mesh,
-      baseCells: terrainState.mesh.baseCells,
+      mesh: terrainState.mesh,
       isLand: terrainState.water.isLand,
       oceanWater: terrainState.water.oceanWater,
+      faceElevation: terrainState.elevation.faceElevation,
+      vertexElevation: terrainState.elevation.vertexElevation,
+      landElevation: terrainState.elevation.landElevation,
     },
     provinces: terrainState.provinces,
     refined: {
@@ -59,7 +52,7 @@ export function calculateProvinceCentroid(provinceId: number, terrainState: Terr
 	let count = 0;
 	province.faces.forEach((faceIndex) =>
 	{
-		const point = terrainState.mesh.mesh.faces[faceIndex]?.point;
+		const point = terrainState.mesh.faces[faceIndex]?.point;
 		if (!point)
 		{
 			return {x:0, y:0};
@@ -78,7 +71,7 @@ export function buildBorder(provinceId: number, terrainState: TerrainGenerationS
 	const segments: Vec2[][] = [];
 	const provinces = terrainState.provinces;
 	const province = terrainState.provinces.faces[provinceId];
-	const mesh = terrainState.mesh.mesh;
+	const mesh = terrainState.mesh;
 
 	province.outerEdges.forEach((edgeIndex) =>
 	{

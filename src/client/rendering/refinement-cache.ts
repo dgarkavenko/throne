@@ -40,8 +40,9 @@ export class TerrainRefinementCacheStore {
     const intermediateRandom = createRng(renderControls.intermediateSeed >>> 0);
     const riverRandom = createStepRng(generationState.generationSeed >>> 0, STEP_SEEDS.river);
     const refined = terrainRefine(
-      generationState.mesh.mesh,
+      generationState.mesh,
       generationState.water.isLand,
+      generationState.elevation.faceElevation,
       refinementControls,
       intermediateRandom,
       riverRandom,

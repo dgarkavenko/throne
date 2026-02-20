@@ -1,5 +1,4 @@
 import { query, World } from 'bitecs';
-import type { TerrainGenerationControls } from '../../terrain/controls';
 import type { TerrainGenerationState } from '../../terrain/types';
 import { ProvinceComponent } from '../../ecs/components';
 
@@ -35,15 +34,31 @@ function pointInPolygon(x: number, y: number, polygon: Vec2[]): boolean
 	return inside;
 }
 
+function getFacePolygon(terrainState: TerrainGenerationState, faceIndex: number): Vec2[] {
+	const face = terrainState.mesh.faces[faceIndex];
+	if (!face || face.vertices.length < 3) {
+		return [];
+	}
+	const polygon: Vec2[] = [];
+	for (let i = 0; i < face.vertices.length; i += 1) {
+		const vertex = terrainState.mesh.vertices[face.vertices[i]];
+		if (!vertex) {
+			continue;
+		}
+		polygon.push(vertex.point);
+	}
+	return polygon;
+}
+
 export function buildProvincePickModel(
 	size: TerrainSize,
 	terrainState: TerrainGenerationState,
 	world: World
 ): ProvincePickModel
 {
-	const meshState = terrainState.mesh;
+	const mesh = terrainState.mesh;
 	const provinces = terrainState.provinces;
-	const faceCount = meshState.mesh.faces.length;
+	const faceCount = mesh.faces.length;
 	const facePolygons: Vec2[][] = new Array(faceCount);
 	const faceAabbs: Array<{ minX: number; minY: number; maxX: number; maxY: number }> = new Array(faceCount);
 	const gridSize = 32;
@@ -53,7 +68,7 @@ export function buildProvincePickModel(
 
 	for (let i = 0; i < faceCount; i += 1)
 	{
-		const cell = meshState.baseCells[i];
+		const cell = getFacePolygon(terrainState, i);
 		if (!cell || cell.length < 3)
 		{
 			facePolygons[i] = [];
@@ -95,7 +110,7 @@ export function buildProvincePickModel(
 		}		
 	}
 
-	let provinceEntityByFace: number[] = new Array(faceCount);
+	let provinceEntityByFace: number[] = new Array(faceCount).fill(-1);
 
 	const provincesEntities = query(world, [ProvinceComponent])
 

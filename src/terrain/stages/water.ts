@@ -8,5 +8,5 @@ export function runWaterStage(
   controls: TerrainGenerationControls
 ) {
   const seed = controls.seed >>> 0;
-  return generateWater(config, mesh.mesh, mesh.baseCells, controls, createStepRng(seed, STEP_SEEDS.water));
+  return generateWater(config, mesh, controls, createStepRng(seed, STEP_SEEDS.water));
 }

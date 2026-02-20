@@ -14,20 +14,32 @@ const CONFIG = { width: 512, height: 512 };
 
 function summarize(controls: TerrainGenerationControls): {
   faceCount: number;
+  vertexCount: number;
   landCount: number;
   riverEdgeCount: number;
   provinceCount: number;
+  faceElevationCount: number;
+  vertexElevationCount: number;
+  isLandSignature: string;
+  riverSignature: string;
+  provinceSignature: string;
 } {
   const cache = buildTerrainGeneration({ config: CONFIG, controls });
-  if (!cache.mesh || !cache.water || !cache.rivers || !cache.provinces) {
+  if (!cache.mesh || !cache.water || !cache.elevation || !cache.rivers || !cache.provinces) {
     throw new Error('Generation cache is incomplete');
   }
   const riverEdgeCount = cache.rivers.riverEdgeMask.reduce((sum, value) => sum + (value ? 1 : 0), 0);
   return {
-    faceCount: cache.mesh.mesh.faces.length,
+    faceCount: cache.mesh.faces.length,
+    vertexCount: cache.mesh.vertices.length,
     landCount: cache.water.landFaces.length,
     riverEdgeCount,
     provinceCount: cache.provinces.faces.length,
+    faceElevationCount: cache.elevation.faceElevation.length,
+    vertexElevationCount: cache.elevation.vertexElevation.length,
+    isLandSignature: cache.water.isLand.map((value) => (value ? '1' : '0')).join(''),
+    riverSignature: cache.rivers.riverEdgeMask.map((value) => (value ? '1' : '0')).join(''),
+    provinceSignature: cache.provinces.provinceByFace.join(','),
   };
 }
 
@@ -50,6 +62,17 @@ describe('terrain generation pipeline', () => {
     const a = summarize(controls);
     const b = summarize(controls);
     expect(a).toEqual(b);
+  });
+
+  it('aligns elevation arrays with mesh topology sizes', () => {
+    const controls: TerrainGenerationControls = {
+      ...DEFAULT_TERRAIN_GENERATION_CONTROLS,
+      seed: 4096,
+      spacing: 52,
+    };
+    const summary = summarize(controls);
+    expect(summary.faceElevationCount).toBe(summary.faceCount);
+    expect(summary.vertexElevationCount).toBe(summary.vertexCount);
   });
 
   it('recomputes only downstream province stage for province-only changes', () => {

@@ -1,11 +1,27 @@
-import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { defineWorkersProject } from '@cloudflare/vitest-pool-workers/config';
+import { defineConfig } from 'vitest/config';
 
-export default defineWorkersConfig({
+export default defineConfig({
 	test: {
-		poolOptions: {
-			workers: {
-				wrangler: { configPath: './wrangler.jsonc' },
+		projects: [
+			{
+				test: {
+					name: 'unit',
+					include: ['test/**/*.spec.ts'],
+					exclude: ['test/index.worker.spec.ts', 'test/room-replication.spec.ts'],
+				},
 			},
-		},
+			defineWorkersProject({
+				test: {
+					name: 'workers',
+					include: ['test/index.worker.spec.ts', 'test/room-replication.spec.ts'],
+					poolOptions: {
+						workers: {
+							wrangler: { configPath: './wrangler.jsonc' },
+						},
+					},
+				},
+			}),
+		],
 	},
 });

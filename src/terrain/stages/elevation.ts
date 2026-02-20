@@ -7,5 +7,5 @@ export function runElevationStage(
   controls: TerrainGenerationControls
 ) {
   const seed = controls.seed >>> 0;
-  return applyMountains(mesh.mesh, water, controls, createStepRng(seed, STEP_SEEDS.mountain));
+  return applyMountains(mesh, water, controls, createStepRng(seed, STEP_SEEDS.mountain));
 }

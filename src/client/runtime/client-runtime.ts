@@ -413,7 +413,7 @@ export class ClientGame
 		{
 			return null;
 		}
-		const face = this.terrainState.mesh.mesh.faces[faceId];
+		const face = this.terrainState.mesh.faces[faceId];
 		if (!face)
 		{
 			return null;

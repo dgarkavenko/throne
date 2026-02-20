@@ -178,7 +178,7 @@ export function* iterateTerrainGeneration(args: {
   }
 
   if (dirty.rivers || !initialCache.rivers) {
-    initialCache.rivers = runRiversStage(initialCache.mesh, initialCache.water, controls);
+    initialCache.rivers = runRiversStage(initialCache.mesh, initialCache.water, initialCache.elevation, controls);
     initialCache.provinces = null;
     yield { stage: 'rivers', computed: true, cache: cloneCache(initialCache) };
   } else {
@@ -189,7 +189,13 @@ export function* iterateTerrainGeneration(args: {
   }
 
   if (dirty.provinces || !initialCache.provinces) {
-    initialCache.provinces = runProvincesStage(initialCache.mesh, initialCache.water, initialCache.rivers, controls);
+    initialCache.provinces = runProvincesStage(
+      initialCache.mesh,
+      initialCache.water,
+      initialCache.elevation,
+      initialCache.rivers,
+      controls
+    );
     yield { stage: 'provinces', computed: true, cache: cloneCache(initialCache) };
   } else {
     yield { stage: 'provinces', computed: false, cache: cloneCache(initialCache) };
